@@ -40,7 +40,7 @@ assert(contract.includes(':is(button, input, select, textarea)'), 'Form controls
 assert(contract.includes('font: inherit'), 'Form controls must inherit the Safety Vote typography contract');
 assert(contract.includes('@media (max-width: 600px)'), 'Mobile heading scale is missing');
 assert(!contract.includes('!important'), 'Typography alignment must not rely on important overrides');
-assert(html.includes('public/style.css?v=20261010-safety-vote-ux8-r1-typography-r1'), 'Typography cache key is missing');
+assert(html.includes('public/style.css?v=20261011-safety-vote-ux8-r1-typography-r1'), 'Typography cache key is missing');
 assert(css.includes('min-height: 44px'), 'Existing accessible touch target contract must remain present');
 
 console.log(`Safety Vote typography alignment static contract: PASS (${requiredScopes.length + 10} assertions)`);

@@ -663,8 +663,8 @@ function renderFilters() {
                     <option value="SUSPENDED" ${_filters.status === 'SUSPENDED' ? 'selected' : ''}>Suspended</option>
                     <option value="ARCHIVED" ${_filters.status === 'ARCHIVED' ? 'selected' : ''}>Archived</option>
                 </select>
-                <input id="fl-expire-from" type="date" class="form-input rounded-xl min-h-[44px]" value="${esc(_filters.expireFrom)}">
-                <input id="fl-expire-to" type="date" class="form-input rounded-xl min-h-[44px]" value="${esc(_filters.expireTo)}">
+                <input id="fl-expire-from" type="date" aria-label="วันหมดอายุตั้งแต่" class="form-input rounded-xl min-h-[44px]" value="${esc(_filters.expireFrom)}">
+                <input id="fl-expire-to" type="date" aria-label="วันหมดอายุถึง" class="form-input rounded-xl min-h-[44px]" value="${esc(_filters.expireTo)}">
                 <select id="fl-certificate" class="form-input rounded-xl min-h-[44px]">
                     <option value="all">Certificate: ทั้งหมด</option>
                     <option value="yes" ${_filters.certificate === 'yes' ? 'selected' : ''}>มี Certificate</option>

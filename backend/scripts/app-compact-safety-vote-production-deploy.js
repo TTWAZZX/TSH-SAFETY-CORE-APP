@@ -12,25 +12,32 @@ const root = path.resolve(__dirname, '..', '..');
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = '20b09f9b1a3369d3d989614e0ed7b93fc096db42';
-const confirmation = 'DEPLOY_APP_COMPACT_SAFETY_VOTE_RUNTIME';
+const productionBaseline = '5ccf6c006b8b27ae5cbff2dd948d2ceffaa4a0f7';
+const confirmation = 'DEPLOY_APP_BRANDING_JOHNNY_RUNTIME';
 const runtimePaths = [
-    'api/handlers/safety_vote_planning.php',
-    'api/lib/safety_vote_planning.php',
-    'public/js/pages/admin-safety-vote-review.js',
-    'public/js/pages/admin-safety-vote-ux1.js',
-    'public/js/pages/admin.js',
-    'public/js/pages/safety-vote-campaign-wizard.js',
-    'shared/johnny-system-usage-knowledge.json',
-    'public/js/johnny-drawer.js',
-    'public/js/main.js',
-    'public/style.css',
+    'api/handlers/platform.php',
+    'api/handlers/storage.php',
+    'api/handlers/branding.php',
+    'api/index.php',
     'index.html',
+    'public/js/login-guides.js',
+    'public/js/main.js',
+    'public/js/module-meta.js',
+    'public/js/pages/admin.js',
+    'public/js/pages/forklift.js',
+    'public/js/pages/fourm.js',
+    'public/js/pages/johnny-ai.js',
+    'public/js/pages/kpi.js',
+    'public/js/pages/machine-safety.js',
+    'public/js/pages/patrol.js',
+    'public/js/pages/policy.js',
+    'public/js/pages/safety-culture.js',
+    'public/style.css',
 ];
-const newPaths = new Set(['public/js/pages/admin-safety-vote-review.js']);
+const newPaths = new Set(['api/handlers/branding.php']);
 const publicPaths = runtimePaths.filter(relative => relative === 'index.html' || relative.startsWith('public/'));
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-const evidenceRoot = path.join(root, 'backups', 'production', `app-compact-safety-vote-deploy-${stamp}`);
+const evidenceRoot = path.join(root, 'backups', 'production', `app-branding-johnny-deploy-${stamp}`);
 const candidateRoot = path.join(evidenceRoot, 'candidate');
 const rollbackRoot = path.join(evidenceRoot, 'rollback-package');
 const bearer = String(process.env.SAFETY_VOTE_PHASE95_PROD_BEARER_TOKEN || '').trim();
@@ -139,17 +146,21 @@ function prepareCandidateAndRollback(commit, tree) {
     }
 
     const index = fs.readFileSync(under(candidateRoot, 'index.html'), 'utf8');
-    const drawer = fs.readFileSync(under(candidateRoot, 'public/js/johnny-drawer.js'), 'utf8');
-    const adminSafetyVote = fs.readFileSync(under(candidateRoot, 'public/js/pages/admin-safety-vote-ux1.js'), 'utf8');
-    const knowledge = JSON.parse(fs.readFileSync(under(candidateRoot, 'shared/johnny-system-usage-knowledge.json'), 'utf8'));
-    assert(index.includes('fullwidth-r1-compact-r1'), 'Compact layout cache marker missing');
-    assert(adminSafetyVote.includes("./admin-safety-vote-review.js?v=20261010-safety-vote-admin-review-r1"), 'Admin review runtime dependency missing');
-    assert(drawer.includes("tsh_johnny_launcher_position_${_userId || 'user'}"), 'Johnny draggable launcher persistence contract missing');
-    assert(drawer.includes("addEventListener('pointerdown', handleLauncherPointerDown)"), 'Johnny draggable launcher pointer contract missing');
-    assert(String(knowledge.version || '').includes('safety-vote'), 'Safety Vote Johnny knowledge version missing');
+    const main = fs.readFileSync(under(candidateRoot, 'public/js/main.js'), 'utf8');
+    const admin = fs.readFileSync(under(candidateRoot, 'public/js/pages/admin.js'), 'utf8');
+    const johnny = fs.readFileSync(under(candidateRoot, 'public/js/pages/johnny-ai.js'), 'utf8');
+    const brandingPhp = fs.readFileSync(under(candidateRoot, 'api/handlers/branding.php'), 'utf8');
+    assert(index.includes('login-a11y-perf-r1'), 'Login accessibility/performance cache marker missing');
+    assert(index.includes('johnny-admin-workspace-r1'), 'Johnny Admin workspace cache marker missing');
+    assert(main.includes("./pages/johnny-ai.js?v=20261011-johnny-admin-workspace-r1"), 'Johnny Admin runtime dependency missing');
+    assert(main.includes("./login-guides.js?v=20261011-login-branding-background-r2"), 'Login Branding runtime dependency missing');
+    assert(admin.includes("API.get('/branding/workspace')"), 'Branding workspace API integration missing');
+    assert(admin.includes('Draft → Preview → Publish'), 'Branding publishing workflow marker missing');
+    assert(johnny.includes('data-johnny-admin-section-tab'), 'Johnny Admin workspace tabs missing');
+    assert(brandingPhp.includes("$path === '/branding/workspace'"), 'PHP Branding workspace route missing');
 
     rollbackManifest = {
-        contract: '2026-10-10-app-compact-safety-vote-production-r1',
+        contract: '2026-10-11-app-branding-johnny-production-r1',
         productionBaseline,
         candidate: { commit, tree },
         restoreFiles: restoreFiles.map(({ rollbackPath: ignored, ...file }) => file),
@@ -171,9 +182,18 @@ async function httpsVerify(candidate, commit) {
         assert.equal(sha256(body), byPath.get(relative).sha256, `HTTPS checksum mismatch: ${relative}`);
         verified.push({ path: relative, bytes: body.length, sha256: sha256(body), status: response.status });
     }
-    const protectedKnowledge = await fetch(`${baseUrl}/shared/johnny-system-usage-knowledge.json?release=${Date.now()}`, { redirect: 'manual', cache: 'no-store' });
-    assert([403, 404].includes(protectedKnowledge.status), 'Shared Johnny knowledge must remain unavailable over HTTPS');
-    return { public: verified, protectedKnowledgeStatus: protectedKnowledge.status };
+    const branding = await fetch(`${baseUrl}/api/index.php?route=public/branding&release=${Date.now()}`, {
+        method: 'GET',
+        redirect: 'manual',
+        headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+        cache: 'no-store',
+    });
+    const brandingBody = await branding.json().catch(() => null);
+    assert.equal(branding.status, 200, 'Public Branding endpoint failed');
+    assert.equal(brandingBody?.success, true, 'Public Branding contract failed');
+    assert.equal(typeof brandingBody?.data?.loginBackgroundFit, 'string', 'Public Branding image-fit field missing');
+    assert.equal(typeof brandingBody?.data?.loginAnnouncementEnabled, 'boolean', 'Public Branding announcement field missing');
+    return { public: verified, publicBranding: { status: branding.status, responseBodyRecorded: false } };
 }
 
 async function resolveSmokeToken() {
@@ -192,7 +212,11 @@ async function resolveSmokeToken() {
 
 async function authenticatedSmoke(auth) {
     const requests = [];
-    for (const relative of ['/api/index.php?route=safety-vote/admin/health', '/api/index.php?route=safety-vote/admin/campaigns']) {
+    for (const relative of [
+        '/api/index.php?route=branding/workspace',
+        '/api/index.php?route=safety-vote/admin/health',
+        '/api/index.php?route=safety-vote/admin/campaigns',
+    ]) {
         const response = await fetch(`${baseUrl}${relative}`, { method: 'GET', redirect: 'manual', headers: { Authorization: `Bearer ${auth.token}`, Accept: 'application/json', 'Cache-Control': 'no-cache' } });
         const body = await response.json().catch(() => null);
         const cache = response.headers.get('cache-control') || '';
@@ -202,6 +226,10 @@ async function authenticatedSmoke(auth) {
         if (relative.includes('/health')) {
             assert.equal(body.data?.ready, true, 'Safety Vote health is not ready');
             assert.equal(body.data?.moduleEnabled, true, 'Safety Vote module is not enabled');
+        }
+        if (relative.includes('branding/workspace')) {
+            assert(body.data?.published && typeof body.data.published === 'object', 'Branding published workspace missing');
+            assert(Array.isArray(body.data?.versions), 'Branding version history missing');
         }
         requests.push({ path: relative, method: 'GET', status: response.status, privateNoStore: true, responseBodyRecorded: false });
     }
@@ -244,7 +272,7 @@ async function main() {
         const https = await httpsVerify(prepared.candidate, commit);
         const smoke = await authenticatedSmoke(auth);
         const result = {
-            contract: '2026-10-10-app-compact-safety-vote-production-r1',
+            contract: '2026-10-11-app-branding-johnny-production-r1',
             generatedAt: new Date().toISOString(),
             decision: 'RELEASED_GO',
             candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length },
@@ -275,6 +303,6 @@ async function main() {
 }
 
 main().catch(error => {
-    process.stderr.write(`App compact/Safety Vote deployment failed: ${error.message}\n`);
+    process.stderr.write(`App Branding/Johnny deployment failed: ${error.message}\n`);
     process.exitCode = 1;
 });

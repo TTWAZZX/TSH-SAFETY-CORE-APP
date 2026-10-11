@@ -8,8 +8,9 @@ const { spawn } = require('child_process');
 const ROOT = path.join(__dirname, '..', '..');
 const EDGE = process.env.JOHNNY_UAT_BROWSER || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = Number(process.env.JOHNNY_PHASE3_UAT_CDP_PORT || 9683);
-const CACHE_BUST = '20260708-johnny-phase3-kb-admin';
+const CACHE_BUST = 'johnny-admin-workspace-r1';
 const PHASE3_MARKER = 'JOHNNY_PHASE3_KB_QUALITY_ADMIN';
+const WORKSPACE_MARKER = 'JOHNNY_ADMIN_WORKSPACE_V1';
 
 function readEnv() {
     const values = {};
@@ -104,14 +105,16 @@ async function setViewport(client, width, height, mobile) {
 
 async function main() {
     const env = readEnv();
-    const baseUrl = (process.env.JOHNNY_UAT_URL || env.PUBLIC_UPLOAD_BASE_URL || 'https://dev.tshpcl.com/safety/tsh-safety-core').replace(/\/+$/, '');
+    const baseUrl = (process.env.JOHNNY_UAT_URL || 'http://127.0.0.1:5500').replace(/\/+$/, '');
+    const parsedBaseUrl = new URL(baseUrl);
+    if (!['127.0.0.1', 'localhost'].includes(parsedBaseUrl.hostname)) throw new Error('Johnny Admin Workspace UAT is local-only');
     const appUrl = `${baseUrl}/index.html?johnnyPhase3Uat=${Date.now()}#johnny-ai`;
-    const employeeId = process.env.SMOKE_ADMIN_EMPLOYEE_ID || env.SMOKE_ADMIN_EMPLOYEE_ID;
-    const password = process.env.SMOKE_ADMIN_PASSWORD || env.SMOKE_ADMIN_PASSWORD;
+    const employeeId = process.env.SMOKE_ADMIN_EMPLOYEE_ID || env.SMOKE_ADMIN_EMPLOYEE_ID || env.PROD_UAT_ADMIN_ID?.replace(/^['"]|['"]$/g, '');
+    const password = process.env.SMOKE_ADMIN_PASSWORD || env.SMOKE_ADMIN_PASSWORD || env.PROD_UAT_ADMIN_PASSWORD?.replace(/^['"]|['"]$/g, '');
     if (!employeeId || !password) throw new Error('Missing smoke Admin credentials');
 
     const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-    const artifactDir = path.join(ROOT, 'backups', 'production', `johnny-phase3-browser-uat-${stamp}`);
+    const artifactDir = path.join(ROOT, 'backups', 'local', `johnny-admin-workspace-browser-uat-${stamp}`);
     fs.mkdirSync(artifactDir, { recursive: true });
 
     const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'johnny-p3-edge-'));
@@ -131,8 +134,7 @@ async function main() {
         artifactDir,
         cacheBust: CACHE_BUST,
         marker: PHASE3_MARKER,
-        desktop: {},
-        mobile: {},
+        viewports: [],
         failures: [],
     };
 
@@ -147,7 +149,7 @@ async function main() {
         await client.command('Page.enable');
         await client.command('Runtime.enable');
 
-        await setViewport(client, 1366, 860, false);
+        await setViewport(client, 1366, 768, false);
         await waitFor(client, `document.getElementById('login-form') && window.__tshLoginReady === true`, 'login form');
         await client.eval(`(() => {
             document.getElementById('login-employee-id').value = ${JSON.stringify(employeeId)};
@@ -159,54 +161,78 @@ async function main() {
         await client.eval(`location.hash = '#johnny-ai'; window.dispatchEvent(new HashChangeEvent('hashchange')); true`);
         await waitFor(client, `document.querySelector('[data-johnny-phase2]')`, 'Johnny page');
         await client.eval(`document.querySelector('.johnny-tab-btn[data-tab="admin"]')?.click(); true`);
-        await waitFor(client, `document.querySelector('[data-johnny-phase3="${PHASE3_MARKER}"]')`, 'Johnny Phase 3 KB admin');
-        await waitFor(client, `document.querySelector('[data-johnny-phase3-dashboard="true"]')`, 'KB quality dashboard');
-
-        result.desktop = await client.eval(`(() => {
-            const resources = performance.getEntriesByType('resource').map(entry => String(entry.name || ''));
-            const filters = ['johnny-kb-filter-query','johnny-kb-filter-status','johnny-kb-filter-quality','johnny-kb-filter-source','johnny-kb-filter-category'];
-            return {
-                phaseMarker: document.querySelector('[data-johnny-phase3]')?.dataset?.johnnyPhase3 || '',
-                dashboard: Boolean(document.querySelector('[data-johnny-phase3-dashboard="true"]')),
-                filters: filters.every(id => Boolean(document.getElementById(id))),
-                duplicateContract: Boolean(document.querySelector('[data-johnny-phase3-duplicates="true"]')) || document.body.textContent.includes('Duplicates'),
-                rows: document.querySelectorAll('#johnny-kb-list tbody tr').length,
-                extractedButtons: document.querySelectorAll('.johnny-kb-extracted').length,
-                johnnyCacheBust: resources.some(src => src.includes('/public/js/pages/johnny-ai.js') && src.includes('${CACHE_BUST}')),
-                mainCacheBust: resources.some(src => src.includes('/public/js/main.js') && src.includes('${CACHE_BUST}')),
-                horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-            };
+        await waitFor(client, `document.querySelector('[data-johnny-admin-workspace="${WORKSPACE_MARKER}"]')`, 'Johnny Admin Workspace');
+        await client.eval(`(() => {
+            const style = document.createElement('style');
+            style.id = 'johnny-workspace-uat-style';
+            style.textContent = '#toast-container{display:none!important}';
+            document.head.appendChild(style);
+            document.getElementById('toast-container')?.remove();
+            return true;
         })()`);
-        await screenshot(client, path.join(artifactDir, 'johnny-phase3-admin-desktop.png'));
 
-        await setViewport(client, 390, 844, true);
-        await sleep(700);
-        result.mobile = await client.eval(`(() => ({
-            width: window.innerWidth,
-            activePage: document.body.dataset.activePage || '',
-            dashboard: Boolean(document.querySelector('[data-johnny-phase3-dashboard="true"]')),
-            filters: Boolean(document.getElementById('johnny-kb-filter-quality')),
-            horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-            bottomTabHidden: getComputedStyle(document.getElementById('bottom-tab-bar')).visibility === 'hidden',
-        }))()`);
-        await screenshot(client, path.join(artifactDir, 'johnny-phase3-admin-mobile.png'));
-
-        const checks = [
-            ['desktop phase marker', result.desktop.phaseMarker === PHASE3_MARKER],
-            ['desktop dashboard', result.desktop.dashboard],
-            ['desktop filters', result.desktop.filters],
-            ['desktop duplicate contract', result.desktop.duplicateContract],
-            ['desktop rows loaded', result.desktop.rows >= 1],
-            ['desktop extracted buttons', result.desktop.extractedButtons >= 1],
-            ['desktop johnny cache bust', result.desktop.johnnyCacheBust],
-            ['desktop main cache bust', result.desktop.mainCacheBust],
-            ['desktop no horizontal overflow', !result.desktop.horizontalOverflow],
-            ['mobile active page', result.mobile.activePage === 'johnny-ai'],
-            ['mobile dashboard', result.mobile.dashboard],
-            ['mobile filters', result.mobile.filters],
-            ['mobile bottom tab hidden', result.mobile.bottomTabHidden],
-            ['mobile no horizontal overflow', !result.mobile.horizontalOverflow],
+        const viewports = [
+            { name: 'mobile-390', width: 390, height: 844, mobile: true },
+            { name: 'mobile-430', width: 430, height: 932, mobile: true },
+            { name: 'tablet-768', width: 768, height: 1024, mobile: false },
+            { name: 'desktop-1366', width: 1366, height: 768, mobile: false },
+            { name: 'desktop-1920', width: 1920, height: 1080, mobile: false },
         ];
+        for (const viewport of viewports) {
+            await setViewport(client, viewport.width, viewport.height, viewport.mobile);
+            await client.eval(`document.querySelector('.johnny-tab-btn[data-tab="admin"]')?.click(); true`);
+            await sleep(100);
+            const observation = await client.eval(`(async () => {
+                const keys = ['overview','create','library','operations','appearance'];
+                const controls = ['johnny-avatar-form','johnny-kb-form','johnny-knowledge-form','johnny-kb-list','johnny-observability-dashboard','johnny-operational-log-list'];
+                const states = [];
+                for (const key of keys) {
+                    const tab = document.querySelector('[data-johnny-admin-section-tab="' + key + '"]');
+                    tab?.click();
+                    await new Promise(resolve => setTimeout(resolve, 60));
+                    const visiblePanels = keys.filter(candidate => !document.querySelector('[data-johnny-admin-section-panel="' + candidate + '"]')?.hidden);
+                    states.push({ key, selected: tab?.getAttribute('aria-selected'), visiblePanels });
+                }
+                document.querySelector('[data-johnny-admin-section-tab="overview"]')?.click();
+                const quick = document.querySelector('[data-johnny-admin-jump="create"]');
+                quick?.click();
+                const quickActionTarget = document.querySelector('[data-johnny-admin-section-tab="create"]')?.getAttribute('aria-selected');
+                document.querySelector('[data-johnny-admin-section-tab="overview"]')?.click();
+                const resources = performance.getEntriesByType('resource').map(entry => String(entry.name || ''));
+                return {
+                    width: window.innerWidth,
+                    marker: document.querySelector('[data-johnny-admin-workspace]')?.dataset?.johnnyAdminWorkspace || '',
+                    tabCount: document.querySelectorAll('[data-johnny-admin-section-tab]').length,
+                    panelCount: document.querySelectorAll('[data-johnny-admin-section-panel]').length,
+                    states,
+                    quickActionTarget,
+                    activeAdminTab: document.querySelector('.johnny-shell')?.dataset?.johnnyTab || '',
+                    adminPanelVisible: !document.getElementById('johnny-admin-panel')?.classList.contains('hidden'),
+                    controlsPresent: controls.every(id => Boolean(document.getElementById(id))),
+                    phase3Marker: document.querySelector('[data-johnny-phase3]')?.dataset?.johnnyPhase3 || '',
+                    johnnyCacheBust: resources.some(src => src.includes('/public/js/pages/johnny-ai.js') && src.includes('${CACHE_BUST}')),
+                    mainCacheBust: resources.some(src => src.includes('/public/js/main.js') && src.includes('${CACHE_BUST}')),
+                    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+                };
+            })()`);
+            result.viewports.push({ ...viewport, ...observation });
+            await sleep(900);
+            await client.eval(`document.getElementById('toast-container')?.remove(); true`);
+            await screenshot(client, path.join(artifactDir, `johnny-admin-workspace-${viewport.name}.png`));
+        }
+
+        const checks = result.viewports.flatMap(viewport => [
+            [`${viewport.name} workspace marker`, viewport.marker === WORKSPACE_MARKER],
+            [`${viewport.name} bounded sections`, viewport.tabCount === 5 && viewport.panelCount === 5],
+            [`${viewport.name} one visible panel`, viewport.states.every(state => state.selected === 'true' && state.visiblePanels.length === 1 && state.visiblePanels[0] === state.key)],
+            [`${viewport.name} quick action`, viewport.quickActionTarget === 'true'],
+            [`${viewport.name} admin panel visible`, viewport.activeAdminTab === 'admin' && viewport.adminPanelVisible],
+            [`${viewport.name} existing controls`, viewport.controlsPresent],
+            [`${viewport.name} phase 3 contract`, viewport.phase3Marker === PHASE3_MARKER],
+            [`${viewport.name} Johnny cache bust`, viewport.johnnyCacheBust],
+            [`${viewport.name} main cache bust`, viewport.mainCacheBust],
+            [`${viewport.name} no horizontal overflow`, !viewport.horizontalOverflow],
+        ]);
         result.failures = checks.filter(([, ok]) => !ok).map(([label]) => label);
         result.ok = result.failures.length === 0;
         if (!result.ok) throw new Error(`Johnny Phase 3 browser UAT failed: ${result.failures.join(', ')}`);

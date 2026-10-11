@@ -97,10 +97,33 @@ const DEFAULT_BRANDING = {
     tagline: 'Activity System',
     loginHeroTitle: '',
     loginHeroSubtitle: '',
-    logoUrl: ''
+    logoUrl: '',
+    loginBackgroundUrl: '',
+    loginBackgroundFit: 'cover',
+    loginBackgroundFocusX: 50,
+    loginBackgroundFocusY: 50,
+    loginAnnouncementEnabled: false,
+    loginAnnouncementTone: 'info',
+    loginAnnouncementTitle: '',
+    loginAnnouncementMessage: '',
+    loginAnnouncementStartAt: '',
+    loginAnnouncementEndAt: '',
+    loginAnnouncementLinkLabel: '',
+    loginAnnouncementUrl: '',
+    supportTitle: 'ต้องการความช่วยเหลือ?',
+    supportEmail: '',
+    supportPhone: '',
+    supportHours: '',
+    supportLinkLabel: '',
+    supportUrl: ''
 };
 let _brandingState = { ...DEFAULT_BRANDING };
 let _brandingUpdatedAt = '';
+let _brandingShowSafeArea = true;
+let _brandingWorkspace = { published: { ...DEFAULT_BRANDING }, draft: null, versions: [], activeVersionId: '', historyLimit: 12 };
+let _brandingDirty = false;
+let _brandingWorkspaceSection = 'overview';
+let _brandingLoadError = '';
 
 // Organization tab state
 let _orgDepts      = [];   // { id, Name, is_safety_core, unit_count }
@@ -2567,39 +2590,554 @@ async function _adminHealthSaveSnapshot() {
 }
 
 function _normalizeBranding(raw = {}) {
+    const normalizeFocus = value => {
+        const numeric = Number(value ?? 50);
+        return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : 50;
+    };
     const appName = String(raw.appName || DEFAULT_BRANDING.appName).trim().slice(0, 80) || DEFAULT_BRANDING.appName;
     const tagline = String(raw.tagline || DEFAULT_BRANDING.tagline).trim().slice(0, 80) || DEFAULT_BRANDING.tagline;
     const loginHeroTitle = String(raw.loginHeroTitle || '').trim().slice(0, 140);
     const loginHeroSubtitle = String(raw.loginHeroSubtitle || '').trim().slice(0, 180);
+    const safeUrl = value => {
+        const url = String(value || '').trim().slice(0, 1024);
+        return url === '' || url.startsWith('/') || /^https:\/\//i.test(url) ? url : '';
+    };
+    const announcementTone = ['info', 'warning', 'critical'].includes(String(raw.loginAnnouncementTone))
+        ? String(raw.loginAnnouncementTone)
+        : 'info';
     return {
         appName,
         tagline,
         loginHeroTitle,
         loginHeroSubtitle,
-        logoUrl: String(raw.logoUrl || '').trim().slice(0, 1024)
+        logoUrl: String(raw.logoUrl || '').trim().slice(0, 1024),
+        loginBackgroundUrl: String(raw.loginBackgroundUrl || '').trim().slice(0, 1024),
+        loginBackgroundFit: String(raw.loginBackgroundFit) === 'contain' ? 'contain' : 'cover',
+        loginBackgroundFocusX: normalizeFocus(raw.loginBackgroundFocusX),
+        loginBackgroundFocusY: normalizeFocus(raw.loginBackgroundFocusY),
+        loginAnnouncementEnabled: raw.loginAnnouncementEnabled === true || raw.loginAnnouncementEnabled === 1 || raw.loginAnnouncementEnabled === '1',
+        loginAnnouncementTone: announcementTone,
+        loginAnnouncementTitle: String(raw.loginAnnouncementTitle || '').trim().slice(0, 100),
+        loginAnnouncementMessage: String(raw.loginAnnouncementMessage || '').trim().slice(0, 300),
+        loginAnnouncementStartAt: String(raw.loginAnnouncementStartAt || '').trim().slice(0, 40),
+        loginAnnouncementEndAt: String(raw.loginAnnouncementEndAt || '').trim().slice(0, 40),
+        loginAnnouncementLinkLabel: String(raw.loginAnnouncementLinkLabel || '').trim().slice(0, 60),
+        loginAnnouncementUrl: safeUrl(raw.loginAnnouncementUrl),
+        supportTitle: String(raw.supportTitle || DEFAULT_BRANDING.supportTitle).trim().slice(0, 80) || DEFAULT_BRANDING.supportTitle,
+        supportEmail: String(raw.supportEmail || '').trim().slice(0, 160),
+        supportPhone: String(raw.supportPhone || '').trim().slice(0, 40),
+        supportHours: String(raw.supportHours || '').trim().slice(0, 120),
+        supportLinkLabel: String(raw.supportLinkLabel || '').trim().slice(0, 60),
+        supportUrl: safeUrl(raw.supportUrl)
     };
 }
 
-function _brandingPreviewLogo(logoUrl = '') {
-    if (logoUrl) {
-        return `<img src="${escHtml(logoUrl)}" alt="Current logo" class="w-full h-full object-contain">`;
+function _brandingAnnouncementActive(branding, now = Date.now()) {
+    if (!branding.loginAnnouncementEnabled || (!branding.loginAnnouncementTitle && !branding.loginAnnouncementMessage)) return false;
+    const start = Date.parse(branding.loginAnnouncementStartAt || '');
+    const end = Date.parse(branding.loginAnnouncementEndAt || '');
+    return (!Number.isFinite(start) || now >= start) && (!Number.isFinite(end) || now <= end);
+}
+
+function _applyBrandingCommunicationPreview(doc, { forceAnnouncement = false } = {}) {
+    doc.querySelectorAll('[data-login-system-announcement]').forEach(announcement => {
+        const configured = _brandingState.loginAnnouncementEnabled
+            && Boolean(_brandingState.loginAnnouncementTitle || _brandingState.loginAnnouncementMessage);
+        // The editor Preview must always expose configured Draft content so an
+        // Admin can review it before Publish. The real Login keeps the bounded
+        // start/end schedule through _loginAnnouncementIsActive in main.js.
+        const active = forceAnnouncement ? configured : _brandingAnnouncementActive(_brandingState);
+        const brandSurface = announcement.dataset.loginAnnouncementSurface === 'brand';
+        const tones = {
+            info: ['border-sky-200 bg-sky-50 text-sky-900', 'bg-sky-100 text-sky-700', 'i'],
+            warning: ['border-amber-200 bg-amber-50 text-amber-950', 'bg-amber-100 text-amber-700', '!'],
+            critical: ['border-rose-200 bg-rose-50 text-rose-950', 'bg-rose-100 text-rose-700', '!']
+        };
+        const tone = tones[_brandingState.loginAnnouncementTone] || tones.info;
+        announcement.className = `${active ? '' : 'hidden '}${brandSurface ? 'border-white/20 bg-emerald-950/60 text-white backdrop-blur-sm' : `md:hidden ${tone[0]}`} mb-5 rounded-xl border px-3.5 py-3`;
+        const icon = announcement.querySelector('[data-login-announcement-icon]');
+        if (icon) { icon.className = `mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-black ${tone[1]}`; icon.textContent = tone[2]; }
+        const title = announcement.querySelector('[data-login-announcement-title]');
+        const message = announcement.querySelector('[data-login-announcement-message]');
+        if (title) title.textContent = _brandingState.loginAnnouncementTitle || 'ประกาศจากระบบ';
+        if (message) message.textContent = _brandingState.loginAnnouncementMessage;
+        const link = announcement.querySelector('[data-login-announcement-link]');
+        if (link) {
+            const visible = Boolean(_brandingState.loginAnnouncementUrl && _brandingState.loginAnnouncementLinkLabel);
+            link.classList.toggle('hidden', !visible);
+            link.classList.toggle('inline-flex', visible);
+            link.textContent = visible ? `${_brandingState.loginAnnouncementLinkLabel} →` : '';
+            if (visible) link.href = _brandingState.loginAnnouncementUrl;
+            else link.removeAttribute('href');
+        }
+    });
+    const title = doc.querySelector('#login-support-title');
+    const hours = doc.querySelector('#login-support-hours');
+    const links = doc.querySelector('#login-support-links');
+    const fallback = doc.querySelector('#login-support-fallback');
+    if (title) title.textContent = _brandingState.supportTitle || DEFAULT_BRANDING.supportTitle;
+    if (hours) { hours.textContent = _brandingState.supportHours; hours.classList.toggle('hidden', !_brandingState.supportHours); }
+    if (links) {
+        links.replaceChildren();
+        const items = [
+            [_brandingState.supportEmail ? 'อีเมล' : '', _brandingState.supportEmail ? `mailto:${_brandingState.supportEmail}` : ''],
+            [_brandingState.supportPhone, _brandingState.supportPhone ? `tel:${_brandingState.supportPhone.replace(/[^+\d]/g, '')}` : ''],
+            [_brandingState.supportLinkLabel || (_brandingState.supportUrl ? 'ศูนย์ช่วยเหลือ' : ''), _brandingState.supportUrl]
+        ];
+        items.forEach(([label, href]) => {
+            if (!label || !href) return;
+            const link = (doc.ownerDocument || document).createElement('a');
+            link.className = 'inline-flex min-h-11 items-center text-xs font-bold text-emerald-700 underline-offset-2 hover:underline';
+            link.textContent = label;
+            link.href = href;
+            links.appendChild(link);
+        });
+        fallback?.classList.toggle('hidden', links.childElementCount > 0 || Boolean(_brandingState.supportHours));
     }
-    return `
+}
+
+function _brandingPreviewLogo(logoUrl = '') {
+    const fallback = `
         <svg width="56" height="56" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect width="40" height="40" rx="10" fill="#059669" fill-opacity="0.1"/>
             <path d="M20 10L12 14.5v7c0 6 4 11.5 8 13.5 4-2 8-7.5 8-13.5v-7z" fill="#059669"/>
             <path d="M15.5 21.5l3 3 6-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>`;
+    if (!logoUrl) return fallback;
+    return `<span class="relative block h-full w-full" aria-hidden="true">${fallback}<img src="${escHtml(logoUrl)}" alt="" class="absolute inset-0 h-full w-full object-contain"></span>`;
+}
+
+const BRANDING_LOGIN_PREVIEW_DEVICES = Object.freeze({
+    desktop: { label: 'Desktop', width: 1440, height: 900 },
+    tablet: { label: 'Tablet', width: 768, height: 1024 },
+    mobile: { label: 'Mobile', width: 390, height: 844 }
+});
+let _brandingLoginPreviewDevice = 'desktop';
+let _brandingPreviewRefreshTimer = null;
+
+function _brandingLoginPreviewDocument() {
+    const source = document.getElementById('login-overlay');
+    if (!source) return '';
+    const clone = source.cloneNode(true);
+    clone.id = 'branding-real-login-overlay';
+    clone.classList.remove('hidden', 'fixed', 'inset-0', 'z-50');
+    clone.classList.add('flex');
+    clone.style.position = 'relative';
+    clone.style.width = '100%';
+    clone.style.height = '100vh';
+    _applyBrandingCommunicationPreview(clone, { forceAnnouncement: true });
+
+    clone.querySelectorAll('input').forEach(input => {
+        input.value = '';
+        input.removeAttribute('required');
+        input.setAttribute('readonly', '');
+        input.setAttribute('tabindex', '-1');
+    });
+    clone.querySelectorAll('button, a, select, textarea').forEach(control => {
+        control.setAttribute('tabindex', '-1');
+        control.setAttribute('aria-disabled', 'true');
+    });
+    clone.querySelectorAll('[data-brand-name]').forEach(node => { node.textContent = _brandingState.appName; });
+    clone.querySelectorAll('[data-brand-login-title]').forEach(node => { node.textContent = _brandingState.loginHeroTitle || _brandingState.appName; });
+    clone.querySelectorAll('[data-brand-login-subtitle]').forEach(node => { node.textContent = _brandingState.loginHeroSubtitle || _brandingState.tagline; });
+    clone.querySelectorAll('[data-brand-logo]').forEach(node => { node.innerHTML = _brandingPreviewLogo(_brandingState.logoUrl); });
+
+    const brandPanel = clone.querySelector('#login-brand-panel');
+    if (brandPanel) {
+        const gradient = 'linear-gradient(160deg, rgba(2,44,34,.94) 0%, rgba(6,78,59,.88) 42%, rgba(6,95,70,.82) 75%, rgba(13,148,136,.76) 100%)';
+        brandPanel.style.backgroundImage = _brandingState.loginBackgroundUrl
+            ? `${gradient}, url(${JSON.stringify(_brandingState.loginBackgroundUrl)})`
+            : 'linear-gradient(160deg, #022c22 0%, #064e3b 40%, #065f46 75%, #0d9488 100%)';
+        const backgroundFit = _brandingState.loginBackgroundFit === 'contain' ? 'contain' : 'cover';
+        brandPanel.style.backgroundSize = _brandingState.loginBackgroundUrl ? `cover, ${backgroundFit}` : 'cover';
+        brandPanel.style.backgroundPosition = _brandingState.loginBackgroundUrl
+            ? `center, ${_brandingState.loginBackgroundFocusX}% ${_brandingState.loginBackgroundFocusY}%`
+            : 'center';
+        brandPanel.style.backgroundRepeat = 'no-repeat';
+        if (_brandingShowSafeArea) {
+            const guide = document.createElement('div');
+            guide.setAttribute('data-branding-safe-area-guide', '');
+            guide.setAttribute('aria-hidden', 'true');
+            guide.style.cssText = 'position:absolute;inset:0;z-index:30;pointer-events:none;overflow:hidden';
+            guide.innerHTML = `
+                <span style="position:absolute;inset:10% 12%;border:2px dashed rgba(255,255,255,.88);border-radius:14px;box-shadow:0 0 0 999px rgba(2,44,34,.16),inset 0 0 0 1px rgba(6,78,59,.45)">
+                    <span style="position:absolute;left:10px;top:8px;padding:4px 7px;border-radius:999px;background:rgba(2,44,34,.78);color:#fff;font:700 11px Kanit,sans-serif">SAFE AREA</span>
+                </span>
+                <span data-branding-focus-marker style="position:absolute;left:${_brandingState.loginBackgroundFocusX}%;top:${_brandingState.loginBackgroundFocusY}%;width:28px;height:28px;border:2px solid #fff;border-radius:999px;transform:translate(-50%,-50%);box-shadow:0 0 0 4px rgba(5,150,105,.72),0 3px 12px rgba(2,44,34,.35)">
+                    <span style="position:absolute;left:50%;top:-8px;width:2px;height:40px;background:rgba(255,255,255,.85);transform:translateX(-50%)"></span>
+                    <span style="position:absolute;left:-8px;top:50%;width:40px;height:2px;background:rgba(255,255,255,.85);transform:translateY(-50%)"></span>
+                </span>`;
+            brandPanel.appendChild(guide);
+        }
+    }
+
+    const assets = [...document.head.querySelectorAll('link[rel="stylesheet"], style')]
+        .map(node => node.outerHTML)
+        .join('\n');
+    const tailwindScript = [...document.head.querySelectorAll('script[src]')]
+        .find(node => String(node.src || '').includes('tailwindcss'));
+    const tailwind = tailwindScript ? `<script src="${escHtml(tailwindScript.src)}"><\/script>` : '';
+    const baseUrl = escHtml(new URL('.', window.location.href).href);
+    return `<!doctype html><html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="${baseUrl}">${tailwind}${assets}<style>html,body{margin:0;width:100%;height:100%;overflow:hidden}body{font-family:Kanit,sans-serif;background:#fff}#branding-real-login-overlay{display:flex!important;width:100%;height:100vh;overflow:hidden}#branding-real-login-overlay *{box-sizing:border-box}#branding-real-login-overlay form,#branding-real-login-overlay button,#branding-real-login-overlay a{pointer-events:none}</style></head><body>${clone.outerHTML}</body></html>`;
+}
+
+function _brandingPreviewDeviceControls(activeDevice, scope = 'inline') {
+    return Object.entries(BRANDING_LOGIN_PREVIEW_DEVICES).map(([key, device]) => `
+        <button type="button" data-branding-preview-device="${key}" data-branding-preview-scope="${scope}"
+            class="min-h-11 rounded-xl border px-3 text-xs font-bold transition-colors ${activeDevice === key ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'}"
+            role="tab" aria-selected="${activeDevice === key}">${device.label}<span class="hidden sm:inline"> · ${device.width}×${device.height}</span></button>`).join('');
+}
+
+function _brandingFocusPresetControls() {
+    const presets = [
+        ['บนซ้าย', 25, 25], ['บนกลาง', 50, 25], ['บนขวา', 75, 25],
+        ['กลางซ้าย', 25, 50], ['กึ่งกลาง', 50, 50], ['กลางขวา', 75, 50],
+        ['ล่างซ้าย', 25, 75], ['ล่างกลาง', 50, 75], ['ล่างขวา', 75, 75],
+    ];
+    return presets.map(([label, x, y]) => {
+        const active = _brandingState.loginBackgroundFocusX === x && _brandingState.loginBackgroundFocusY === y;
+        return `<button type="button" data-branding-focus-preset data-focus-x="${x}" data-focus-y="${y}" aria-label="จุดโฟกัส${label}" aria-pressed="${active}" ${_brandingState.loginBackgroundFit === 'contain' ? 'disabled' : ''}
+            class="min-h-11 rounded-lg border text-[10px] font-bold transition-colors ${active ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'}">${label}</button>`;
+    }).join('');
+}
+
+function _syncBrandingFocusControls({ refreshPreview = true } = {}) {
+    const x = Math.round(_brandingState.loginBackgroundFocusX);
+    const y = Math.round(_brandingState.loginBackgroundFocusY);
+    const xInput = document.getElementById('branding-focus-x');
+    const yInput = document.getElementById('branding-focus-y');
+    if (xInput) xInput.value = String(x);
+    if (yInput) yInput.value = String(y);
+    const value = document.getElementById('branding-focus-value');
+    if (value) value.textContent = `X ${x}% · Y ${y}%`;
+    const picker = document.getElementById('branding-focus-picker');
+    const usesCover = _brandingState.loginBackgroundFit !== 'contain';
+    if (xInput) xInput.disabled = !usesCover;
+    if (yInput) yInput.disabled = !usesCover;
+    if (picker) {
+        const gradient = 'linear-gradient(160deg, rgba(2,44,34,.64), rgba(6,95,70,.45), rgba(13,148,136,.36))';
+        picker.style.backgroundImage = _brandingState.loginBackgroundUrl
+            ? `${gradient}, url(${JSON.stringify(_brandingState.loginBackgroundUrl)})`
+            : 'linear-gradient(160deg, #022c22 0%, #064e3b 45%, #0d9488 100%)';
+        picker.style.backgroundPosition = _brandingState.loginBackgroundUrl ? `center, ${x}% ${y}%` : 'center';
+        picker.style.backgroundSize = _brandingState.loginBackgroundUrl ? `cover, ${_brandingState.loginBackgroundFit}` : 'cover';
+        picker.style.backgroundRepeat = 'no-repeat';
+        picker.disabled = !usesCover;
+        picker.setAttribute('aria-disabled', String(!usesCover));
+    }
+    const marker = document.querySelector('#branding-focus-picker [data-branding-focus-editor-marker]');
+    if (marker) {
+        marker.style.left = `${x}%`;
+        marker.style.top = `${y}%`;
+    }
+    document.querySelectorAll('iframe[data-branding-preview-iframe]').forEach(iframe => {
+        const panel = iframe.contentDocument?.getElementById('login-brand-panel');
+        if (!panel) return;
+        const hasImage = Boolean(_brandingState.loginBackgroundUrl);
+        panel.style.backgroundSize = hasImage ? `cover, ${_brandingState.loginBackgroundFit}` : 'cover';
+        panel.style.backgroundPosition = hasImage ? `center, ${x}% ${y}%` : 'center';
+        const previewMarker = panel.querySelector('[data-branding-focus-marker]');
+        if (previewMarker) {
+            previewMarker.style.left = `${x}%`;
+            previewMarker.style.top = `${y}%`;
+        }
+    });
+    document.querySelectorAll('[data-branding-safe-area-editor]').forEach(guide => {
+        guide.classList.toggle('hidden', !_brandingShowSafeArea);
+    });
+    document.querySelectorAll('[data-branding-safe-area-toggle]').forEach(button => {
+        button.setAttribute('aria-pressed', String(_brandingShowSafeArea));
+        button.textContent = _brandingShowSafeArea ? 'ซ่อน Safe Area' : 'แสดง Safe Area';
+    });
+    const presetHost = document.getElementById('branding-focus-presets');
+    if (presetHost) presetHost.innerHTML = _brandingFocusPresetControls();
+    const modeNote = document.getElementById('branding-focus-mode-note');
+    if (modeNote) modeNote.textContent = usesCover
+        ? 'โหมดเต็มพื้นที่: ใช้จุดโฟกัสกำหนดส่วนสำคัญที่ต้องคงอยู่เมื่อมีการครอป'
+        : 'โหมดเห็นภาพครบ: ระบบไม่ครอปภาพ จึงไม่จำเป็นต้องกำหนดจุดโฟกัส';
+    if (refreshPreview) _scheduleBrandingRealPreviewRefresh();
+}
+
+function _renderBrandingRealPreview(target, deviceKey = _brandingLoginPreviewDevice, fullScreen = false) {
+    if (!target) return;
+    const device = BRANDING_LOGIN_PREVIEW_DEVICES[deviceKey] || BRANDING_LOGIN_PREVIEW_DEVICES.desktop;
+    const previewDocument = _brandingLoginPreviewDocument();
+    target._brandingPreviewObserver?.disconnect?.();
+    if (!previewDocument) {
+        target.innerHTML = '<div class="min-h-44 flex items-center justify-center rounded-xl border border-amber-200 bg-amber-50 p-5 text-center text-xs font-semibold text-amber-800">ไม่สามารถสร้าง Preview จากหน้า Login จริงได้ กรุณารีเฟรชหน้าแล้วลองใหม่</div>';
+        return;
+    }
+    target.innerHTML = `
+        <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 bg-slate-50/90">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Real layout · ${device.label}</span>
+            <span class="text-[10px] font-semibold text-slate-400">${device.width} × ${device.height}</span>
+        </div>
+        <div data-branding-preview-stage class="flex justify-center overflow-hidden bg-slate-200/70 p-3 sm:p-4">
+            <div data-branding-preview-frame class="relative overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-slate-300">
+                <iframe title="ตัวอย่างหน้า Login ขนาด ${device.label}" data-branding-preview-iframe class="absolute left-0 top-0 border-0 bg-white" sandbox="allow-same-origin allow-scripts" tabindex="-1"></iframe>
+            </div>
+        </div>`;
+    const stage = target.querySelector('[data-branding-preview-stage]');
+    const frame = target.querySelector('[data-branding-preview-frame]');
+    const iframe = target.querySelector('[data-branding-preview-iframe]');
+    if (!stage || !frame || !iframe) return;
+    iframe.addEventListener('load', () => {
+        iframe.contentDocument?.querySelectorAll('[data-brand-logo] img').forEach(image => {
+            const useFallback = () => image.remove();
+            image.addEventListener('error', useFallback, { once: true });
+            if (image.complete && !image.naturalWidth) useFallback();
+        });
+    }, { once: true });
+    iframe.srcdoc = previewDocument;
+
+    let lastSizeSignature = '';
+    let resizeFrameId = 0;
+    const sizeFrame = () => {
+        const sizeSignature = `${stage.clientWidth}:${window.innerHeight}`;
+        if (sizeSignature === lastSizeSignature) return;
+        lastSizeSignature = sizeSignature;
+        const availableWidth = Math.max(280, stage.clientWidth - (fullScreen ? 32 : 24));
+        const availableHeight = fullScreen
+            ? Math.max(360, window.innerHeight - 190)
+            : Math.min(680, Math.max(420, window.innerHeight * 0.66));
+        const scale = Math.min(1, availableWidth / device.width, availableHeight / device.height);
+        frame.style.width = `${Math.round(device.width * scale)}px`;
+        frame.style.height = `${Math.round(device.height * scale)}px`;
+        iframe.style.width = `${device.width}px`;
+        iframe.style.height = `${device.height}px`;
+        iframe.style.transformOrigin = 'top left';
+        iframe.style.transform = `scale(${scale})`;
+    };
+    sizeFrame();
+    if (typeof ResizeObserver === 'function') {
+        const observer = new ResizeObserver(() => {
+            if (!target.isConnected) {
+                if (resizeFrameId) cancelAnimationFrame(resizeFrameId);
+                observer.disconnect();
+                return;
+            }
+            if (resizeFrameId) cancelAnimationFrame(resizeFrameId);
+            resizeFrameId = requestAnimationFrame(() => {
+                resizeFrameId = 0;
+                sizeFrame();
+            });
+        });
+        observer.observe(stage);
+        target._brandingPreviewObserver = observer;
+    }
+}
+
+function _refreshBrandingRealPreviews() {
+    _renderBrandingRealPreview(document.getElementById('branding-login-page-preview'), _brandingLoginPreviewDevice, false);
+    const fullTarget = document.getElementById('branding-login-full-preview-target');
+    if (fullTarget) _renderBrandingRealPreview(fullTarget, _brandingLoginPreviewDevice, true);
+}
+
+function _scheduleBrandingRealPreviewRefresh() {
+    clearTimeout(_brandingPreviewRefreshTimer);
+    _brandingPreviewRefreshTimer = setTimeout(_refreshBrandingRealPreviews, 100);
+}
+
+function _applyBrandingBackgroundPreview() {
+    _syncBrandingFocusControls();
+}
+
+function _openBrandingLoginFullPreview(trigger = null) {
+    if (!document.getElementById('login-overlay')) return;
+
+    document.getElementById('branding-login-full-preview')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'branding-login-full-preview';
+    overlay.className = 'fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-sm p-3 sm:p-5 flex items-center justify-center';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'branding-login-full-preview-title');
+
+    const shell = document.createElement('div');
+    shell.className = 'w-full max-w-[1600px] max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-2.5rem)] overflow-auto rounded-2xl border border-white/20 bg-slate-100 shadow-2xl';
+    shell.innerHTML = `
+        <div class="sticky top-0 z-10 flex flex-col gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Full-page Preview</p>
+                <h3 id="branding-login-full-preview-title" class="truncate text-sm font-black text-slate-800">ภาพรวมหน้า Login ที่แสดงจริง</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-2" role="tablist" aria-label="ขนาดหน้าจอตัวอย่าง">
+                ${_brandingPreviewDeviceControls(_brandingLoginPreviewDevice, 'full')}
+                <button type="button" data-branding-safe-area-toggle aria-pressed="${_brandingShowSafeArea}" class="min-h-11 shrink-0 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-xs font-bold text-emerald-800 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">${_brandingShowSafeArea ? 'ซ่อน Safe Area' : 'แสดง Safe Area'}</button>
+                <button type="button" data-branding-preview-close class="min-h-11 shrink-0 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2" aria-label="ปิดตัวอย่างเต็มหน้าจอ">ปิด</button>
+            </div>
+        </div>`;
+
+    const stage = document.createElement('div');
+    stage.id = 'branding-login-full-preview-target';
+    shell.appendChild(stage);
+    overlay.appendChild(shell);
+
+    const previousOverflow = document.body.style.overflow;
+    const close = () => {
+        document.removeEventListener('keydown', onKeydown);
+        document.body.style.overflow = previousOverflow;
+        overlay.remove();
+        trigger?.focus?.();
+    };
+    const onKeydown = event => {
+        if (event.key === 'Escape') close();
+    };
+    overlay.addEventListener('click', event => {
+        if (event.target === overlay || event.target.closest('[data-branding-preview-close]')) close();
+        const deviceButton = event.target.closest('[data-branding-preview-device]');
+        if (deviceButton) {
+            _brandingLoginPreviewDevice = deviceButton.dataset.brandingPreviewDevice;
+            shell.querySelectorAll('[data-branding-preview-device]').forEach(button => {
+                const active = button.dataset.brandingPreviewDevice === _brandingLoginPreviewDevice;
+                button.setAttribute('aria-selected', String(active));
+                button.classList.toggle('border-emerald-600', active);
+                button.classList.toggle('bg-emerald-600', active);
+                button.classList.toggle('text-white', active);
+                button.classList.toggle('border-slate-200', !active);
+                button.classList.toggle('bg-white', !active);
+                button.classList.toggle('text-slate-600', !active);
+            });
+            _renderBrandingRealPreview(stage, _brandingLoginPreviewDevice, true);
+        }
+        const safeAreaButton = event.target.closest('[data-branding-safe-area-toggle]');
+        if (safeAreaButton) {
+            _brandingShowSafeArea = !_brandingShowSafeArea;
+            shell.querySelectorAll('[data-branding-safe-area-toggle]').forEach(button => {
+                button.setAttribute('aria-pressed', String(_brandingShowSafeArea));
+                button.textContent = _brandingShowSafeArea ? 'ซ่อน Safe Area' : 'แสดง Safe Area';
+            });
+            _renderBrandingRealPreview(stage, _brandingLoginPreviewDevice, true);
+        }
+    });
+    document.addEventListener('keydown', onKeydown);
+    document.body.style.overflow = 'hidden';
+    document.body.appendChild(overlay);
+    _renderBrandingRealPreview(stage, _brandingLoginPreviewDevice, true);
+    overlay.querySelector('[data-branding-preview-close]')?.focus();
 }
 
 async function _loadBrandingSetting() {
-    const res = await API.get('/settings/app_branding');
-    let raw = res?.value;
-    if (typeof raw === 'string' && raw.trim()) {
-        try { raw = JSON.parse(raw); } catch (_) { raw = {}; }
+    const res = await API.get('/branding/workspace');
+    _brandingWorkspace = res?.data || {};
+    const selected = _brandingWorkspace.draft?.value || _brandingWorkspace.published || {};
+    _brandingState = _normalizeBranding(selected);
+    _brandingUpdatedAt = _brandingWorkspace.draft?.updatedAt || _brandingWorkspace.publishedUpdatedAt || '';
+    _brandingDirty = false;
+    _brandingLoadError = '';
+}
+
+function _brandingVersionRows() {
+    const versions = Array.isArray(_brandingWorkspace.versions) ? _brandingWorkspace.versions : [];
+    if (!versions.length) return `<div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500">ยังไม่มีประวัติ Version ระบบจะเริ่มบันทึกเมื่อ Publish ครั้งแรก</div>`;
+    return versions.map(version => {
+        const active = version.id === _brandingWorkspace.activeVersionId;
+        const restored = version.source === 'rollback';
+        const title = version.value?.loginHeroTitle || version.value?.appName || 'Branding';
+        return `<article class="rounded-xl border ${active ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200 bg-white'} p-4" data-branding-version="${escHtml(version.id)}">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-sm font-black text-slate-800">Version ${Number(version.versionNo) || 1}</span>
+                        ${active ? '<span class="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-black text-white">กำลังใช้งาน</span>' : ''}
+                        ${restored ? '<span class="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">Rollback</span>' : ''}
+                    </div>
+                    <p class="mt-1 truncate text-xs font-bold text-slate-600">${escHtml(title)}</p>
+                    <p class="mt-1 text-[11px] text-slate-400">${escHtml(version.publishedAt || '-')} · ${escHtml(version.publishedBy?.name || version.publishedBy?.id || 'Admin')}</p>
+                    ${version.note ? `<p class="mt-2 text-xs text-slate-500">${escHtml(version.note)}</p>` : ''}
+                </div>
+                <button type="button" data-branding-rollback="${escHtml(version.id)}" data-version-no="${Number(version.versionNo) || 1}" ${active ? 'disabled' : ''}
+                    class="min-h-11 shrink-0 rounded-xl border px-4 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${active ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400' : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'}">${active ? 'เวอร์ชันปัจจุบัน' : 'Rollback เวอร์ชันนี้'}</button>
+            </div>
+        </article>`;
+    }).join('');
+}
+
+const BRANDING_WORKSPACE_SECTIONS = [
+    { key: 'overview', label: 'ภาพรวมและ Preview', shortLabel: 'ภาพรวม' },
+    { key: 'identity', label: 'ข้อมูลแบรนด์', shortLabel: 'แบรนด์' },
+    { key: 'login', label: 'หน้า Login', shortLabel: 'หน้า Login' },
+    { key: 'communications', label: 'ประกาศและช่วยเหลือ', shortLabel: 'ประกาศ' },
+    { key: 'versions', label: 'ตรวจและเผยแพร่', shortLabel: 'เผยแพร่' }
+];
+
+function _setBrandingControlVisibility(control, visible) {
+    if (!control) return;
+    control.hidden = !visible;
+    control.classList.toggle('hidden', !visible);
+}
+
+function _syncBrandingActionState() {
+    const section = _brandingWorkspaceSection;
+    const actionBar = document.querySelector('[data-branding-action-bar]');
+    _setBrandingControlVisibility(actionBar, section !== 'overview');
+    if (!actionBar) return;
+
+    const previousMap = { identity: 'overview', login: 'identity', communications: 'login', versions: 'overview' };
+    const nextMap = { identity: 'login', login: 'communications', communications: 'overview' };
+    const previous = document.getElementById('branding-previous-section-btn');
+    const next = document.getElementById('branding-next-section-btn');
+    const publish = document.getElementById('branding-publish-btn');
+    const reset = document.getElementById('branding-reset-btn');
+    const discard = document.getElementById('branding-discard-draft-btn');
+    _setBrandingControlVisibility(previous, Boolean(previousMap[section]));
+    _setBrandingControlVisibility(next, Boolean(nextMap[section]));
+    _setBrandingControlVisibility(publish, section === 'versions');
+    _setBrandingControlVisibility(reset, section === 'versions');
+    _setBrandingControlVisibility(discard, section === 'versions');
+    if (previous) previous.dataset.brandingWorkspaceJump = previousMap[section] || '';
+    if (next) {
+        next.dataset.brandingWorkspaceJump = nextMap[section] || '';
+        next.textContent = section === 'communications' ? 'ตรวจ Preview →' : 'ถัดไป →';
     }
-    _brandingState = _normalizeBranding(raw || {});
-    _brandingUpdatedAt = raw?.updatedAt || '';
+
+    const status = document.getElementById('branding-draft-status');
+    if (status) {
+        status.textContent = _brandingDirty
+            ? 'มีการแก้ไขที่ยังไม่ได้บันทึก'
+            : (_brandingWorkspace.draft ? 'Draft บันทึกล่าสุดแล้ว' : 'ยังไม่มี Draft');
+        status.className = `text-[11px] font-bold ${_brandingDirty ? 'text-amber-700' : 'text-slate-500'}`;
+    }
+}
+
+function _brandingWorkspaceTabs() {
+    return BRANDING_WORKSPACE_SECTIONS.map((section, index) => {
+        const active = section.key === _brandingWorkspaceSection;
+        return `<button type="button" role="tab" id="branding-workspace-tab-${section.key}"
+            data-branding-workspace-tab="${section.key}" aria-selected="${active}" aria-controls="branding-workspace-content"
+            tabindex="${active ? '0' : '-1'}"
+            class="branding-workspace-tab min-h-11 shrink-0 rounded-xl border px-4 py-2 text-left transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${active ? 'border-emerald-600 bg-emerald-700 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50'}">
+            <span class="block text-[10px] font-black ${active ? 'text-emerald-100' : 'text-slate-400'}">${String(index + 1).padStart(2, '0')}</span>
+            <span class="block text-xs font-black">${escHtml(section.label)}</span>
+        </button>`;
+    }).join('');
+}
+
+function _syncBrandingWorkspaceSections({ focusTab = false } = {}) {
+    if (!BRANDING_WORKSPACE_SECTIONS.some(section => section.key === _brandingWorkspaceSection)) {
+        _brandingWorkspaceSection = 'overview';
+    }
+    document.querySelectorAll('[data-branding-workspace-panel]').forEach(panel => {
+        const hidden = panel.dataset.brandingWorkspacePanel !== _brandingWorkspaceSection;
+        panel.hidden = hidden;
+        panel.classList.toggle('hidden', hidden);
+    });
+    _syncBrandingActionState();
+    document.querySelectorAll('[data-branding-workspace-tab]').forEach(tab => {
+        const active = tab.dataset.brandingWorkspaceTab === _brandingWorkspaceSection;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+        tab.className = `branding-workspace-tab min-h-11 shrink-0 rounded-xl border px-4 py-2 text-left transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${active ? 'border-emerald-600 bg-emerald-700 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:bg-emerald-50'}`;
+        const step = tab.querySelector('span');
+        if (step) step.className = `block text-[10px] font-black ${active ? 'text-emerald-100' : 'text-slate-400'}`;
+        if (active && focusTab) tab.focus();
+    });
+    const activeSection = BRANDING_WORKSPACE_SECTIONS.find(section => section.key === _brandingWorkspaceSection);
+    const status = document.getElementById('branding-workspace-current');
+    if (status && activeSection) status.textContent = `กำลังแสดง: ${activeSection.label}`;
+    if (_brandingWorkspaceSection === 'overview') {
+        _renderBrandingRealPreview(document.getElementById('branding-login-page-preview'), _brandingLoginPreviewDevice, false);
+    }
 }
 
 async function renderBranding(container) {
@@ -2609,6 +3147,7 @@ async function renderBranding(container) {
     } catch (err) {
         showError('โหลดค่าตั้งค่าแบรนด์ไม่สำเร็จ', err);
         _brandingState = { ...DEFAULT_BRANDING };
+        _brandingLoadError = String(err?.message || 'ไม่สามารถเชื่อมต่อ Branding API ได้');
     }
 
     container.innerHTML = `
@@ -2619,34 +3158,91 @@ async function renderBranding(container) {
                 <h2 class="text-xl font-black text-slate-800">ตั้งค่าแบรนด์ระบบ</h2>
                 <p class="text-sm text-slate-500 mt-1">กำหนดชื่อระบบและโลโก้ที่ใช้ร่วมกันบน Sidebar, Mobile header และหน้า Login</p>
             </div>
-            <span class="text-xs font-semibold text-slate-500 bg-white border border-slate-200 rounded-full px-3 py-1.5">
-                ${_brandingUpdatedAt ? `Updated ${escHtml(_brandingUpdatedAt)}` : 'Using saved setting or default'}
+            <span class="text-xs font-semibold ${_brandingWorkspace.draft ? 'text-amber-800 bg-amber-50 border-amber-200' : 'text-emerald-800 bg-emerald-50 border-emerald-200'} border rounded-full px-3 py-1.5">
+                ${_brandingWorkspace.draft ? `Draft · ${escHtml(_brandingUpdatedAt)}` : (_brandingUpdatedAt ? `Published · ${escHtml(_brandingUpdatedAt)}` : 'Published default')}
             </span>
         </div>
 
-        <div class="grid grid-cols-1 xl:grid-cols-[360px,1fr] gap-5">
-            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-                <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Preview</p>
-                <div class="rounded-2xl p-5 text-white overflow-hidden" style="background:linear-gradient(160deg,#064e3b 0%,#065f46 55%,#0d9488 100%)">
-                    <div class="flex items-center gap-3">
-                        <div id="branding-preview-logo" class="w-14 h-14 rounded-xl bg-white/12 border border-white/15 p-1.5 flex items-center justify-center overflow-hidden">
-                            ${_brandingPreviewLogo(_brandingState.logoUrl)}
-                        </div>
-                        <div class="min-w-0">
-                            <p id="branding-preview-name" class="text-base font-black truncate">${escHtml(_brandingState.appName)}</p>
-                            <p id="branding-preview-tagline" class="text-xs text-emerald-100/80 truncate">${escHtml(_brandingState.tagline)}</p>
-                        </div>
+        ${_brandingLoadError ? `<div role="alert" class="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div><p class="text-sm font-black text-rose-800">เชื่อมต่อ Branding API ไม่สำเร็จ</p><p class="mt-1 text-xs leading-relaxed text-rose-700">Draft และสถานะ Publish อาจไม่ถูกต้อง กรุณาตรวจว่า Backend ทำงานอยู่ แล้วลองโหลดใหม่</p></div>
+            <button type="button" id="branding-api-retry-btn" class="min-h-11 shrink-0 rounded-lg border border-rose-300 bg-white px-4 text-xs font-black text-rose-800 hover:bg-rose-100">ลองเชื่อมต่อใหม่</button>
+        </div>` : ''}
+
+        <div class="space-y-5">
+            <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" aria-labelledby="branding-workflow-heading">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Publishing Workflow</p>
+                        <h3 id="branding-workflow-heading" class="mt-1 text-sm font-black text-slate-800">Draft → Preview → Publish</h3>
+                        <p class="mt-1 text-xs leading-relaxed text-slate-500">การแก้ไขและไฟล์ที่เลือกจะอยู่ใน Draft ก่อน หน้า Login จริงจะเปลี่ยนเฉพาะเมื่อกด Publish และยืนยันเท่านั้น</p>
                     </div>
-                    <div class="mt-5 pt-4 border-t border-white/15">
-                        <p class="text-[11px] font-bold uppercase tracking-widest text-emerald-100/70 mb-2">Login Hero</p>
-                        <p id="branding-preview-login-title" class="text-lg font-black leading-tight">${escHtml(_brandingState.loginHeroTitle || _brandingState.appName)}</p>
-                        <p id="branding-preview-login-subtitle" class="text-xs text-emerald-100/80 mt-1 leading-relaxed">${escHtml(_brandingState.loginHeroSubtitle || _brandingState.tagline)}</p>
+                    <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                        <div class="min-h-11 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-center">
+                            <span class="block text-[10px] font-bold text-emerald-700">PUBLISHED</span>
+                            <span class="text-xs font-black text-emerald-900">${_brandingWorkspace.activeVersionId ? `Version ${Number(_brandingWorkspace.versions?.find(v => v.id === _brandingWorkspace.activeVersionId)?.versionNo) || '-'}` : 'Current'}</span>
+                        </div>
+                        <div class="min-h-11 rounded-xl border ${_brandingWorkspace.draft ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'} px-4 py-2 text-center">
+                            <span class="block text-[10px] font-bold ${_brandingWorkspace.draft ? 'text-amber-700' : 'text-slate-400'}">DRAFT</span>
+                            <span class="text-xs font-black ${_brandingWorkspace.draft ? 'text-amber-900' : 'text-slate-500'}">${_brandingWorkspace.draft ? 'พร้อมตรวจสอบ' : 'ยังไม่มีงานร่าง'}</span>
+                        </div>
                     </div>
                 </div>
-                <p class="text-xs text-slate-500 mt-3">ถ้าไม่มีโลโก้ที่อัปโหลด ระบบจะใช้โลโก้เดิมอัตโนมัติ</p>
-            </div>
+            </section>
 
-            <form id="branding-form" class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+            <nav class="sticky top-20 z-20 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur" aria-label="หมวดการตั้งค่าแบรนด์">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Branding Workspace</p>
+                        <p id="branding-workspace-current" class="mt-0.5 text-xs font-bold text-slate-600" aria-live="polite"></p>
+                    </div>
+                    <span class="hidden text-[11px] text-slate-400 lg:block">เลือกทำทีละส่วน ลดการเลื่อนหน้าจอ</span>
+                </div>
+                <div id="branding-workspace-tabs" class="mt-3 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="เลือกส่วนที่ต้องการตั้งค่า">
+                    ${_brandingWorkspaceTabs()}
+                </div>
+            </nav>
+
+            <div id="branding-workspace-content" class="space-y-4">
+            <section data-branding-workspace-panel="overview" class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5" aria-labelledby="branding-login-preview-heading">
+                <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="สรุปการตั้งค่า Branding">
+                    ${[
+                        ['identity', 'ข้อมูลแบรนด์', _brandingState.logoUrl ? 'ชื่อระบบและโลโก้กำหนดแล้ว' : 'ใช้โลโก้มาตรฐาน', 'แก้ไขข้อมูล'],
+                        ['login', 'หน้า Login', _brandingState.loginBackgroundUrl ? 'ใช้ภาพพื้นหลังแบบกำหนดเอง' : 'ใช้พื้นหลังมาตรฐาน', 'ปรับหน้า Login'],
+                        ['communications', 'การสื่อสาร', _brandingState.loginAnnouncementEnabled ? 'เปิดประกาศตามกำหนดเวลา' : 'ประกาศปิดอยู่', 'จัดการข้อความ'],
+                        ['versions', 'สถานะเผยแพร่', _brandingWorkspace.draft ? 'มี Draft รอตรวจและเผยแพร่' : 'Published เป็นเวอร์ชันปัจจุบัน', 'ตรวจและเผยแพร่']
+                    ].map(([key, title, summary, action]) => `
+                        <article class="flex min-h-[132px] flex-col rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <p class="text-xs font-black text-slate-800">${escHtml(title)}</p>
+                            <p class="mt-1 flex-1 text-[11px] leading-relaxed text-slate-500">${escHtml(summary)}</p>
+                            <button type="button" data-branding-workspace-jump="${key}" class="mt-3 min-h-11 rounded-lg border border-emerald-200 bg-white px-3 text-xs font-bold text-emerald-800 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">${escHtml(action)} →</button>
+                        </article>
+                    `).join('')}
+                </div>
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                    <div>
+                        <p class="text-[10px] font-bold text-emerald-700 uppercase tracking-widest">Live Preview</p>
+                        <h3 id="branding-login-preview-heading" class="mt-1 text-sm font-black text-slate-800">Preview หน้า Login</h3>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div id="branding-login-preview-device-tabs" class="flex flex-wrap items-center gap-2" role="tablist" aria-label="เลือกขนาดหน้าจอตัวอย่าง">
+                            ${_brandingPreviewDeviceControls(_brandingLoginPreviewDevice, 'inline')}
+                        </div>
+                        <button type="button" id="branding-login-full-preview-btn" class="min-h-11 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white shadow-sm hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2" aria-haspopup="dialog">
+                            ดูตัวอย่างเต็มหน้าจอ
+                        </button>
+                    </div>
+                </div>
+                <div id="branding-login-page-preview" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-live="polite"></div>
+                <p class="mt-3 text-xs text-slate-500">Preview ใช้ข้อมูล Draft และโครงสร้างเดียวกับหน้า Login จริง เลือก Desktop, Tablet หรือ Mobile เพื่อตรวจก่อน Publish โดยไม่กระทบผู้ใช้งานปัจจุบัน</p>
+            </section>
+
+            <form id="branding-form" class="flex flex-col gap-4">
+                <section data-branding-workspace-panel="identity" class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="branding-identity-heading">
+                    <div class="mb-4">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Brand Identity</p>
+                        <h3 id="branding-identity-heading" class="mt-1 text-sm font-black text-slate-800">ชื่อระบบและโลโก้</h3>
+                        <p class="mt-1 text-xs text-slate-500">ค่าชุดนี้ใช้ร่วมกันบน Sidebar, Header และหน้า Login</p>
+                    </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <label class="block">
                         <span class="block text-xs font-bold text-slate-600 mt-1">Sidebar / Header Name</span>
@@ -2659,8 +3255,25 @@ async function renderBranding(container) {
                             class="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none">
                     </label>
                 </div>
+
+                <div class="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                    <div class="flex flex-col md:flex-row md:items-center gap-3">
+                        <div class="flex-1">
+                            <p class="text-xs font-bold text-slate-600">อัปโหลดโลโก้ใหม่</p>
+                            <p class="text-xs text-slate-500 mt-1">รองรับ PNG, JPG, JPEG, WEBP ขนาดไม่เกิน 2 MB · แนะนำ 512 × 512 px</p>
+                            <p id="branding-logo-url" class="text-[11px] text-slate-400 mt-2 break-all">${escHtml(_brandingState.logoUrl || 'Default logo')}</p>
+                        </div>
+                        <input id="branding-logo-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" class="hidden">
+                        <button type="button" onclick="document.getElementById('branding-logo-input')?.click()"
+                            class="min-h-11 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold">เลือกไฟล์</button>
+                    </div>
+                </div>
+                </section>
+
+                <section data-branding-workspace-panel="login" class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="branding-login-content-heading">
                 <div>
                     <p class="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Desktop Login Hero</p>
+                    <h3 id="branding-login-content-heading" class="sr-only">ข้อความและภาพหน้า Login</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <label class="block">
                             <span class="text-xs font-bold text-slate-600">Login Hero Title</span>
@@ -2676,20 +3289,162 @@ async function renderBranding(container) {
                     <p class="text-xs text-slate-500 mt-2">Leave Login Hero fields blank to reuse Sidebar / Header text.</p>
                 </div>
 
-                <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                <div class="mt-4 rounded-xl border border-dashed border-emerald-200 bg-emerald-50/50 p-4">
                     <div class="flex flex-col md:flex-row md:items-center gap-3">
-                        <div class="flex-1">
-                            <p class="text-xs font-bold text-slate-600">อัปโหลดโลโก้ใหม่</p>
-                            <p class="text-xs text-slate-500 mt-1">รองรับ PNG, JPG, JPEG, WEBP ขนาดไม่เกิน 2 MB · แนะนำ 512 × 512 px</p>
-                            <p id="branding-logo-url" class="text-[11px] text-slate-400 mt-2 break-all">${escHtml(_brandingState.logoUrl || 'Default logo')}</p>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-xs font-bold text-slate-700">ภาพพื้นหลังหน้า Login (Desktop)</p>
+                            <p class="text-xs text-slate-500 mt-1">รองรับ JPG, PNG และ WebP ไม่เกิน 5 MB · ภาพแนวตั้งแนะนำ 1200 × 1600 px หรือใหญ่กว่า</p>
+                            <p class="text-[11px] text-slate-400 mt-1">หน้า Login เปลี่ยนอัตราส่วนตามจอ เลือก “เต็มพื้นที่” เมื่อต้องการไร้ขอบ หรือ “เห็นภาพครบ” เมื่อต้องการไม่ให้ภาพถูกครอป</p>
+                            <p id="branding-background-url" class="text-[11px] text-slate-400 mt-2 break-all">${escHtml(_brandingState.loginBackgroundUrl || 'ใช้พื้นหลังมาตรฐานของระบบ')}</p>
                         </div>
-                        <input id="branding-logo-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" class="hidden">
-                        <button type="button" onclick="document.getElementById('branding-logo-input')?.click()"
-                            class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold">เลือกไฟล์</button>
+                        <input id="branding-background-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" class="hidden">
+                        <div class="flex flex-wrap gap-2">
+                            <button type="button" id="branding-background-reset"
+                                class="px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-bold">ใช้พื้นหลังเดิม</button>
+                            <button type="button" onclick="document.getElementById('branding-background-input')?.click()"
+                                class="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold">เลือกภาพพื้นหลัง</button>
+                        </div>
                     </div>
                 </div>
 
-                <div class="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+                <fieldset class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <legend class="px-1 text-xs font-black text-slate-800">การวางภาพบนหน้าจอ</legend>
+                    <div class="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <label class="flex min-h-14 cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 ${_brandingState.loginBackgroundFit === 'cover' ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'}">
+                            <input type="radio" name="branding-background-fit" value="cover" ${_brandingState.loginBackgroundFit === 'cover' ? 'checked' : ''} class="mt-0.5 h-5 w-5 accent-emerald-600">
+                            <span><strong class="block text-xs text-slate-800">เต็มพื้นที่ (Cover)</strong><span class="mt-1 block text-[11px] leading-relaxed text-slate-500">เต็มกรอบทุกขนาดจอ แต่อาจครอปด้านบน–ล่างหรือซ้าย–ขวา</span></span>
+                        </label>
+                        <label class="flex min-h-14 cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 ${_brandingState.loginBackgroundFit === 'contain' ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'}">
+                            <input type="radio" name="branding-background-fit" value="contain" ${_brandingState.loginBackgroundFit === 'contain' ? 'checked' : ''} class="mt-0.5 h-5 w-5 accent-emerald-600">
+                            <span><strong class="block text-xs text-slate-800">เห็นภาพครบ (Contain)</strong><span class="mt-1 block text-[11px] leading-relaxed text-slate-500">ไม่ครอปภาพ เหมาะกับไฟล์ 1200 × 1600 นี้ แต่อาจมีพื้นที่สีเขียวด้านข้าง</span></span>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <section class="rounded-xl border border-emerald-200 bg-white p-4" aria-labelledby="branding-focus-heading">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Image Composition</p>
+                            <h3 id="branding-focus-heading" class="mt-1 text-sm font-black text-slate-800">จุดโฟกัสและ Safe Area</h3>
+                            <p id="branding-focus-help" class="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">กำหนดส่วนสำคัญของภาพที่ต้องคงอยู่เมื่อระบบครอบภาพแบบ Cover เส้น Safe Area เป็นเพียงไกด์ใน Preview และจะไม่แสดงบนหน้า Login จริง</p>
+                            <p id="branding-focus-mode-note" class="mt-2 text-[11px] font-bold text-emerald-700"></p>
+                        </div>
+                        <button type="button" data-branding-safe-area-toggle aria-pressed="${_brandingShowSafeArea}"
+                            class="min-h-11 shrink-0 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-xs font-bold text-emerald-800 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">${_brandingShowSafeArea ? 'ซ่อน Safe Area' : 'แสดง Safe Area'}</button>
+                    </div>
+                    <div class="mt-4 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(280px,430px)_minmax(260px,1fr)]">
+                        <div class="mx-auto w-full max-w-[430px]">
+                        <p class="mb-2 text-[11px] font-bold text-emerald-800">จำลองสัดส่วนภาพฝั่งซ้ายแนวตั้ง 3:4</p>
+                        <button type="button" id="branding-focus-picker" aria-label="เลือกจุดโฟกัสบนภาพพื้นหลังฝั่งซ้าย" aria-describedby="branding-focus-help" class="relative aspect-[3/4] w-full overflow-hidden rounded-2xl border border-slate-300 bg-emerald-950 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+                            <span data-branding-safe-area-editor class="absolute inset-[10%_12%] rounded-xl border-2 border-dashed border-white/90 shadow-[0_0_0_999px_rgba(2,44,34,.16)]" aria-hidden="true">
+                                <span class="absolute left-2 top-2 rounded-full bg-emerald-950/80 px-2 py-1 text-[9px] font-black tracking-wide text-white">SAFE AREA</span>
+                            </span>
+                            <span data-branding-focus-editor-marker class="absolute h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_4px_rgba(5,150,105,.75),0_3px_12px_rgba(2,44,34,.35)]" aria-hidden="true">
+                                <span class="absolute left-1/2 top-[-8px] h-10 w-0.5 -translate-x-1/2 bg-white/90"></span>
+                                <span class="absolute left-[-8px] top-1/2 h-0.5 w-10 -translate-y-1/2 bg-white/90"></span>
+                            </span>
+                            <span class="absolute bottom-3 left-3 rounded-lg bg-emerald-950/80 px-2.5 py-1.5 text-[10px] font-bold text-white">คลิกบนภาพเพื่อเลือกจุดโฟกัส</span>
+                        </button>
+                        </div>
+                        <div class="space-y-4">
+                            <div class="flex items-center justify-between gap-3">
+                                <p class="text-xs font-black text-slate-700">ตำแหน่งปัจจุบัน</p>
+                                <output id="branding-focus-value" class="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-800">X 50% · Y 50%</output>
+                            </div>
+                            <label class="block text-xs font-bold text-slate-600">แนวนอน (ซ้าย–ขวา)
+                                <input id="branding-focus-x" type="range" min="0" max="100" step="1" value="${Math.round(_brandingState.loginBackgroundFocusX)}" class="mt-2 w-full accent-emerald-600">
+                            </label>
+                            <label class="block text-xs font-bold text-slate-600">แนวตั้ง (บน–ล่าง)
+                                <input id="branding-focus-y" type="range" min="0" max="100" step="1" value="${Math.round(_brandingState.loginBackgroundFocusY)}" class="mt-2 w-full accent-emerald-600">
+                            </label>
+                            <div>
+                                <p class="mb-2 text-xs font-bold text-slate-600">ตำแหน่งสำเร็จรูป</p>
+                                <div id="branding-focus-presets" class="grid grid-cols-3 gap-2">${_brandingFocusPresetControls()}</div>
+                            </div>
+                            <p class="rounded-xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-500">แนะนำให้วางใบหน้า โลโก้ หรือวัตถุสำคัญไว้ในกรอบ Safe Area และตรวจทั้ง Desktop กับ Tablet ก่อนบันทึก ส่วน Mobile จะไม่แสดงแผงภาพพื้นหลังตามรูปแบบปัจจุบัน</p>
+                        </div>
+                    </div>
+                </section>
+                </section>
+
+                <section data-branding-workspace-panel="communications" class="rounded-xl border border-sky-200 bg-sky-50/40 p-4 shadow-sm" aria-labelledby="branding-communications-heading">
+                    <div class="mb-4">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-sky-700">Login Communication</p>
+                        <h3 id="branding-communications-heading" class="mt-1 text-sm font-black text-slate-800">ประกาศระบบและช่องทางช่วยเหลือ</h3>
+                        <p class="mt-1 text-xs leading-relaxed text-slate-500">ข้อความทั้งหมดอยู่ใน Draft และจะแสดงบนหน้า Login จริงเมื่อ Publish แล้วเท่านั้น ลิงก์รองรับ HTTPS หรือ path ภายในระบบ</p>
+                    </div>
+                    <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                        <fieldset class="rounded-xl border border-sky-200 bg-white p-4">
+                            <legend class="px-1 text-xs font-black text-slate-800">ประกาศระบบ</legend>
+                            <p class="mb-3 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] leading-relaxed text-emerald-800"><strong>ตำแหน่งแสดงผล:</strong> ฝั่งซ้ายสีเขียว ใต้ชื่อและคำอธิบายระบบ · ใน Preview จะแสดง Draft ที่เปิดใช้งานทันทีเพื่อให้ตรวจสอบได้ แม้ยังไม่ถึงช่วงเวลาเผยแพร่</p>
+                            <label class="mt-1 flex min-h-11 cursor-pointer items-center gap-3 rounded-lg bg-slate-50 px-3 text-xs font-bold text-slate-700">
+                                <input id="branding-announcement-enabled" type="checkbox" ${_brandingState.loginAnnouncementEnabled ? 'checked' : ''} class="h-5 w-5 accent-emerald-600">
+                                เปิดแสดงประกาศตามช่วงเวลาที่กำหนด
+                            </label>
+                            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <label class="text-xs font-bold text-slate-600">ระดับ
+                                    <select id="branding-announcement-tone" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                        <option value="info" ${_brandingState.loginAnnouncementTone === 'info' ? 'selected' : ''}>ข้อมูลทั่วไป</option>
+                                        <option value="warning" ${_brandingState.loginAnnouncementTone === 'warning' ? 'selected' : ''}>แจ้งเตือน</option>
+                                        <option value="critical" ${_brandingState.loginAnnouncementTone === 'critical' ? 'selected' : ''}>สำคัญมาก</option>
+                                    </select>
+                                </label>
+                                <label class="text-xs font-bold text-slate-600">หัวข้อ
+                                    <input id="branding-announcement-title" maxlength="100" value="${escHtml(_brandingState.loginAnnouncementTitle)}" placeholder="เช่น ปิดปรับปรุงระบบ"
+                                        class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                            </div>
+                            <label class="mt-3 block text-xs font-bold text-slate-600">รายละเอียด
+                                <textarea id="branding-announcement-message" maxlength="300" rows="3" placeholder="แจ้งรายละเอียดที่ผู้ใช้จำเป็นต้องทราบ" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">${escHtml(_brandingState.loginAnnouncementMessage)}</textarea>
+                            </label>
+                            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <label class="text-xs font-bold text-slate-600">เริ่มแสดง
+                                    <input id="branding-announcement-start" type="datetime-local" value="${escHtml(_brandingState.loginAnnouncementStartAt.slice(0, 16))}" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                                <label class="text-xs font-bold text-slate-600">สิ้นสุด
+                                    <input id="branding-announcement-end" type="datetime-local" value="${escHtml(_brandingState.loginAnnouncementEndAt.slice(0, 16))}" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                            </div>
+                            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <label class="text-xs font-bold text-slate-600">ข้อความบนลิงก์
+                                    <input id="branding-announcement-link-label" maxlength="60" value="${escHtml(_brandingState.loginAnnouncementLinkLabel)}" placeholder="ดูรายละเอียด" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                                <label class="text-xs font-bold text-slate-600">ลิงก์รายละเอียด
+                                    <input id="branding-announcement-url" maxlength="1024" value="${escHtml(_brandingState.loginAnnouncementUrl)}" placeholder="https://..." inputmode="url" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="rounded-xl border border-emerald-200 bg-white p-4">
+                            <legend class="px-1 text-xs font-black text-slate-800">ช่องทางช่วยเหลือ</legend>
+                            <label class="block text-xs font-bold text-slate-600">หัวข้อ
+                                <input id="branding-support-title" maxlength="80" value="${escHtml(_brandingState.supportTitle)}" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                            </label>
+                            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <label class="text-xs font-bold text-slate-600">อีเมล
+                                    <input id="branding-support-email" type="email" maxlength="160" value="${escHtml(_brandingState.supportEmail)}" placeholder="safety@example.com" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                                <label class="text-xs font-bold text-slate-600">โทรศัพท์ / เบอร์ภายใน
+                                    <input id="branding-support-phone" maxlength="40" value="${escHtml(_brandingState.supportPhone)}" placeholder="02-000-0000 ต่อ 123" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                            </div>
+                            <label class="mt-3 block text-xs font-bold text-slate-600">เวลาบริการ
+                                <input id="branding-support-hours" maxlength="120" value="${escHtml(_brandingState.supportHours)}" placeholder="จันทร์–ศุกร์ 08:00–17:00 น." class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                            </label>
+                            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <label class="text-xs font-bold text-slate-600">ชื่อช่องทางเพิ่มเติม
+                                    <input id="branding-support-link-label" maxlength="60" value="${escHtml(_brandingState.supportLinkLabel)}" placeholder="ศูนย์ช่วยเหลือ" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                                <label class="text-xs font-bold text-slate-600">ลิงก์ช่องทางช่วยเหลือ
+                                    <input id="branding-support-url" maxlength="1024" value="${escHtml(_brandingState.supportUrl)}" placeholder="https://..." inputmode="url" class="mt-1 min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm">
+                                </label>
+                            </div>
+                            <p class="mt-3 rounded-lg bg-emerald-50 p-3 text-[11px] leading-relaxed text-emerald-800">ถ้าไม่กำหนดช่องทาง ระบบจะแสดงข้อความมาตรฐาน “กรุณาติดต่อ Safety/Admin” และจะไม่สร้างลิงก์ที่กดไม่ได้</p>
+                        </fieldset>
+                    </div>
+                </section>
+
+                <section data-branding-workspace-panel="identity" class="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4 shadow-sm" aria-label="คำแนะนำการใช้แบรนด์">
                     <div class="flex flex-col lg:flex-row gap-4">
                         <div class="flex-1">
                             <p class="text-xs font-black text-emerald-800 uppercase tracking-wide">Logo Guide / คำแนะนำโลโก้</p>
@@ -2739,15 +3494,45 @@ async function renderBranding(container) {
                             <p class="text-[11px] text-slate-500 mt-3">Tip: ใช้โลโก้สีขาว/เขียวเข้มบนพื้นโปร่งใสจะเข้ากับ Sidebar และ Login ได้ดีที่สุด</p>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <div class="flex flex-col sm:flex-row sm:justify-between gap-2 pt-2">
-                    <button type="button" id="branding-reset-btn"
-                        class="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold">รีเซ็ตกลับค่าเริ่มต้น</button>
-                    <button type="submit" id="branding-save-btn"
-                        class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm">บันทึก Branding</button>
+                <section data-branding-workspace-panel="versions" class="rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm" aria-labelledby="branding-publish-note-heading">
+                    <label class="block">
+                        <span id="branding-publish-note-heading" class="text-xs font-bold text-slate-700">หมายเหตุการ Publish (ไม่บังคับ)</span>
+                        <input id="branding-publish-note" maxlength="240" placeholder="เช่น ปรับภาพกิจกรรมเดือนตุลาคม"
+                            class="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100">
+                    </label>
+                </section>
+
+                <div data-branding-action-bar class="order-first flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:flex-row lg:items-center lg:justify-between" aria-label="การจัดการ Draft และ Publish">
+                    <div class="min-w-0">
+                        <p class="text-xs font-black text-slate-800">ดำเนินการตั้งค่า Branding</p>
+                        <p id="branding-draft-status" class="text-[11px] font-bold text-slate-500" aria-live="polite"></p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                        <button type="button" id="branding-previous-section-btn" data-branding-workspace-jump="" class="min-h-11 rounded-lg border border-slate-200 bg-white px-4 text-xs font-bold text-slate-600 hover:bg-slate-50">← ย้อนกลับ</button>
+                        <button type="button" id="branding-reset-btn"
+                            class="min-h-11 rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">ตั้ง Draft เป็นค่าเริ่มต้น</button>
+                        ${_brandingWorkspace.draft ? `<button type="button" id="branding-discard-draft-btn" class="min-h-11 rounded-lg border border-rose-200 bg-rose-50 px-4 text-xs font-bold text-rose-700 hover:bg-rose-100">ทิ้ง Draft</button>` : ''}
+                        <button type="submit" id="branding-save-btn" class="min-h-11 rounded-lg border border-emerald-200 bg-white px-5 text-xs font-bold text-emerald-800 hover:bg-emerald-50">บันทึก Draft</button>
+                        <button type="button" id="branding-next-section-btn" data-branding-workspace-jump="" class="min-h-11 rounded-lg bg-slate-800 px-5 text-xs font-bold text-white hover:bg-slate-900">ถัดไป →</button>
+                        <button type="button" id="branding-publish-btn" ${_brandingWorkspace.draft ? '' : 'disabled'}
+                            class="min-h-11 rounded-lg px-5 text-xs font-bold shadow-sm ${_brandingWorkspace.draft ? 'bg-emerald-700 text-white hover:bg-emerald-800' : 'cursor-not-allowed bg-slate-200 text-slate-400'}">Publish</button>
+                    </div>
                 </div>
             </form>
+
+            <section data-branding-workspace-panel="versions" class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5" aria-labelledby="branding-history-heading">
+                <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Version History</p>
+                        <h3 id="branding-history-heading" class="mt-1 text-sm font-black text-slate-800">ประวัติการเผยแพร่และ Rollback</h3>
+                    </div>
+                    <p class="text-[11px] text-slate-500">เก็บสูงสุด ${Number(_brandingWorkspace.historyLimit) || 12} เวอร์ชันล่าสุด · Rollback จะสร้าง Version ใหม่เสมอ</p>
+                </div>
+                <div id="branding-version-list" class="space-y-3">${_brandingVersionRows()}</div>
+            </section>
+            </div>
         </div>
     </div>`;
 
@@ -2756,22 +3541,141 @@ async function renderBranding(container) {
     const loginTitle = document.getElementById('branding-login-title');
     const loginSubtitle = document.getElementById('branding-login-subtitle');
     const fileInput = document.getElementById('branding-logo-input');
+    const backgroundInput = document.getElementById('branding-background-input');
+    const backgroundFitInputs = [...document.querySelectorAll('input[name="branding-background-fit"]')];
+    const focusXInput = document.getElementById('branding-focus-x');
+    const focusYInput = document.getElementById('branding-focus-y');
+    const focusPicker = document.getElementById('branding-focus-picker');
+    const communicationFields = {
+        loginAnnouncementEnabled: document.getElementById('branding-announcement-enabled'),
+        loginAnnouncementTone: document.getElementById('branding-announcement-tone'),
+        loginAnnouncementTitle: document.getElementById('branding-announcement-title'),
+        loginAnnouncementMessage: document.getElementById('branding-announcement-message'),
+        loginAnnouncementStartAt: document.getElementById('branding-announcement-start'),
+        loginAnnouncementEndAt: document.getElementById('branding-announcement-end'),
+        loginAnnouncementLinkLabel: document.getElementById('branding-announcement-link-label'),
+        loginAnnouncementUrl: document.getElementById('branding-announcement-url'),
+        supportTitle: document.getElementById('branding-support-title'),
+        supportEmail: document.getElementById('branding-support-email'),
+        supportPhone: document.getElementById('branding-support-phone'),
+        supportHours: document.getElementById('branding-support-hours'),
+        supportLinkLabel: document.getElementById('branding-support-link-label'),
+        supportUrl: document.getElementById('branding-support-url')
+    };
+    const workspaceTabs = document.getElementById('branding-workspace-tabs');
+    document.getElementById('branding-api-retry-btn')?.addEventListener('click', () => renderBranding(container));
+    const activateWorkspaceSection = (key, { focusTab = false } = {}) => {
+        if (!BRANDING_WORKSPACE_SECTIONS.some(section => section.key === key)) return;
+        _brandingWorkspaceSection = key;
+        _syncBrandingWorkspaceSections({ focusTab });
+    };
+    workspaceTabs?.addEventListener('click', event => {
+        const tab = event.target.closest('[data-branding-workspace-tab]');
+        if (tab) activateWorkspaceSection(tab.dataset.brandingWorkspaceTab);
+    });
+    workspaceTabs?.addEventListener('keydown', event => {
+        const current = event.target.closest('[data-branding-workspace-tab]');
+        if (!current) return;
+        const tabs = [...workspaceTabs.querySelectorAll('[data-branding-workspace-tab]')];
+        const currentIndex = tabs.indexOf(current);
+        let nextIndex = currentIndex;
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        activateWorkspaceSection(tabs[nextIndex].dataset.brandingWorkspaceTab, { focusTab: true });
+    });
+    container.querySelectorAll('[data-branding-workspace-jump]').forEach(button => {
+        button.addEventListener('click', () => activateWorkspaceSection(button.dataset.brandingWorkspaceJump, { focusTab: true }));
+    });
+    const markDraftDirty = () => {
+        _brandingDirty = true;
+        const publishButton = document.getElementById('branding-publish-btn');
+        if (publishButton) {
+            publishButton.disabled = true;
+            publishButton.title = 'บันทึก Draft ล่าสุดก่อน Publish';
+            publishButton.className = 'min-h-11 cursor-not-allowed rounded-lg bg-slate-200 px-5 text-xs font-bold text-slate-400 shadow-sm';
+        }
+        _syncBrandingActionState();
+    };
     const updatePreview = () => {
         _brandingState.appName = String(appName?.value || '').trim() || DEFAULT_BRANDING.appName;
         _brandingState.tagline = String(tagline?.value || '').trim() || DEFAULT_BRANDING.tagline;
         _brandingState.loginHeroTitle = String(loginTitle?.value || '').trim();
         _brandingState.loginHeroSubtitle = String(loginSubtitle?.value || '').trim();
-        document.getElementById('branding-preview-name').textContent = _brandingState.appName;
-        document.getElementById('branding-preview-tagline').textContent = _brandingState.tagline;
-        const loginPreviewTitle = document.getElementById('branding-preview-login-title');
-        const loginPreviewSubtitle = document.getElementById('branding-preview-login-subtitle');
-        if (loginPreviewTitle) loginPreviewTitle.textContent = _brandingState.loginHeroTitle || _brandingState.appName;
-        if (loginPreviewSubtitle) loginPreviewSubtitle.textContent = _brandingState.loginHeroSubtitle || _brandingState.tagline;
+        Object.entries(communicationFields).forEach(([key, field]) => {
+            _brandingState[key] = field?.type === 'checkbox' ? Boolean(field.checked) : String(field?.value || '').trim();
+        });
+        markDraftDirty();
+        _scheduleBrandingRealPreviewRefresh();
     };
     appName?.addEventListener('input', updatePreview);
     tagline?.addEventListener('input', updatePreview);
     loginTitle?.addEventListener('input', updatePreview);
     loginSubtitle?.addEventListener('input', updatePreview);
+    Object.values(communicationFields).forEach(field => field?.addEventListener(field.type === 'checkbox' || field.tagName === 'SELECT' ? 'change' : 'input', updatePreview));
+    backgroundFitInputs.forEach(input => input.addEventListener('change', () => {
+        if (!input.checked) return;
+        _brandingState.loginBackgroundFit = input.value === 'contain' ? 'contain' : 'cover';
+        backgroundFitInputs.forEach(option => {
+            option.closest('label')?.classList.toggle('border-emerald-500', option.checked);
+            option.closest('label')?.classList.toggle('ring-2', option.checked);
+            option.closest('label')?.classList.toggle('ring-emerald-100', option.checked);
+            option.closest('label')?.classList.toggle('border-slate-200', !option.checked);
+        });
+        markDraftDirty();
+        _syncBrandingFocusControls();
+    }));
+    const setFocus = (x, y) => {
+        _brandingState.loginBackgroundFocusX = Math.max(0, Math.min(100, Math.round(Number(x) || 0)));
+        _brandingState.loginBackgroundFocusY = Math.max(0, Math.min(100, Math.round(Number(y) || 0)));
+        markDraftDirty();
+        _syncBrandingFocusControls();
+    };
+    focusXInput?.addEventListener('input', () => setFocus(focusXInput.value, _brandingState.loginBackgroundFocusY));
+    focusYInput?.addEventListener('input', () => setFocus(_brandingState.loginBackgroundFocusX, focusYInput.value));
+    focusPicker?.addEventListener('click', event => {
+        if (event.detail === 0) return;
+        const rect = focusPicker.getBoundingClientRect();
+        setFocus(((event.clientX - rect.left) / rect.width) * 100, ((event.clientY - rect.top) / rect.height) * 100);
+    });
+    focusPicker?.addEventListener('keydown', event => {
+        const delta = event.shiftKey ? 10 : 2;
+        let x = _brandingState.loginBackgroundFocusX;
+        let y = _brandingState.loginBackgroundFocusY;
+        if (event.key === 'ArrowLeft') x -= delta;
+        else if (event.key === 'ArrowRight') x += delta;
+        else if (event.key === 'ArrowUp') y -= delta;
+        else if (event.key === 'ArrowDown') y += delta;
+        else if (event.key === 'Home') { x = 50; y = 50; }
+        else return;
+        event.preventDefault();
+        setFocus(x, y);
+    });
+    document.getElementById('branding-focus-presets')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-branding-focus-preset]');
+        if (!button) return;
+        setFocus(button.dataset.focusX, button.dataset.focusY);
+    });
+    document.querySelector('form#branding-form [data-branding-safe-area-toggle]')?.addEventListener('click', () => {
+        _brandingShowSafeArea = !_brandingShowSafeArea;
+        _syncBrandingFocusControls();
+    });
+    _syncBrandingFocusControls({ refreshPreview: false });
+    _syncBrandingWorkspaceSections();
+    document.getElementById('branding-login-preview-device-tabs')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-branding-preview-device]');
+        if (!button) return;
+        _brandingLoginPreviewDevice = button.dataset.brandingPreviewDevice;
+        const tabs = document.getElementById('branding-login-preview-device-tabs');
+        if (tabs) tabs.innerHTML = _brandingPreviewDeviceControls(_brandingLoginPreviewDevice, 'inline');
+        _renderBrandingRealPreview(document.getElementById('branding-login-page-preview'), _brandingLoginPreviewDevice, false);
+    });
+    document.getElementById('branding-login-full-preview-btn')?.addEventListener('click', event => {
+        _openBrandingLoginFullPreview(event.currentTarget);
+    });
 
     fileInput?.addEventListener('change', async () => {
         const file = fileInput.files?.[0];
@@ -2792,14 +3696,59 @@ async function renderBranding(container) {
         try {
             const res = await API.post('/upload/branding-logo', fd);
             _brandingState.logoUrl = res.url || res.data?.url || '';
-            document.getElementById('branding-preview-logo').innerHTML = _brandingPreviewLogo(_brandingState.logoUrl);
             document.getElementById('branding-logo-url').textContent = _brandingState.logoUrl || 'Default logo';
-            showToast('อัปโหลดโลโก้แล้ว กดบันทึกเพื่อใช้งาน', 'success');
+            markDraftDirty();
+            _scheduleBrandingRealPreviewRefresh();
+            showToast('อัปโหลดโลโก้แล้ว กรุณาบันทึก Draft ก่อน Publish', 'success');
         } catch (err) {
             showError('อัปโหลดโลโก้ไม่สำเร็จ', err);
         } finally {
             fileInput.value = '';
         }
+    });
+
+    backgroundInput?.addEventListener('change', async () => {
+        const file = backgroundInput.files?.[0];
+        if (!file) return;
+        const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+        if (!allowed.includes(file.type) || !/\.(png|jpe?g|webp)$/i.test(file.name)) {
+            showToast('รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP', 'error');
+            backgroundInput.value = '';
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            showToast('ภาพพื้นหลังต้องมีขนาดไม่เกิน 5 MB', 'error');
+            backgroundInput.value = '';
+            return;
+        }
+        const fd = new FormData();
+        fd.append('background', file);
+        try {
+            const res = await API.post('/upload/branding-background', fd);
+            _brandingState.loginBackgroundUrl = res.url || res.data?.url || '';
+            document.getElementById('branding-background-url').textContent = _brandingState.loginBackgroundUrl || 'ใช้พื้นหลังมาตรฐานของระบบ';
+            markDraftDirty();
+            _applyBrandingBackgroundPreview();
+            showToast('อัปโหลดภาพพื้นหลังแล้ว กรุณาบันทึก Draft ก่อน Publish', 'success');
+        } catch (err) {
+            showError('อัปโหลดภาพพื้นหลังไม่สำเร็จ', err);
+        } finally {
+            backgroundInput.value = '';
+        }
+    });
+
+    document.getElementById('branding-background-reset')?.addEventListener('click', () => {
+        _brandingState.loginBackgroundUrl = '';
+        document.getElementById('branding-background-url').textContent = 'ใช้พื้นหลังมาตรฐานของระบบ';
+        backgroundFitInputs.forEach(input => {
+            input.checked = input.value === _brandingState.loginBackgroundFit;
+            input.closest('label')?.classList.toggle('border-emerald-500', input.checked);
+            input.closest('label')?.classList.toggle('ring-2', input.checked);
+            input.closest('label')?.classList.toggle('ring-emerald-100', input.checked);
+            input.closest('label')?.classList.toggle('border-slate-200', !input.checked);
+        });
+        markDraftDirty();
+        _applyBrandingBackgroundPreview();
     });
 
     document.getElementById('branding-form')?.addEventListener('submit', guardSubmitHandler(async (e) => {
@@ -2808,33 +3757,114 @@ async function renderBranding(container) {
         const btn = document.getElementById('branding-save-btn');
         const orig = _btnLoad(btn, 'Saving...');
         try {
-            const payload = { ..._normalizeBranding(_brandingState), updatedAt: new Date().toISOString() };
-            await API.put('/settings/app_branding', { value: payload });
-            await window._refreshAppBranding?.();
-            _brandingState = _normalizeBranding(payload);
-            showToast('บันทึก Branding สำเร็จ', 'success');
+            const isSafeUrl = value => !value || value.startsWith('/') || /^https:\/\//i.test(value);
+            if (!isSafeUrl(_brandingState.loginAnnouncementUrl) || !isSafeUrl(_brandingState.supportUrl)) {
+                showToast('ลิงก์ประกาศและช่องทางช่วยเหลือต้องเป็น HTTPS หรือ path ภายในระบบ', 'warning');
+                return;
+            }
+            if (_brandingState.loginAnnouncementEnabled && !_brandingState.loginAnnouncementTitle && !_brandingState.loginAnnouncementMessage) {
+                showToast('กรุณาระบุหัวข้อหรือรายละเอียดประกาศก่อนเปิดใช้งาน', 'warning');
+                return;
+            }
+            const start = Date.parse(_brandingState.loginAnnouncementStartAt || '');
+            const end = Date.parse(_brandingState.loginAnnouncementEndAt || '');
+            if (Number.isFinite(start) && Number.isFinite(end) && end <= start) {
+                showToast('เวลาสิ้นสุดประกาศต้องอยู่หลังเวลาเริ่มแสดง', 'warning');
+                return;
+            }
+            const payload = _normalizeBranding(_brandingState);
+            await API.put('/branding/draft', {
+                value: payload,
+                expectedDraftUpdatedAt: _brandingWorkspace.draft?.updatedAt || ''
+            });
+            _brandingDirty = false;
+            showToast('บันทึก Draft แล้ว หน้า Login จริงยังไม่เปลี่ยน', 'success');
             renderBranding(container);
         } catch (err) {
-            showError('บันทึก Branding ไม่สำเร็จ', err);
+            showError('บันทึก Draft ไม่สำเร็จ', err);
         } finally {
             _btnRestore(btn, orig);
         }
     }));
 
-    document.getElementById('branding-reset-btn')?.addEventListener('click', guardActionHandler(async () => {
-        if (!confirm('รีเซ็ต Branding กลับค่าเริ่มต้น?')) return;
-        const btn = document.getElementById('branding-reset-btn');
-        const orig = _btnLoad(btn, 'Resetting...');
+    document.getElementById('branding-reset-btn')?.addEventListener('click', () => {
+        if (!confirm('ตั้งค่าใน Draft เป็นค่าเริ่มต้น? หน้า Login จริงจะยังไม่เปลี่ยนจนกว่าจะ Publish')) return;
+        _brandingState = { ...DEFAULT_BRANDING };
+        if (appName) appName.value = _brandingState.appName;
+        if (tagline) tagline.value = _brandingState.tagline;
+        if (loginTitle) loginTitle.value = _brandingState.loginHeroTitle;
+        if (loginSubtitle) loginSubtitle.value = _brandingState.loginHeroSubtitle;
+        Object.entries(communicationFields).forEach(([key, field]) => {
+            if (!field) return;
+            if (field.type === 'checkbox') field.checked = Boolean(_brandingState[key]);
+            else field.value = _brandingState[key] || '';
+        });
+        document.getElementById('branding-logo-url').textContent = 'Default logo';
+        document.getElementById('branding-background-url').textContent = 'ใช้พื้นหลังมาตรฐานของระบบ';
+        markDraftDirty();
+        _syncBrandingFocusControls();
+        showToast('ตั้งค่าเริ่มต้นใน Preview แล้ว กรุณาบันทึก Draft', 'info');
+    });
+
+    document.getElementById('branding-discard-draft-btn')?.addEventListener('click', guardActionHandler(async () => {
+        if (!confirm('ทิ้ง Draft นี้หรือไม่? ค่า Published และหน้า Login จริงจะไม่เปลี่ยน')) return;
+        const btn = document.getElementById('branding-discard-draft-btn');
+        const orig = _btnLoad(btn, 'Discarding...');
         try {
-            await API.put('/settings/app_branding', { value: null });
-            _brandingState = { ...DEFAULT_BRANDING };
-            await window._refreshAppBranding?.();
-            showToast('รีเซ็ต Branding แล้ว', 'success');
+            await API.delete('/branding/draft', {
+                body: JSON.stringify({ expectedDraftUpdatedAt: _brandingWorkspace.draft?.updatedAt || '' })
+            });
+            showToast('ทิ้ง Draft แล้ว กลับมาใช้ค่า Published', 'success');
             renderBranding(container);
         } catch (err) {
-            showError('รีเซ็ต Branding ไม่สำเร็จ', err);
-        } finally {
+            showError('ทิ้ง Draft ไม่สำเร็จ', err);
             _btnRestore(btn, orig);
+        }
+    }));
+
+    document.getElementById('branding-publish-btn')?.addEventListener('click', guardActionHandler(async () => {
+        if (_brandingDirty) {
+            showToast('กรุณาบันทึก Draft ล่าสุดก่อน Publish', 'warning');
+            return;
+        }
+        if (!_brandingWorkspace.draft) return;
+        if (!confirm('Publish Branding เวอร์ชันนี้ไปยังหน้า Login จริงหรือไม่? การเปลี่ยนแปลงจะมีผลกับผู้ใช้ทันที')) return;
+        const btn = document.getElementById('branding-publish-btn');
+        const orig = _btnLoad(btn, 'Publishing...');
+        try {
+            await API.post('/branding/publish', {
+                confirmation: 'PUBLISH_BRANDING',
+                expectedDraftUpdatedAt: _brandingWorkspace.draft.updatedAt,
+                note: document.getElementById('branding-publish-note')?.value || ''
+            });
+            await window._refreshAppBranding?.();
+            showToast('Publish Branding สำเร็จและบันทึก Version แล้ว', 'success');
+            renderBranding(container);
+        } catch (err) {
+            showError('Publish Branding ไม่สำเร็จ', err);
+            _btnRestore(btn, orig);
+        }
+    }));
+
+    document.getElementById('branding-version-list')?.addEventListener('click', guardActionHandler(async event => {
+        const button = event.target.closest('[data-branding-rollback]');
+        if (!button || button.disabled) return;
+        const versionId = button.dataset.brandingRollback;
+        const versionNo = button.dataset.versionNo;
+        if (!confirm(`Rollback ไปยัง Version ${versionNo} หรือไม่? ระบบจะสร้าง Version ใหม่และเก็บประวัติเดิมไว้`)) return;
+        const orig = _btnLoad(button, 'Rolling back...');
+        try {
+            await API.post(`/branding/versions/${encodeURIComponent(versionId)}/rollback`, {
+                confirmation: 'ROLLBACK_BRANDING',
+                expectedActiveVersionId: _brandingWorkspace.activeVersionId || '',
+                note: `Rollback from Version ${versionNo}`
+            });
+            await window._refreshAppBranding?.();
+            showToast(`Rollback จาก Version ${versionNo} สำเร็จ`, 'success');
+            renderBranding(container);
+        } catch (err) {
+            showError('Rollback Branding ไม่สำเร็จ', err);
+            _btnRestore(button, orig);
         }
     }));
 }

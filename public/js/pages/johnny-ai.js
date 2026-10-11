@@ -20,6 +20,7 @@ let _kbBusy = false;
 let _avatarBusy = false;
 let _isAdmin = false;
 let _activeTab = 'chat';
+let _johnnyAdminSection = 'overview';
 let _kbEditId = null;
 let _kbReindexingIds = new Set();
 let _kbRefiningIds = new Set();
@@ -36,6 +37,14 @@ const JOHNNY_PHASE2_MARKER = 'JOHNNY_PHASE2_MOBILE_FIELD_UX';
 const JOHNNY_PHASE3_MARKER = 'JOHNNY_PHASE3_KB_QUALITY_ADMIN';
 const JOHNNY_PHASE4_MARKER = 'JOHNNY_PHASE4_OBSERVABILITY';
 const JOHNNY_PHASE5_MARKER = 'JOHNNY_PHASE5_WORKFLOW_INTEGRATION';
+const JOHNNY_ADMIN_WORKSPACE_MARKER = 'JOHNNY_ADMIN_WORKSPACE_V1';
+const JOHNNY_ADMIN_SECTIONS = Object.freeze([
+    { key: 'overview', step: '01', label: 'ภาพรวม', hint: 'สถานะและทางลัด' },
+    { key: 'create', step: '02', label: 'เพิ่มความรู้', hint: 'ไฟล์และข้อความ' },
+    { key: 'library', step: '03', label: 'คลังความรู้', hint: 'ค้นหาและจัดการ' },
+    { key: 'operations', step: '04', label: 'ติดตามระบบ', hint: 'คุณภาพและ Log' },
+    { key: 'appearance', step: '05', label: 'รูปลักษณ์', hint: 'รูปจอห์นนี่' },
+]);
 
 const QUICK_PROMPTS_LEGACY = [
     'PPE สำหรับงานเจียรควรมีอะไรบ้าง',
@@ -942,6 +951,87 @@ function kbSourceBadge(doc) {
     return '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-black">เอกสาร</span>';
 }
 
+function johnnyAdminWorkspaceTabs() {
+    return JOHNNY_ADMIN_SECTIONS.map(section => {
+        const active = section.key === _johnnyAdminSection;
+        return `
+            <button type="button" id="johnny-admin-workspace-tab-${section.key}" data-johnny-admin-section-tab="${section.key}"
+                role="tab" aria-selected="${active}" aria-controls="johnny-admin-workspace-panel-${section.key}" tabindex="${active ? '0' : '-1'}"
+                class="min-h-12 shrink-0 rounded-xl border px-4 py-2 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 sm:flex-1 ${active ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-800'}">
+                <span class="block text-[9px] font-black opacity-70">${section.step}</span>
+                <span class="block text-xs font-black">${escHtml(section.label)}</span>
+                <span class="hidden text-[10px] font-bold opacity-75 xl:block">${escHtml(section.hint)}</span>
+            </button>`;
+    }).join('');
+}
+
+function syncJohnnyAdminWorkspace({ focusTab = false } = {}) {
+    const valid = JOHNNY_ADMIN_SECTIONS.some(section => section.key === _johnnyAdminSection);
+    if (!valid) _johnnyAdminSection = 'overview';
+    document.querySelectorAll('[data-johnny-admin-section-tab]').forEach(button => {
+        const active = button.dataset.johnnyAdminSectionTab === _johnnyAdminSection;
+        button.setAttribute('aria-selected', String(active));
+        button.tabIndex = active ? 0 : -1;
+        button.classList.toggle('border-emerald-600', active);
+        button.classList.toggle('bg-emerald-600', active);
+        button.classList.toggle('text-white', active);
+        button.classList.toggle('shadow-sm', active);
+        button.classList.toggle('border-slate-200', !active);
+        button.classList.toggle('bg-white', !active);
+        button.classList.toggle('text-slate-600', !active);
+        if (active && focusTab) button.focus();
+    });
+    document.querySelectorAll('[data-johnny-admin-section-panel]').forEach(panel => {
+        const active = panel.dataset.johnnyAdminSectionPanel === _johnnyAdminSection;
+        panel.hidden = !active;
+        panel.setAttribute('aria-hidden', String(!active));
+    });
+    const current = JOHNNY_ADMIN_SECTIONS.find(section => section.key === _johnnyAdminSection);
+    const label = document.getElementById('johnny-admin-workspace-current');
+    if (label && current) label.textContent = `${current.step} · ${current.label} — ${current.hint}`;
+}
+
+function activateJohnnyAdminSection(sectionKey, { focusTab = false } = {}) {
+    if (!JOHNNY_ADMIN_SECTIONS.some(section => section.key === sectionKey)) return;
+    _johnnyAdminSection = sectionKey;
+    syncJohnnyAdminWorkspace({ focusTab });
+    if (sectionKey === 'operations') {
+        loadObservability();
+        loadOperationalLogs();
+    }
+}
+
+function johnnyAdminOverviewHtml() {
+    const total = _kbDocs.length;
+    const active = _kbDocs.filter(doc => Number(doc.IsActive) === 1).length;
+    const ready = _kbDocs.filter(doc => Number(doc.IsActive) === 1 && String(doc.IndexedStatus || '') === 'ready' && Number(doc.ActualChunkCount ?? doc.ChunkCount ?? 0) > 0).length;
+    const attention = _kbDocs.filter(doc => String(doc.IndexedStatus || '') === 'failed' || doc.ErrorMessage || Number(doc.EmbeddingCount ?? 0) < Number(doc.ActualChunkCount ?? doc.ChunkCount ?? 0)).length;
+    const cards = [
+        ['เอกสารทั้งหมด', total.toLocaleString(), 'รายการใน Knowledge Base', 'slate'],
+        ['เปิดใช้งาน', active.toLocaleString(), 'พร้อมให้ Johnny เลือกค้นหา', 'emerald'],
+        ['พร้อมค้นหา', ready.toLocaleString(), 'Index และ chunks พร้อม', 'sky'],
+        ['ต้องตรวจสอบ', attention.toLocaleString(), 'Index, embedding หรือข้อผิดพลาด', attention ? 'amber' : 'emerald'],
+    ];
+    const tones = {
+        slate: 'border-slate-200 bg-slate-50 text-slate-800',
+        emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+        sky: 'border-sky-200 bg-sky-50 text-sky-800',
+        amber: 'border-amber-200 bg-amber-50 text-amber-900',
+    };
+    return `
+        <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+            ${cards.map(([label, value, detail, tone]) => `<article class="rounded-xl border p-4 ${tones[tone]}"><p class="text-[10px] font-black uppercase tracking-wider opacity-70">${label}</p><p class="mt-1 text-2xl font-black">${value}</p><p class="mt-1 text-[11px] font-bold opacity-75">${detail}</p></article>`).join('')}
+        </div>
+        <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="งานด่วนสำหรับผู้ดูแล Johnny">
+            ${[
+                ['create', 'เพิ่มข้อมูลใหม่', 'อัปโหลดเอกสารหรือเพิ่ม Safety Knowledge'],
+                ['library', 'ตรวจคลังความรู้', 'ค้นหา แก้ไข Reindex หรือปิดรายการ'],
+                ['operations', 'ตรวจสุขภาพระบบ', 'ดูคุณภาพ คำตอบช้า และ Operational Log'],
+                ['appearance', 'ตั้งค่ารูปลักษณ์', 'เปลี่ยนหรือคืนค่ารูปจอห์นนี่'],
+            ].map(([key, title, detail]) => `<button type="button" data-johnny-admin-jump="${key}" class="min-h-24 rounded-xl border border-slate-200 bg-white p-4 text-left hover:border-emerald-300 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"><span class="block text-sm font-black text-slate-800">${title} →</span><span class="mt-1 block text-[11px] leading-relaxed text-slate-500">${detail}</span></button>`).join('')}
+        </div>`;
+}
+
 function renderKbAdmin() {
     const wrap = document.getElementById('johnny-kb-admin');
     if (!wrap) return;
@@ -960,8 +1050,33 @@ function renderKbAdmin() {
                     <span class="text-xs text-slate-500">PDF, Word, Excel, PowerPoint, Text</span>
                 </div>
             </div>
+            <nav class="border-b border-slate-200 bg-slate-50/95 p-3" data-johnny-admin-workspace="${JOHNNY_ADMIN_WORKSPACE_MARKER}" aria-label="พื้นที่ทำงานผู้ดูแล Johnny">
+                <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Johnny Admin Workspace</p>
+                        <p class="text-xs font-bold text-slate-500">เลือกทำงานทีละส่วน เพื่อลดการเลื่อนหน้าจอและรักษาบริบทของงาน</p>
+                    </div>
+                    <p id="johnny-admin-workspace-current" class="text-[11px] font-black text-slate-700" aria-live="polite"></p>
+                </div>
+                <div id="johnny-admin-workspace-tabs" role="tablist" aria-label="หมวดงานผู้ดูแล Johnny" class="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+                    ${johnnyAdminWorkspaceTabs()}
+                </div>
+            </nav>
             <div id="johnny-kb-operation-status" class="hidden"></div>
-            <form id="johnny-avatar-form" class="p-4 border-b border-emerald-50 grid grid-cols-1 lg:grid-cols-[1fr_280px_auto_auto] gap-3 items-center">
+            <section id="johnny-admin-workspace-panel-overview" data-johnny-admin-section-panel="overview" role="tabpanel" aria-labelledby="johnny-admin-workspace-tab-overview" class="p-4">
+                <div class="mb-4">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">ภาพรวมการดูแล</p>
+                    <h3 class="font-black text-slate-800">สถานะคลังความรู้และงานที่ใช้บ่อย</h3>
+                </div>
+                ${johnnyAdminOverviewHtml()}
+            </section>
+            <section id="johnny-admin-workspace-panel-appearance" data-johnny-admin-section-panel="appearance" role="tabpanel" aria-labelledby="johnny-admin-workspace-tab-appearance" class="p-4" hidden>
+                <div class="mb-4">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Appearance</p>
+                    <h3 class="font-black text-slate-800">รูปประจำตัวของ Johnny</h3>
+                    <p class="text-xs text-slate-500">เปลี่ยนภาพที่ใช้ในหน้าแชท โดยไม่กระทบข้อมูลหรือความสามารถของผู้ช่วย</p>
+                </div>
+            <form id="johnny-avatar-form" class="rounded-xl border border-slate-200 bg-slate-50 p-4 grid grid-cols-1 lg:grid-cols-[1fr_280px_auto_auto] gap-3 items-center">
                 <div class="flex items-center gap-3">
                     ${johnnyAvatar('w-14 h-14', 'text-xl')}
                     <div>
@@ -977,6 +1092,14 @@ function renderKbAdmin() {
                     รีเซ็ต
                 </button>
             </form>
+            </section>
+            <section id="johnny-admin-workspace-panel-create" data-johnny-admin-section-panel="create" role="tabpanel" aria-labelledby="johnny-admin-workspace-tab-create" class="p-4" hidden>
+                <div class="mb-4">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Knowledge Intake</p>
+                    <h3 class="font-black text-slate-800">เพิ่มความรู้ให้ Johnny</h3>
+                    <p class="text-xs text-slate-500">เลือกอัปโหลดเอกสาร หรือเพิ่มและแก้ไข Safety Knowledge แบบข้อความ</p>
+                </div>
+                <div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
             <form id="johnny-kb-form" class="p-4 grid grid-cols-1 lg:grid-cols-[1fr_180px_260px_auto] gap-3 items-end">
                 <label class="block">
                     <span class="text-xs font-bold text-slate-500">ชื่อเอกสาร</span>
@@ -1018,9 +1141,18 @@ function renderKbAdmin() {
                     </button>
                 </div>
             </form>
-            <div id="johnny-kb-list" class="px-4 pb-4" data-johnny-phase3="${JOHNNY_PHASE3_MARKER}"></div>
+                </div>
+            </section>
+            <section id="johnny-admin-workspace-panel-library" data-johnny-admin-section-panel="library" role="tabpanel" aria-labelledby="johnny-admin-workspace-tab-library" class="p-4" hidden>
+                <div class="mb-4">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700">Knowledge Library</p>
+                    <h3 class="font-black text-slate-800">ค้นหา ตรวจสอบ และจัดการคลังความรู้</h3>
+                    <p class="text-xs text-slate-500">ตัวกรอง คุณภาพเอกสาร และคำสั่งเดิมทั้งหมดรวมอยู่ในส่วนนี้</p>
+                </div>
+                <div id="johnny-kb-list" data-johnny-phase3="${JOHNNY_PHASE3_MARKER}"></div>
+            </section>
         </div>
-        <section class="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section id="johnny-admin-workspace-panel-operations" data-johnny-admin-section-panel="operations" role="tabpanel" aria-labelledby="johnny-admin-workspace-tab-operations" class="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" hidden>
             <div class="flex flex-col gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
                 <div>
                     <p class="text-[11px] font-black uppercase tracking-widest text-slate-500">Johnny Operational Log</p>
@@ -1084,6 +1216,28 @@ function renderKbAdmin() {
     if (levelSelect) levelSelect.value = _operationalLogFilters.level;
     if (operationSelect) operationSelect.value = _operationalLogFilters.operation;
     if (daysSelect) daysSelect.value = String(_observabilityDays);
+    const adminTabs = document.getElementById('johnny-admin-workspace-tabs');
+    adminTabs?.addEventListener('click', event => {
+        const tab = event.target.closest('[data-johnny-admin-section-tab]');
+        if (tab) activateJohnnyAdminSection(tab.dataset.johnnyAdminSectionTab);
+    });
+    adminTabs?.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+        const tabs = Array.from(adminTabs.querySelectorAll('[data-johnny-admin-section-tab]'));
+        const currentIndex = tabs.indexOf(event.target.closest('[data-johnny-admin-section-tab]'));
+        if (currentIndex < 0 || !tabs.length) return;
+        event.preventDefault();
+        let nextIndex = currentIndex;
+        if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = tabs.length - 1;
+        else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % tabs.length;
+        else nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        activateJohnnyAdminSection(tabs[nextIndex].dataset.johnnyAdminSectionTab, { focusTab: true });
+    });
+    wrap.querySelectorAll('[data-johnny-admin-jump]').forEach(button => {
+        button.addEventListener('click', () => activateJohnnyAdminSection(button.dataset.johnnyAdminJump, { focusTab: true }));
+    });
+    syncJohnnyAdminWorkspace();
     renderObservability();
     renderOperationalLogs();
 }
@@ -2448,6 +2602,7 @@ function cancelManualKnowledgeEdit() {
 function editManualKnowledge(id) {
     const doc = _kbDocs.find(row => Number(row.id) === Number(id));
     if (!doc || String(doc.SourceType || 'document') !== 'manual') return;
+    activateJohnnyAdminSection('create');
     _kbEditId = Number(doc.id);
     const topic = document.getElementById('johnny-knowledge-topic');
     const category = document.getElementById('johnny-knowledge-category');

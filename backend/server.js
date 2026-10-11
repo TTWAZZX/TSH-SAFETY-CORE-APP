@@ -85,6 +85,7 @@ const hiyariRoutes        = require('./routes/hiyari');
 const kyRoutes            = require('./routes/ky');
 const fourmRoutes         = require('./routes/fourm');
 const settingsRoutes          = require('./routes/settings');
+const brandingRoutes          = require('./routes/branding');
 const activityTargetsRoutes   = require('./routes/activity-targets');
 const dashboardRoutes         = require('./routes/dashboard');
 const moduleFormsRoutes       = require('./routes/module-forms');
@@ -205,6 +206,15 @@ app.get('/api/public/branding', async (req, res) => {
                 branding = {};
             }
         }
+        const focusX = Number(branding.loginBackgroundFocusX ?? 50);
+        const focusY = Number(branding.loginBackgroundFocusY ?? 50);
+        const safePublicUrl = value => {
+            const url = String(value || '').trim().slice(0, 1024);
+            return url === '' || url.startsWith('/') || /^https:\/\//i.test(url) ? url : '';
+        };
+        const announcementTone = ['info', 'warning', 'critical'].includes(String(branding.loginAnnouncementTone))
+            ? String(branding.loginAnnouncementTone)
+            : 'info';
         res.json({
             success: true,
             data: {
@@ -213,6 +223,24 @@ app.get('/api/public/branding', async (req, res) => {
                 loginHeroTitle: String(branding.loginHeroTitle || '').slice(0, 140),
                 loginHeroSubtitle: String(branding.loginHeroSubtitle || '').slice(0, 180),
                 logoUrl: String(branding.logoUrl || '').slice(0, 1024),
+                loginBackgroundUrl: String(branding.loginBackgroundUrl || '').slice(0, 1024),
+                loginBackgroundFit: String(branding.loginBackgroundFit) === 'contain' ? 'contain' : 'cover',
+                loginBackgroundFocusX: Number.isFinite(focusX) ? Math.max(0, Math.min(100, focusX)) : 50,
+                loginBackgroundFocusY: Number.isFinite(focusY) ? Math.max(0, Math.min(100, focusY)) : 50,
+                loginAnnouncementEnabled: branding.loginAnnouncementEnabled === true || branding.loginAnnouncementEnabled === 1 || branding.loginAnnouncementEnabled === '1',
+                loginAnnouncementTone: announcementTone,
+                loginAnnouncementTitle: String(branding.loginAnnouncementTitle || '').slice(0, 100),
+                loginAnnouncementMessage: String(branding.loginAnnouncementMessage || '').slice(0, 300),
+                loginAnnouncementStartAt: String(branding.loginAnnouncementStartAt || '').slice(0, 40),
+                loginAnnouncementEndAt: String(branding.loginAnnouncementEndAt || '').slice(0, 40),
+                loginAnnouncementLinkLabel: String(branding.loginAnnouncementLinkLabel || '').slice(0, 60),
+                loginAnnouncementUrl: safePublicUrl(branding.loginAnnouncementUrl),
+                supportTitle: String(branding.supportTitle || '').slice(0, 80),
+                supportEmail: String(branding.supportEmail || '').slice(0, 160),
+                supportPhone: String(branding.supportPhone || '').slice(0, 40),
+                supportHours: String(branding.supportHours || '').slice(0, 120),
+                supportLinkLabel: String(branding.supportLinkLabel || '').slice(0, 60),
+                supportUrl: safePublicUrl(branding.supportUrl),
             },
         });
     } catch (error) {
@@ -237,6 +265,17 @@ const brandingLogoUpload = multer({
         cb(new Error(`Unsupported logo type: ${file.mimetype}`), false);
     },
     limits: { fileSize: 2 * 1024 * 1024 }, // 2 MB
+});
+const brandingBackgroundUpload = multer({
+    storage: uploadStorage,
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        const allowedExt = ['.jpg', '.jpeg', '.png', '.webp'];
+        if (allowed.includes(file.mimetype) && allowedExt.includes(ext)) return cb(null, true);
+        cb(new Error(`Unsupported login background type: ${file.mimetype}`), false);
+    },
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
 });
 
 // =================================================================
@@ -1911,6 +1950,36 @@ app.post('/api/upload/branding-logo', authenticateToken, isAdmin, brandingLogoUp
     });
 });
 
+app.post('/api/upload/branding-background', authenticateToken, isAdmin, brandingBackgroundUpload.single('background'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No login background uploaded.' });
+    }
+    try {
+        await logAudit(req, {
+            module: 'system',
+            action: 'UPLOAD_BRANDING_BACKGROUND',
+            targetType: 'App_Settings',
+            targetId: 'app_branding',
+            detail: 'Uploaded desktop login background',
+            metadata: {
+                originalName: req.file.originalName,
+                storedName: req.file.storedName || req.file.filename,
+                mimetype: req.file.mimetype,
+                size: req.file.size,
+            },
+        });
+    } catch (err) {
+        console.warn('[branding] background audit log failed:', err.message);
+    }
+    res.json({
+        success: true,
+        message: 'Login background uploaded successfully',
+        url: req.file.path,
+        originalName: req.file.originalName,
+        storedName: req.file.storedName || req.file.filename,
+    });
+});
+
 app.delete('/api/upload/document', authenticateToken, isAdmin, async (req, res) => {
     const url = String(req.body?.url || req.body?.FileURL || '').trim();
     if (!url || !url.includes('/uploads/')) {
@@ -1975,6 +2044,7 @@ app.use('/api/hiyari',        authenticateToken, hiyariRoutes);
 app.use('/api/ky',            authenticateToken, kyRoutes);
 app.use('/api/fourm',         authenticateToken, fourmRoutes);
 app.use('/api/settings',          authenticateToken, settingsRoutes);
+app.use('/api/branding',          authenticateToken, brandingRoutes);
 app.use('/api/activity-targets',  authenticateToken, activityTargetsRoutes);
 app.use('/api/dashboard',         authenticateToken, dashboardRoutes);
 app.use('/api/module-forms',      authenticateToken, moduleFormsRoutes);

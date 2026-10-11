@@ -897,11 +897,11 @@ function _renderTable() {
             แสดง ${(_page-1)*PAGE_SIZE+1}–${Math.min(_page*PAGE_SIZE, filtered.length)} จาก ${filtered.length} รายการ
         </span>
         <div class="flex items-center gap-1">
-            <button onclick="window._msdGoPage(${_page-1})" ${_page<=1?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <button onclick="window._msdGoPage(${_page-1})" aria-label="หน้าก่อนหน้า" ${_page<=1?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
             </button>
             <span class="px-3 py-1.5 text-xs font-semibold text-slate-500">Page ${_page} / ${totalPages}</span>
-            <button onclick="window._msdGoPage(${_page+1})" ${_page>=totalPages?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <button onclick="window._msdGoPage(${_page+1})" aria-label="หน้าถัดไป" ${_page>=totalPages?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             </button>
         </div>
@@ -933,11 +933,11 @@ function _renderCardView(filtered, paginated, totalPages) {
             แสดง ${(_page-1)*PAGE_SIZE+1}-${Math.min(_page*PAGE_SIZE, filtered.length)} จาก ${filtered.length} รายการ
         </span>
         <div class="flex items-center gap-1">
-            <button onclick="window._msdGoPage(${_page-1})" ${_page<=1?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <button onclick="window._msdGoPage(${_page-1})" aria-label="หน้าก่อนหน้า" ${_page<=1?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
             </button>
             <span class="px-3 py-1.5 text-xs font-semibold text-slate-500">Page ${_page} / ${totalPages}</span>
-            <button onclick="window._msdGoPage(${_page+1})" ${_page>=totalPages?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <button onclick="window._msdGoPage(${_page+1})" aria-label="หน้าถัดไป" ${_page>=totalPages?'disabled':''} class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             </button>
         </div>

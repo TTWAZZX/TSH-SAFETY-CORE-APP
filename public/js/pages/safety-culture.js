@@ -216,7 +216,7 @@ function buildShell() {
             <div class="absolute -right-10 -top-10 w-52 h-52 rounded-full opacity-10 pointer-events-none" style="background:radial-gradient(circle,#fff,transparent 70%)"></div>
 
             <div class="relative z-10 p-6">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
+                <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-5">
                     <div>
                         <div class="flex items-center gap-2 mb-2">
                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/20 text-white border border-white/30">
@@ -229,8 +229,8 @@ function buildShell() {
                         <h1 class="text-xl md:text-2xl font-bold text-white leading-snug">Safety Communication &amp; Culture Program</h1>
                         <p class="text-sm mt-1" style="color:rgba(167,243,208,0.85)">ศูนย์รวมสื่อรณรงค์ กิจกรรม และการติดตามวัฒนธรรมความปลอดภัย · Thai Summit Harness Co., Ltd.</p>
                     </div>
-                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-shrink-0 w-full md:w-auto">
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full sm:w-auto">
+                    <div class="flex flex-col xl:flex-row items-start xl:items-center gap-3 flex-shrink-0 w-full xl:w-auto">
+                        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 w-full xl:w-auto">
                             ${statCards}
                         </div>
                         <div class="flex items-center gap-2 flex-shrink-0">
@@ -858,7 +858,7 @@ function buildPrinciplesHtml() {
 
     const matP = overallAvgP != null ? getMaturity(overallAvgP) : null;
     const kpiStrip = `
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 xl:grid-cols-4 gap-4">
         <div class="ds-metric-card p-4 flex items-center gap-3" data-sc-card-image="safety-culture-principles-average">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,#059669,#0d9488)">
                 <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
@@ -988,7 +988,7 @@ function buildPrinciplesHtml() {
         ${kpiStrip}
         ${featured ? `<div class="ds-section overflow-hidden" data-sc-card-image="safety-culture-featured-campaign">
             <div class="grid grid-cols-1 lg:grid-cols-5">
-                <button type="button" onclick="window._scPreviewCampaign('${escHtml(featured.PrincipleID)}')" class="lg:col-span-2 min-h-[220px] bg-emerald-50 flex items-center justify-center overflow-hidden">
+                <button type="button" onclick="window._scPreviewCampaign('${escHtml(featured.PrincipleID)}')" aria-label="ดูรายละเอียด ${escHtml(featured.Title)}" class="lg:col-span-2 min-h-[220px] bg-emerald-50 flex items-center justify-center overflow-hidden">
                     ${featured.ImageUrl
                         ? `<img src="${escHtml(safeResourceUrl(featured.ImageUrl))}" alt="${escHtml(featured.Title)}" class="w-full h-full min-h-[220px] object-cover hover:scale-[1.02] transition-transform">`
                         : `<div class="w-full min-h-[220px] flex items-center justify-center" style="background:linear-gradient(135deg,#ecfdf5,#d1fae5)">${TOPIC_SVG[(featured.SortOrder || 1) - 1] || TOPIC_SVG[5]}</div>`}

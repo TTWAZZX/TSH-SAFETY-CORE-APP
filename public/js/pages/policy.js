@@ -66,7 +66,7 @@ export async function loadPolicyPage() {
             </div>
 
             <!-- Stats Bar (skeleton) -->
-            <div id="stats-bar" class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div id="stats-bar" class="grid grid-cols-2 xl:grid-cols-4 gap-4">
                 ${[1,2,3,4].map(() => `
                 <div class="bg-white rounded-xl p-4 border border-slate-100 shadow-sm animate-pulse">
                     <div class="h-6 bg-slate-100 rounded w-16 mb-2"></div>

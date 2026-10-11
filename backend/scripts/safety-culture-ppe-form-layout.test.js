@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '..', '..');
 const page = fs.readFileSync(path.join(root, 'public', 'js', 'pages', 'safety-culture.js'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'public', 'js', 'main.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const releaseMarker = '20261011-design-system-a11y-r1';
 
 const checks = [
     ['wider PPE modal', page.includes("</form>`, 'max-w-5xl');")],
@@ -20,7 +21,7 @@ const checks = [
     ['existing PPE API retained', page.includes("API.post('/safety-culture/ppe-inspections', payload)")],
     ['existing evidence precedence retained', page.includes("getElementById('sc-ppef-camera')?.files?.[0] || document.getElementById('sc-ppef-evidence')?.files?.[0]")],
     ['automatic Violation result handling retained', page.includes('result?.violationResult?.error')],
-    ['cache key synchronized', main.includes('20260824-safety-culture-ppe-form-r1') && index.includes('20260824-safety-culture-ppe-form-r1')],
+    ['cache key synchronized', main.includes(`safety-culture.js?v=${releaseMarker}`) && index.includes(`public/js/main.js?v=${releaseMarker}`)],
 ];
 
 let failed = 0;

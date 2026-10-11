@@ -1862,11 +1862,21 @@ body.johnny-global-open {
     --app-canvas-deep: #d8e6e0;
     --app-canvas-soft: #edf3f0;
     --app-surface: #ffffff;
-    --app-surface-muted: #f2f6f4;
-    --app-border: #c2d1cb;
-    --app-border-strong: #a9bdb4;
-    --app-shadow-sm: 0 2px 7px rgb(15 68 51 / .08), 0 1px 2px rgb(15 23 42 / .07);
-    --app-shadow-card: 0 9px 26px rgb(15 68 51 / .09), 0 1px 3px rgb(15 23 42 / .08);
+    --app-surface-muted: #f3f7f5;
+    --app-surface-inset: #edf4f1;
+    --app-border: #cad7d1;
+    --app-border-strong: #abc0b6;
+    --app-border-accent: #4f8f77;
+    --app-shadow-sm: 0 3px 12px rgb(24 78 61 / .065), 0 1px 2px rgb(15 23 42 / .045);
+    --app-shadow-card: 0 12px 32px rgb(24 78 61 / .075), 0 2px 6px rgb(15 23 42 / .045);
+    --app-radius-section: 1rem;
+    --app-radius-inner: .875rem;
+    --app-radius-control: .75rem;
+    --app-text: #1e293b;
+    --app-text-muted: #64748b;
+    --app-focus: #059669;
+    --app-focus-ring: rgb(5 150 105 / .20);
+    --app-motion-fast: 160ms ease;
 }
 
 .app-workspace {
@@ -1888,6 +1898,7 @@ body.johnny-global-open {
 #main-content .border-slate-100 { border-color: var(--app-border) !important; }
 #main-content .border-slate-200 { border-color: var(--app-border-strong) !important; }
 #main-content .bg-slate-50 { background-color: var(--app-surface-muted) !important; }
+#main-content .bg-slate-100 { background-color: var(--app-surface-inset) !important; }
 #main-content .shadow-sm { box-shadow: var(--app-shadow-sm) !important; }
 #main-content :is(.card, .ds-surface, .ds-section, .ds-filter-bar, .ds-metric-card, .ds-table-wrap) {
     border-color: var(--app-border);
@@ -2038,6 +2049,30 @@ body.johnny-global-open {
 
 :is(.sv-campaign-table td, .sv-action-bar, .sv-context-actions, .sv-campaign-card__actions, .sv-review-detail > section) {
     border-color: var(--app-border);
+}
+
+/* Chart.js writes an intrinsic canvas width. Keep the 4M dashboard charts bounded
+   by their responsive grid cells after desktop/sidebar width changes. */
+#fourm-page .fourm-chart-grid,
+#fourm-page .fourm-chart-card,
+#fourm-page .fourm-chart-frame {
+    min-width: 0;
+    max-width: 100%;
+}
+#fourm-page .fourm-chart-card,
+#fourm-page .fourm-chart-frame {
+    overflow: hidden;
+}
+#fourm-page .fourm-chart-frame {
+    position: relative;
+    width: 100%;
+    height: 220px;
+}
+#fourm-page .fourm-chart-frame > canvas {
+    display: block;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 220px !important;
 }
 
 /* Unified page shell — every module fills the same workspace after the sidebar. */
@@ -2582,6 +2617,15 @@ body[data-active-page="admin"] #admin-page:not(.hidden) {
     height: 100vh;
     height: 100dvh;
 }
+#login-brand-panel {
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    isolation: isolate;
+}
+#login-brand-panel.has-custom-background {
+    box-shadow: inset -1px 0 0 rgba(255,255,255,.08);
+}
 #login-panel,
 #login-form-area {
     min-height: 0;
@@ -2590,6 +2634,80 @@ body[data-active-page="admin"] #admin-page:not(.hidden) {
 .login-guide-panel {
     position: relative;
     color: #ffffff;
+}
+.login-guide-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    width: 100%;
+    max-width: none;
+    padding: .7rem .8rem;
+    border: 1px solid rgba(167,243,208,.24);
+    border-radius: .8rem;
+    background: linear-gradient(145deg, rgba(2,44,34,.46), rgba(255,255,255,.09));
+    box-shadow: 0 10px 28px rgba(2,44,34,.18);
+    color: #ffffff;
+    backdrop-filter: blur(10px);
+}
+.login-guide-entry-copy {
+    min-width: 0;
+}
+.login-guide-entry-copy > p:not(.login-guide-eyebrow) {
+    margin: .15rem 0 0;
+    color: rgba(209,250,229,.82);
+    font-size: .7rem;
+    line-height: 1.35;
+}
+.login-guide-entry .login-guide-all-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .6rem;
+    min-height: 44px;
+    flex: none;
+    margin: 0;
+    padding: .55rem .75rem;
+    border-radius: .65rem;
+    background: rgba(255,255,255,.94);
+    color: #065f46;
+    font-size: .75rem;
+    box-shadow: 0 7px 18px rgba(2,44,34,.16);
+}
+.login-guide-entry .login-guide-all-btn:hover,
+.login-guide-entry .login-guide-all-btn:focus-visible {
+    background: #ffffff;
+    color: #047857;
+    transform: translateY(-1px);
+}
+.login-guide-entry .login-guide-all-btn svg {
+    width: .9rem;
+    height: .9rem;
+}
+#login-guide-desktop-host {
+    position: relative;
+    z-index: 1;
+    margin-bottom: .8rem;
+}
+.login-brand-footer {
+    padding-top: 0 !important;
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+    .login-guide-entry {
+        gap: .45rem;
+        padding: .55rem .6rem;
+    }
+    .login-guide-entry-copy > p:not(.login-guide-eyebrow) {
+        display: none;
+    }
+    .login-guide-eyebrow {
+        font-size: .65rem;
+        letter-spacing: .03em;
+    }
+    .login-guide-entry .login-guide-all-btn {
+        padding-inline: .6rem;
+        font-size: .7rem;
+    }
 }
 .login-guide-head {
     display: flex;
@@ -3029,7 +3147,7 @@ body[data-active-page="admin"] #admin-page:not(.hidden) {
     justify-content: center;
     gap: 0.45rem;
     width: 100%;
-    min-height: 42px;
+    min-height: 44px;
     border: 1px solid #d1fae5;
     border-radius: 10px;
     background: #ecfdf5;
@@ -4806,16 +4924,165 @@ body[data-active-page="admin"] #admin-page:not(.hidden) {
 #main-content .border-slate-100 { border-color: var(--app-border) !important; }
 #main-content .border-slate-200 { border-color: var(--app-border-strong) !important; }
 #main-content .bg-slate-50 { background-color: var(--app-surface-muted) !important; }
+#main-content .bg-slate-100 { background-color: var(--app-surface-inset) !important; }
 #main-content .shadow-sm { box-shadow: var(--app-shadow-sm) !important; }
 #main-content :is(.card, .ds-surface, .ds-section, .ds-filter-bar, .ds-metric-card, .ds-table-wrap) {
-    border-color: var(--app-border);
+    border-color: var(--app-border) !important;
     box-shadow: var(--app-shadow-sm);
 }
 #main-content :is(.ds-empty-state, .ds-table thead tr) {
-    background: var(--app-surface-muted);
-    border-color: var(--app-border);
+    background: var(--app-surface-inset);
+    border-color: var(--app-border-strong);
 }
-#main-content .ds-table td { border-bottom-color: var(--app-border); }
+#main-content :is(.ds-table-wrap, .sv-campaign-table-wrap, .svan-table-wrap) {
+    border-color: var(--app-border-strong) !important;
+}
+#main-content :is(.ds-table, .sv-campaign-table, .svan-table-wrap table) td {
+    border-color: var(--app-border) !important;
+}
+#main-content :is(.ds-table, .sv-campaign-table, .svan-table-wrap table) thead {
+    background: var(--app-surface-inset);
+}
+#main-content :is(.ds-metric-card, .sv-detail-summary > div, .svw-stat, .svo-stat, .svan-list dl > div) {
+    border-color: var(--app-border) !important;
+    box-shadow: none !important;
+}
+#main-content :is(.card, .ds-surface, .ds-section, .ds-filter-bar, .ds-table-wrap) {
+    border-radius: var(--app-radius-section) !important;
+}
+#main-content :is(.ds-metric-card, .sv-detail-summary > div, .svw-stat, .svo-stat, .svan-list dl > div) {
+    border-radius: var(--app-radius-inner) !important;
+}
+#main-content .ds-table th {
+    text-transform: none !important;
+    letter-spacing: .025em !important;
+    font-weight: 700;
+}
+#main-content :is(.ds-table, .sv-campaign-table, .svan-table-wrap table) tbody tr:nth-child(even) {
+    background: rgb(243 247 245 / .48);
+}
+#main-content :is(.ds-table, .sv-campaign-table, .svan-table-wrap table) tbody tr {
+    transition: background-color .16s ease;
+}
+#main-content :is(.ds-table, .sv-campaign-table, .svan-table-wrap table) tbody tr:hover {
+    background: #edf7f2;
+}
+
+/* Application design-system finalization: shared hierarchy without flattening semantic states. */
+#main-content :is(.form-input, .form-select, .form-textarea, .form-multiselect) {
+    border-color: var(--app-border-strong);
+    border-radius: var(--app-radius-control);
+    color: var(--app-text);
+    transition: border-color var(--app-motion-fast), box-shadow var(--app-motion-fast), background-color var(--app-motion-fast);
+}
+#main-content :is(.form-input, .form-select, .form-textarea, .form-multiselect):hover:not(:disabled) {
+    border-color: var(--app-border-accent);
+}
+#main-content :is(.form-input, .form-select, .form-textarea, .form-multiselect):focus-visible {
+    outline: 0;
+    border-color: var(--app-focus);
+    box-shadow: 0 0 0 3px var(--app-focus-ring);
+}
+#main-content :is(.form-input, .form-select, .form-textarea, .form-multiselect):disabled {
+    border-color: var(--app-border);
+    background: var(--app-surface-muted);
+    color: #94a3b8;
+    opacity: 1;
+}
+#main-content :is(.form-input, .form-textarea)::placeholder { color: #94a3b8; }
+
+#main-content .btn {
+    min-height: 40px;
+    border-radius: var(--app-radius-control);
+    transition: transform var(--app-motion-fast), filter var(--app-motion-fast), box-shadow var(--app-motion-fast);
+}
+#main-content :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 3px solid var(--app-focus-ring);
+    outline-offset: 2px;
+}
+#main-content :is(.btn, button):disabled,
+#main-content :is(.btn, button)[aria-disabled="true"] {
+    cursor: not-allowed;
+    transform: none !important;
+    filter: none !important;
+}
+
+#main-content .ds-metric-label {
+    letter-spacing: .02em;
+    text-transform: none;
+    font-weight: 700;
+}
+#main-content :is(.ds-empty-state, .sv-empty-state) {
+    border-color: var(--app-border);
+    border-radius: var(--app-radius-section);
+    background: linear-gradient(145deg, var(--app-surface-muted), rgb(255 255 255 / .92));
+    box-shadow: none;
+}
+#main-content :is(.sv-skeleton, .svp-skeleton) {
+    background: linear-gradient(90deg, var(--app-surface-inset) 25%, #f8fbf9 50%, var(--app-surface-inset) 75%);
+    background-size: 200% 100%;
+}
+
+#modal-container {
+    border: 1px solid var(--app-border);
+    box-shadow: 0 24px 64px rgb(15 68 51 / .18), 0 8px 24px rgb(15 23 42 / .10) !important;
+}
+
+/* Login accessibility/performance validation baseline. */
+#login-overlay .text-slate-400 { color: #64748b !important; }
+#login-overlay :is(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid rgb(5 150 105 / .34);
+    outline-offset: 2px;
+}
+#login-overlay :is(button, a) { touch-action: manipulation; }
+@media (prefers-contrast: more) {
+    #login-overlay :is(input, select, textarea) { border-color: #475569 !important; }
+    #login-overlay :is(a, button, input, select, textarea, [tabindex]):focus-visible {
+        outline-color: #047857;
+    }
+}
+@media (min-width: 768px) {
+    #modal-container { border-radius: 1.125rem !important; }
+}
+@media (max-width: 767px) {
+    #main-content :is(button, [role="button"], summary, a.btn, input:not([type="hidden"]), select, textarea) {
+        min-width: 44px !important;
+        min-height: 44px !important;
+    }
+    #main-content label:has(input:is([type="checkbox"], [type="radio"])) {
+        min-width: 44px !important;
+        min-height: 44px !important;
+    }
+}
+#main-content .carousel-dot {
+    position: relative;
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    background: transparent !important;
+}
+#main-content .carousel-dot::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--carousel-dot-width, 6px);
+    height: 4px;
+    border-radius: 999px;
+    background: var(--carousel-dot-color, rgb(255 255 255 / .3));
+    content: "";
+    transform: translate(-50%, -50%);
+    transition: width var(--app-motion-standard), background-color var(--app-motion-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+    #login-overlay *,
+    #main-content *,
+    #modal-container {
+        scroll-behavior: auto !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+    }
+}
 
 :is(.sv-ux-shell, .svw-shell, .svp-shell, .svj-shell, .svo-shell, .svr-shell, .svg-shell, .sv-planning) {
     background: transparent;

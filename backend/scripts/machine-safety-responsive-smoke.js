@@ -52,10 +52,10 @@ assert.match(css, /\.msd-clickable-row:hover\s*\{[\s\S]*?background:/);
 assert.match(css, /\.msd-clickable-row:focus-visible\s*\{[\s\S]*?outline:/);
 assert.match(css, /@media \(max-width: 479px\)[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/);
 
-const releaseMarker = '20260724-machine-safety-row-detail';
+const releaseMarker = '20261011-design-system-a11y-r1';
 assert.ok(main.includes(`machine-safety.js?v=${releaseMarker}`), 'main module cache marker is stale');
-assert.ok(index.includes(`public/style.css?v=${releaseMarker}`), 'stylesheet cache marker is stale');
 assert.ok(index.includes(`public/js/main.js?v=${releaseMarker}`), 'main script cache marker is stale');
+assert.ok(index.includes('public/style.css?v=20261011-safety-vote-ux8-r1-typography-r1-johnny-drag-r1-surface-r7-fullwidth-r1-compact-r1-a11y-r1'), 'stylesheet cache marker is stale');
 
 for (const [name, source] of Object.entries({ page, css, main, index })) {
     assert.ok(!source.includes('\uFFFD'), `${name} contains a UTF-8 replacement character`);

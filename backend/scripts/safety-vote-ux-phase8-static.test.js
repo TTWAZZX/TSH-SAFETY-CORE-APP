@@ -56,7 +56,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
     check(css.includes('min-height: 52px') && css.includes('min-height:56px'), '44px+ journey targets are not enforced');
     check(css.includes(':focus-visible'), 'visible focus treatment is missing');
     check(css.includes('prefers-reduced-motion:reduce'), 'reduced-motion support is missing');
-    check(/renderSafetyVoteFoundation/.test(read('public/js/pages/admin.js')) && /safety-vote-phase9abc-enabled-r1/.test(html), 'Phase 8/current cache chain is incomplete');
+    check(/renderSafetyVoteFoundation/.test(read('public/js/pages/admin.js')) && /public\/js\/main\.js\?v=20261011-login-communications-r8/.test(html), 'Phase 8/current cache chain is incomplete');
 
     const adminPopular = model.journeyForCampaign({ role: 'admin', campaignType: 'popular_vote' });
     check(adminPopular[0].key === 'center' && adminPopular.at(-1).key === 'governance', 'Admin journey endpoints are incorrect');

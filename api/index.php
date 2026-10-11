@@ -7,6 +7,7 @@ require __DIR__ . '/lib/company_email_change.php';
 require __DIR__ . '/lib/password_reset.php';
 require __DIR__ . '/handlers/foundation.php';
 require __DIR__ . '/handlers/platform.php';
+require __DIR__ . '/handlers/branding.php';
 require __DIR__ . '/handlers/storage.php';
 require __DIR__ . '/handlers/targets.php';
 require __DIR__ . '/handlers/people.php';
@@ -707,6 +708,7 @@ function dashboard_compliance_matrix(int $year, array $config): array
 
 try {
     handle_foundation_routes($method, $path);
+    handle_branding_routes($method, $path);
     handle_platform_routes($method, $path);
     handle_storage_routes($method, $path);
     handle_target_routes($method, $path);
@@ -756,12 +758,37 @@ try {
         $stmt->execute(['app_branding']);
         $branding = json_decode((string) ($stmt->fetchColumn() ?: '{}'), true);
         $branding = is_array($branding) ? $branding : [];
+        $safeBrandingUrl = static function ($value): string {
+            $url = mb_substr(trim((string) $value), 0, 1024);
+            return $url === '' || str_starts_with($url, '/') || preg_match('/^https:\/\//i', $url) ? $url : '';
+        };
+        $announcementTone = in_array((string) ($branding['loginAnnouncementTone'] ?? ''), ['info', 'warning', 'critical'], true)
+            ? (string) $branding['loginAnnouncementTone']
+            : 'info';
         json_response(['success' => true, 'data' => [
             'appName' => mb_substr((string) ($branding['appName'] ?? ''), 0, 80),
             'tagline' => mb_substr((string) ($branding['tagline'] ?? ''), 0, 80),
             'loginHeroTitle' => mb_substr((string) ($branding['loginHeroTitle'] ?? ''), 0, 140),
             'loginHeroSubtitle' => mb_substr((string) ($branding['loginHeroSubtitle'] ?? ''), 0, 180),
             'logoUrl' => mb_substr((string) ($branding['logoUrl'] ?? ''), 0, 1024),
+            'loginBackgroundUrl' => mb_substr((string) ($branding['loginBackgroundUrl'] ?? ''), 0, 1024),
+            'loginBackgroundFit' => ($branding['loginBackgroundFit'] ?? '') === 'contain' ? 'contain' : 'cover',
+            'loginBackgroundFocusX' => max(0, min(100, is_numeric($branding['loginBackgroundFocusX'] ?? null) ? (float) $branding['loginBackgroundFocusX'] : 50)),
+            'loginBackgroundFocusY' => max(0, min(100, is_numeric($branding['loginBackgroundFocusY'] ?? null) ? (float) $branding['loginBackgroundFocusY'] : 50)),
+            'loginAnnouncementEnabled' => filter_var($branding['loginAnnouncementEnabled'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            'loginAnnouncementTone' => $announcementTone,
+            'loginAnnouncementTitle' => mb_substr((string) ($branding['loginAnnouncementTitle'] ?? ''), 0, 100),
+            'loginAnnouncementMessage' => mb_substr((string) ($branding['loginAnnouncementMessage'] ?? ''), 0, 300),
+            'loginAnnouncementStartAt' => mb_substr((string) ($branding['loginAnnouncementStartAt'] ?? ''), 0, 40),
+            'loginAnnouncementEndAt' => mb_substr((string) ($branding['loginAnnouncementEndAt'] ?? ''), 0, 40),
+            'loginAnnouncementLinkLabel' => mb_substr((string) ($branding['loginAnnouncementLinkLabel'] ?? ''), 0, 60),
+            'loginAnnouncementUrl' => $safeBrandingUrl($branding['loginAnnouncementUrl'] ?? ''),
+            'supportTitle' => mb_substr((string) ($branding['supportTitle'] ?? ''), 0, 80),
+            'supportEmail' => mb_substr((string) ($branding['supportEmail'] ?? ''), 0, 160),
+            'supportPhone' => mb_substr((string) ($branding['supportPhone'] ?? ''), 0, 40),
+            'supportHours' => mb_substr((string) ($branding['supportHours'] ?? ''), 0, 120),
+            'supportLinkLabel' => mb_substr((string) ($branding['supportLinkLabel'] ?? ''), 0, 60),
+            'supportUrl' => $safeBrandingUrl($branding['supportUrl'] ?? ''),
         ]]);
     }
 

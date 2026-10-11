@@ -7,32 +7,37 @@ import * as UI from './ui.js?v=20260714-phase21-platform-shell';
 import { API, apiFetch } from './api.js?v=20260917-bbs-qr-login-intent-r1';
 import { guardSubmitHandler } from './utils/async-ui.js?v=20260715-phase32d-remaining-async-ux';
 
-// --- Page Loaders ---
-import { loadPolicyPage } from './pages/policy.js?v=20260715-phase32d-remaining-async-ux';
-import { loadCommitteePage } from './pages/committee.js?v=20260715-phase32d-remaining-async-ux';
-import { loadPatrolPage } from './pages/patrol.js?v=20261002-patrol-self-makeup-year-r3';
-import { loadCccfPage } from './pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2';
-import { loadKpiPage } from './pages/kpi.js?v=20260715-phase32d-remaining-async-ux';
-import { loadYokotenPage } from './pages/yokoten.js?v=20260825-yokoten-department-relevance-r1';
-import { loadAdminPage } from './pages/admin.js?v=20261010-safety-vote-phase9abc-enabled-r1';
-import { loadMachineSafetyPage } from './pages/machine-safety.js?v=20260820-card-image-phase2b';
-import { loadForkliftPage } from './pages/forklift.js?v=20260831-forklift-renewal-retry-r1';
-import { loadOjtPage } from './pages/ojt.js?v=20260820-card-image-phase2d';
-import { loadTrainingPage } from './pages/training.js?v=20260820-card-image-phase2d-rollout-r2';
-import { loadAccidentPage } from './pages/accident.js?v=20261002-accident-accessibility-r3';
-import { loadSafetyCulturePage } from './pages/safety-culture.js?v=20260824-safety-culture-ppe-form-r1';
-import { loadBbsSmartCardPage } from './pages/bbs-smart-card.js?v=20260921-bbs-issued-batch-r1';
-import { loadContractorPage } from './pages/contractor.js?v=20260715-phase32d-remaining-async-ux';
-import { loadHiyariPage } from './pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2';
-import { loadKyPage } from './pages/ky.js?v=20260923-ky-annual-contest-r9';
-import { loadFourmPage } from './pages/fourm.js?v=20260923-fourm-curriculum-soft-disable-r1';
-import { loadJohnnyAiPage } from './pages/johnny-ai.js?v=20261007-johnny-launcher-avatar-r1';
-import { loadSafetyVotePage } from './pages/safety-vote-page-ux1.js?v=20261010-safety-vote-ux9c-r1';
+// Route modules are loaded only after authentication and only when requested.
+// Keeping them out of the Login dependency graph avoids parsing every workspace before sign-in.
+const lazyPage = (modulePath, exportName) => async (...args) => {
+    const module = await import(modulePath);
+    return module[exportName](...args);
+};
+const loadPolicyPage = lazyPage('./pages/policy.js?v=20261011-design-system-a11y-r1', 'loadPolicyPage');
+const loadCommitteePage = lazyPage('./pages/committee.js?v=20260715-phase32d-remaining-async-ux', 'loadCommitteePage');
+const loadPatrolPage = lazyPage('./pages/patrol.js?v=20261011-design-system-a11y-r1', 'loadPatrolPage');
+const loadCccfPage = lazyPage('./pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2', 'loadCccfPage');
+const loadKpiPage = lazyPage('./pages/kpi.js?v=20261011-design-system-a11y-r1', 'loadKpiPage');
+const loadYokotenPage = lazyPage('./pages/yokoten.js?v=20260825-yokoten-department-relevance-r1', 'loadYokotenPage');
+const loadAdminPage = lazyPage('./pages/admin.js?v=20261011-login-communications-r9-portrait-preview', 'loadAdminPage');
+const loadMachineSafetyPage = lazyPage('./pages/machine-safety.js?v=20261011-design-system-a11y-r1', 'loadMachineSafetyPage');
+const loadForkliftPage = lazyPage('./pages/forklift.js?v=20261011-design-system-a11y-r1', 'loadForkliftPage');
+const loadOjtPage = lazyPage('./pages/ojt.js?v=20260820-card-image-phase2d', 'loadOjtPage');
+const loadTrainingPage = lazyPage('./pages/training.js?v=20260820-card-image-phase2d-rollout-r2', 'loadTrainingPage');
+const loadAccidentPage = lazyPage('./pages/accident.js?v=20261002-accident-accessibility-r3', 'loadAccidentPage');
+const loadSafetyCulturePage = lazyPage('./pages/safety-culture.js?v=20261011-design-system-a11y-r1', 'loadSafetyCulturePage');
+const loadBbsSmartCardPage = lazyPage('./pages/bbs-smart-card.js?v=20260921-bbs-issued-batch-r1', 'loadBbsSmartCardPage');
+const loadContractorPage = lazyPage('./pages/contractor.js?v=20260715-phase32d-remaining-async-ux', 'loadContractorPage');
+const loadHiyariPage = lazyPage('./pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2', 'loadHiyariPage');
+const loadKyPage = lazyPage('./pages/ky.js?v=20260923-ky-annual-contest-r9', 'loadKyPage');
+const loadFourmPage = lazyPage('./pages/fourm.js?v=20261011-fourm-chart-containment-r1', 'loadFourmPage');
+const loadJohnnyAiPage = lazyPage('./pages/johnny-ai.js?v=20261011-johnny-admin-workspace-r1', 'loadJohnnyAiPage');
+const loadSafetyVotePage = lazyPage('./pages/safety-vote-page-ux1.js?v=20261010-safety-vote-ux9c-r1', 'loadSafetyVotePage');
 import { initJohnnyDrawer, syncJohnnyDrawerRoute, destroyJohnnyDrawer } from './johnny-drawer.js?v=20261010-johnny-draggable-launcher-r1';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260924-company-email-self-service-r1';
-import { loadDashboardPage } from './pages/dashboard.js?v=20260822-cccf-shared-target-r4';
-import { loadSearchPage } from './pages/search.js?v=20261005-safety360-data-integrity-r1';
-import { initLoginModuleGuides } from './login-guides.js?v=20260825-bbs-phase4-r1';
+const loadDashboardPage = lazyPage('./pages/dashboard.js?v=20260822-cccf-shared-target-r4', 'loadDashboardPage');
+const loadSearchPage = lazyPage('./pages/search.js?v=20261005-safety360-data-integrity-r1', 'loadSearchPage');
+import { initLoginModuleGuides } from './login-guides.js?v=20261011-login-branding-background-r2';
 import { MODULE_ORDER, moduleTitleMap } from './module-meta.js?v=20260825-bbs-phase4-r1';
 import { BBS_QR_INTENT_KEY, BBS_QR_PENDING_KEY, shouldDiscardBbsQrIntent, isBbsRolloutBlockedError, normalizeBbsQrRoute } from './utils/bbs-qr-intent.js?v=20260917-bbs-qr-login-intent-r1';
 
@@ -83,22 +88,136 @@ const DEFAULT_BRANDING = {
     tagline: 'Activity System',
     loginHeroTitle: '',
     loginHeroSubtitle: '',
-    logoUrl: ''
+    logoUrl: '',
+    loginBackgroundUrl: '',
+    loginBackgroundFit: 'cover',
+    loginBackgroundFocusX: 50,
+    loginBackgroundFocusY: 50,
+    loginAnnouncementEnabled: false,
+    loginAnnouncementTone: 'info',
+    loginAnnouncementTitle: '',
+    loginAnnouncementMessage: '',
+    loginAnnouncementStartAt: '',
+    loginAnnouncementEndAt: '',
+    loginAnnouncementLinkLabel: '',
+    loginAnnouncementUrl: '',
+    supportTitle: 'ต้องการความช่วยเหลือ?',
+    supportEmail: '',
+    supportPhone: '',
+    supportHours: '',
+    supportLinkLabel: '',
+    supportUrl: ''
 };
 let _currentBranding = { ...DEFAULT_BRANDING };
+const _loginBrandMediaQuery = window.matchMedia('(min-width: 768px)');
 
 function _normalizeBranding(raw = {}) {
+    const normalizeFocus = value => {
+        const numeric = Number(value ?? 50);
+        return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : 50;
+    };
     const appName = String(raw.appName || DEFAULT_BRANDING.appName).trim().slice(0, 80) || DEFAULT_BRANDING.appName;
     const tagline = String(raw.tagline || DEFAULT_BRANDING.tagline).trim().slice(0, 80) || DEFAULT_BRANDING.tagline;
     const loginHeroTitle = String(raw.loginHeroTitle || '').trim().slice(0, 140);
     const loginHeroSubtitle = String(raw.loginHeroSubtitle || '').trim().slice(0, 180);
+    const safeUrl = value => {
+        const url = String(value || '').trim().slice(0, 1024);
+        return url === '' || url.startsWith('/') || /^https:\/\//i.test(url) ? url : '';
+    };
+    const announcementTone = ['info', 'warning', 'critical'].includes(String(raw.loginAnnouncementTone))
+        ? String(raw.loginAnnouncementTone)
+        : 'info';
     return {
         appName,
         tagline,
         loginHeroTitle,
         loginHeroSubtitle,
-        logoUrl: String(raw.logoUrl || '').trim().slice(0, 1024)
+        logoUrl: String(raw.logoUrl || '').trim().slice(0, 1024),
+        loginBackgroundUrl: String(raw.loginBackgroundUrl || '').trim().slice(0, 1024),
+        loginBackgroundFit: String(raw.loginBackgroundFit) === 'contain' ? 'contain' : 'cover',
+        loginBackgroundFocusX: normalizeFocus(raw.loginBackgroundFocusX),
+        loginBackgroundFocusY: normalizeFocus(raw.loginBackgroundFocusY),
+        loginAnnouncementEnabled: raw.loginAnnouncementEnabled === true || raw.loginAnnouncementEnabled === 1 || raw.loginAnnouncementEnabled === '1',
+        loginAnnouncementTone: announcementTone,
+        loginAnnouncementTitle: String(raw.loginAnnouncementTitle || '').trim().slice(0, 100),
+        loginAnnouncementMessage: String(raw.loginAnnouncementMessage || '').trim().slice(0, 300),
+        loginAnnouncementStartAt: String(raw.loginAnnouncementStartAt || '').trim().slice(0, 40),
+        loginAnnouncementEndAt: String(raw.loginAnnouncementEndAt || '').trim().slice(0, 40),
+        loginAnnouncementLinkLabel: String(raw.loginAnnouncementLinkLabel || '').trim().slice(0, 60),
+        loginAnnouncementUrl: safeUrl(raw.loginAnnouncementUrl),
+        supportTitle: String(raw.supportTitle || DEFAULT_BRANDING.supportTitle).trim().slice(0, 80) || DEFAULT_BRANDING.supportTitle,
+        supportEmail: String(raw.supportEmail || '').trim().slice(0, 160),
+        supportPhone: String(raw.supportPhone || '').trim().slice(0, 40),
+        supportHours: String(raw.supportHours || '').trim().slice(0, 120),
+        supportLinkLabel: String(raw.supportLinkLabel || '').trim().slice(0, 60),
+        supportUrl: safeUrl(raw.supportUrl)
     };
+}
+
+function _loginAnnouncementIsActive(branding, now = Date.now()) {
+    if (!branding.loginAnnouncementEnabled) return false;
+    if (!branding.loginAnnouncementTitle && !branding.loginAnnouncementMessage) return false;
+    const start = Date.parse(branding.loginAnnouncementStartAt || '');
+    const end = Date.parse(branding.loginAnnouncementEndAt || '');
+    if (Number.isFinite(start) && now < start) return false;
+    if (Number.isFinite(end) && now > end) return false;
+    return true;
+}
+
+function _renderLoginCommunications(root = document, branding = _currentBranding) {
+    root.querySelectorAll('[data-login-system-announcement]').forEach(announcement => {
+        const active = _loginAnnouncementIsActive(branding);
+        const brandSurface = announcement.dataset.loginAnnouncementSurface === 'brand';
+        const tones = {
+            info: ['border-sky-200 bg-sky-50 text-sky-900', 'bg-sky-100 text-sky-700', 'i'],
+            warning: ['border-amber-200 bg-amber-50 text-amber-950', 'bg-amber-100 text-amber-700', '!'],
+            critical: ['border-rose-200 bg-rose-50 text-rose-950', 'bg-rose-100 text-rose-700', '!']
+        };
+        const tone = tones[branding.loginAnnouncementTone] || tones.info;
+        announcement.setAttribute('role', branding.loginAnnouncementTone === 'critical' ? 'alert' : 'status');
+        announcement.setAttribute('aria-live', branding.loginAnnouncementTone === 'critical' ? 'assertive' : 'polite');
+        announcement.setAttribute('aria-atomic', 'true');
+        announcement.className = `${active ? '' : 'hidden '}${brandSurface ? 'border-white/20 bg-emerald-950/60 text-white backdrop-blur-sm' : `md:hidden ${tone[0]}`} mb-5 rounded-xl border px-3.5 py-3`;
+        const icon = announcement.querySelector('[data-login-announcement-icon]');
+        if (icon) { icon.className = `mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-black ${tone[1]}`; icon.textContent = tone[2]; }
+        const title = announcement.querySelector('[data-login-announcement-title]');
+        const message = announcement.querySelector('[data-login-announcement-message]');
+        if (title) title.textContent = branding.loginAnnouncementTitle || 'ประกาศจากระบบ';
+        if (message) message.textContent = branding.loginAnnouncementMessage;
+        const link = announcement.querySelector('[data-login-announcement-link]');
+        if (link) {
+            const visible = Boolean(branding.loginAnnouncementUrl && branding.loginAnnouncementLinkLabel);
+            link.classList.toggle('hidden', !visible);
+            link.classList.toggle('inline-flex', visible);
+            if (visible) { link.href = branding.loginAnnouncementUrl; link.textContent = `${branding.loginAnnouncementLinkLabel} →`; }
+            else { link.removeAttribute('href'); link.textContent = ''; }
+        }
+    });
+
+    const supportTitle = root.querySelector('#login-support-title');
+    const supportHours = root.querySelector('#login-support-hours');
+    const supportLinks = root.querySelector('#login-support-links');
+    const fallback = root.querySelector('#login-support-fallback');
+    if (supportTitle) supportTitle.textContent = branding.supportTitle || DEFAULT_BRANDING.supportTitle;
+    if (supportHours) { supportHours.textContent = branding.supportHours; supportHours.classList.toggle('hidden', !branding.supportHours); }
+    if (supportLinks) {
+        supportLinks.replaceChildren();
+        const addLink = (label, href, external = false) => {
+            if (!label || !href) return;
+            const link = root.createElement ? root.createElement('a') : document.createElement('a');
+            link.className = 'inline-flex min-h-11 items-center text-xs font-bold text-emerald-700 underline-offset-2 hover:underline';
+            link.textContent = label;
+            link.href = href;
+            if (external) { link.target = '_blank'; link.rel = 'noopener noreferrer'; }
+            supportLinks.appendChild(link);
+        };
+        const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(branding.supportEmail) ? branding.supportEmail : '';
+        const phoneHref = branding.supportPhone.replace(/[^+\d]/g, '');
+        addLink(email ? 'อีเมล' : '', email ? `mailto:${email}` : '');
+        addLink(branding.supportPhone, phoneHref.length >= 3 ? `tel:${phoneHref}` : '');
+        addLink(branding.supportLinkLabel || (branding.supportUrl ? 'ศูนย์ช่วยเหลือ' : ''), branding.supportUrl, true);
+        if (fallback) fallback.classList.toggle('hidden', supportLinks.childElementCount > 0 || Boolean(branding.supportHours));
+    }
 }
 
 function applyAppBranding(branding = {}) {
@@ -143,6 +262,23 @@ function applyAppBranding(branding = {}) {
     document.querySelectorAll('[data-brand-login-subtitle]').forEach(el => {
         el.textContent = _currentBranding.loginHeroSubtitle || _currentBranding.tagline;
     });
+    const loginBrandPanel = document.getElementById('login-brand-panel');
+    if (loginBrandPanel) {
+        const backgroundUrl = _currentBranding.loginBackgroundUrl;
+        const baseGradient = 'linear-gradient(160deg, rgba(2,44,34,.94) 0%, rgba(6,78,59,.88) 42%, rgba(6,95,70,.82) 75%, rgba(13,148,136,.76) 100%)';
+        const shouldLoadBackground = Boolean(backgroundUrl && _loginBrandMediaQuery.matches);
+        loginBrandPanel.classList.toggle('has-custom-background', shouldLoadBackground);
+        loginBrandPanel.style.backgroundImage = shouldLoadBackground
+            ? `${baseGradient}, url(${JSON.stringify(backgroundUrl)})`
+            : 'linear-gradient(160deg, #022c22 0%, #064e3b 40%, #065f46 75%, #0d9488 100%)';
+        const backgroundFit = _currentBranding.loginBackgroundFit === 'contain' ? 'contain' : 'cover';
+        loginBrandPanel.style.backgroundSize = shouldLoadBackground ? `cover, ${backgroundFit}` : 'cover';
+        loginBrandPanel.style.backgroundPosition = shouldLoadBackground
+            ? `center, ${_currentBranding.loginBackgroundFocusX}% ${_currentBranding.loginBackgroundFocusY}%`
+            : 'center';
+        loginBrandPanel.style.backgroundRepeat = 'no-repeat';
+    }
+    _renderLoginCommunications(document, _currentBranding);
     document.title = _currentBranding.appName;
     document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', _currentBranding.appName);
 
@@ -160,11 +296,12 @@ async function loadAppBranding() {
 }
 
 window._refreshAppBranding = loadAppBranding;
+_loginBrandMediaQuery.addEventListener?.('change', () => applyAppBranding(_currentBranding));
 
 // ======================================================
 // App Bootstrap
 // ======================================================
-document.addEventListener('DOMContentLoaded', async () => {
+async function bootstrapFrontend() {
     document.querySelectorAll('[data-current-year]').forEach(el => { el.textContent = String(new Date().getFullYear()); });
     document.querySelectorAll('[data-module-count]').forEach(el => { el.textContent = String(MODULE_ORDER.length); });
     console.log('🚀 Frontend Application Started');
@@ -182,7 +319,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     await initializeSession();
     showCompanyEmailVerificationResult();
     showPasswordResetFromLink();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { void bootstrapFrontend(); }, { once: true });
+} else {
+    void bootstrapFrontend();
+}
 
 function capturePasswordResetLink() {
     const match = String(window.location.hash || '').match(/^#reset-password=([A-Za-z0-9_-]{43})$/);
@@ -388,7 +531,9 @@ async function startApp(user, onboardingStatus = null) {
     UI.hideLoading();
 
     // แสดง App / ซ่อน Login
-    document.getElementById('login-overlay')?.classList.add('hidden');
+    const loginOverlay = document.getElementById('login-overlay');
+    loginOverlay?.classList.add('hidden');
+    loginOverlay?.setAttribute('aria-hidden', 'true');
     const app = document.getElementById('app-container');
     app.classList.remove('hidden');
     app.style.display = 'flex';
@@ -535,8 +680,12 @@ function showLoginScreen() {
     UI.hideLoading();
     destroyJohnnyDrawer();
     document.getElementById('app-container')?.classList.add('hidden');
-    document.getElementById('login-overlay')?.classList.remove('hidden');
+    const loginOverlay = document.getElementById('login-overlay');
+    loginOverlay?.classList.remove('hidden');
+    loginOverlay?.setAttribute('aria-hidden', 'false');
     showFirstLoginReentryNotice();
+    if (!document.getElementById('login-success-message')?.classList.contains('hidden')) return;
+    setTimeout(() => document.getElementById('login-employee-id')?.focus(), 50);
 }
 
 function rememberFirstLoginReentry(user) {

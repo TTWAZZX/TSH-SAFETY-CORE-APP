@@ -33,6 +33,11 @@ function platform_normalize_patrol_flexible_monthly_requirement($value): ?int
     return max(1, min(10, (int) $number));
 }
 
+function platform_is_branding_workflow_key(string $key): bool
+{
+    return in_array(strtolower($key), ['app_branding', 'app_branding_draft', 'app_branding_versions'], true);
+}
+
 function handle_platform_routes(string $method, string $path): bool
 {
     if ($method === 'GET' && $path === '/dashboard/config') {
@@ -79,6 +84,13 @@ function handle_platform_routes(string $method, string $path): bool
     }
     if ($params !== null && $method === 'PUT') {
         require_admin();
+        if (platform_is_branding_workflow_key((string) $params['key'])) {
+            json_response([
+                'ok' => false,
+                'code' => 'BRANDING_WORKFLOW_REQUIRED',
+                'message' => 'Branding must be changed through the Draft / Publish / Version workflow.',
+            ], 409);
+        }
         $body = json_body();
         if (!array_key_exists('value', $body) || $body['value'] === null) {
             db_execute('DELETE FROM app_settings WHERE key_name=?', [$params['key']]);

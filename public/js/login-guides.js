@@ -14,6 +14,7 @@ const GUIDE_EXAMPLES = {
     training: 'ต้องตรวจว่าพนักงานผ่านหลักสูตร Safety หรือยัง ให้ค้นหาชื่อ/หลักสูตรและดู pass rate ในโมดูลนี้',
     accident: 'เกิดอุบัติเหตุในพื้นที่ ให้บันทึกเหตุการณ์ สาเหตุ CAPA และส่งออก PDF เมื่อใช้ทำรายงาน',
     'safety-culture': 'ต้องติดตามพฤติกรรมความปลอดภัยหรือ PPE violation ให้ดู dashboard และบันทึก assessment/inspection',
+    'safety-vote': 'ผู้ใช้เปิดกิจกรรมที่ได้รับสิทธิ์ ตรวจรายละเอียดและความเป็นส่วนตัว ทบทวนคำตอบก่อนยืนยัน แล้วเก็บเลขอ้างอิงโดยไม่เปิดเผยตัวเลือกที่ลงคะแนน',
     contractor: 'ก่อนผู้รับเหมาเข้าพื้นที่ ให้ตรวจข้อมูล เอกสาร และสถานะ E-Pass ในโมดูล Contractor / Supplier',
     hiyari: 'เห็นเหตุเกือบพลาด เช่น สะดุดสายไฟหรือเกือบชนรถเข็น ให้บันทึก Near-Miss พร้อมพื้นที่และความเสี่ยง',
     ky: 'ก่อนเริ่มงานเสี่ยง ให้ทีมทำ KY Activity ระบุอันตราย มาตรการ และส่งให้ Safety/Admin review',
@@ -178,6 +179,18 @@ export const LOGIN_MODULE_GUIDES = [
         updatedAt: '2026-08-25'
     },
     {
+        key: 'safety-vote',
+        title: 'Safety Vote',
+        purpose: 'เข้าร่วมแบบสำรวจ การโหวต การเสนอชื่อ และงานกรรมการ พร้อมพื้นที่จัดการแคมเปญที่รักษาสิทธิ์และความเป็นส่วนตัว',
+        whenToUse: 'ใช้เมื่อมีแคมเปญที่ได้รับสิทธิ์เข้าร่วม งานประเมินของกรรมการ หรือ Admin ต้องสร้างและติดตามแคมเปญ',
+        audience: ['User', 'Admin', 'Safety', 'Juror'],
+        badges: ['User', 'Workflow', 'Report'],
+        actions: ['ผู้ใช้เปิดกิจกรรมของฉัน อ่านเงื่อนไขและทบทวนคำตอบก่อนยืนยัน', 'กรรมการเปิดงานประเมินของฉัน ให้คะแนนตามเกณฑ์ และทบทวนก่อนส่ง', 'Admin สร้างแคมเปญ ตรวจ readiness จัดการป้ายประชาสัมพันธ์ ปฏิทิน และการสื่อสาร', 'Admin ติดตามการมีส่วนร่วม ผลรวม การรับรอง และ Audit ตาม permission'],
+        reports: ['รายงานการมีส่วนร่วมและผลรวมที่ผ่าน privacy threshold', 'ผลและหลักฐานการรับรองตามสิทธิ์', 'Governance/Audit timeline และ aggregate engagement export'],
+        warnings: ['การยืนยันคำตอบหรือคะแนนเป็นขั้นตอนสำคัญและอาจแก้ไขไม่ได้', 'ระบบไม่เปิดเผยผู้ลงคะแนนต่อคำตอบ ตัวตนแบบ blind หรือข้อมูลต่ำกว่า privacy threshold', 'การเข้าถึง การสร้าง การรับรอง และการส่งออกขึ้นกับ permission และสถานะแคมเปญ'],
+        updatedAt: '2026-10-11'
+    },
+    {
         key: 'contractor',
         title: 'Contractor / Supplier',
         purpose: 'จัดการข้อมูล Contractor/Supplier และ E-Pass ที่เกี่ยวข้องกับความปลอดภัย',
@@ -338,14 +351,16 @@ function compactCardHtml(guide, index) {
 
 function desktopPanelHtml() {
     return `
-        <div class="login-guide-panel">
-            <div class="login-guide-head">
-                <p class="login-guide-eyebrow">โมดูลในระบบ</p>
-                <button type="button" class="login-guide-all-btn" data-guide-all>ดูคู่มือทั้งหมด</button>
+        <div class="login-guide-entry">
+            <div class="login-guide-entry-copy">
+                <p class="login-guide-eyebrow">ศูนย์คู่มือการใช้งาน</p>
+                <p>รวมวิธีใช้ทุกโมดูลและ Safety Vote</p>
             </div>
-            <div class="login-guide-list" data-guide-list>
-                ${LOGIN_MODULE_GUIDES.map(compactCardHtml).join('')}
-            </div>
+            <button type="button" class="login-guide-all-btn" data-guide-all>
+                <span>${moduleIcon('policy')}</span>
+                <span>ดูคู่มือทั้งหมด</span>
+                <span aria-hidden="true">→</span>
+            </button>
         </div>`;
 }
 
@@ -626,7 +641,13 @@ export function initLoginModuleGuides() {
     const desktopHost = desktopGrid?.parentElement;
     if (desktopHost) {
         desktopHost.innerHTML = desktopPanelHtml();
-        desktopHost.querySelector('.login-guide-panel')?.addEventListener('click', (event) => {
+        const footer = document.querySelector('#login-brand-panel .login-brand-footer');
+        const footerDivider = footer?.firstElementChild;
+        if (footer && desktopHost.parentElement !== footer) {
+            footer.insertBefore(desktopHost, footerDivider || footer.firstChild);
+        }
+        desktopHost.classList.remove('hidden');
+        desktopHost.querySelector('.login-guide-entry')?.addEventListener('click', (event) => {
             if (event.target.closest('[data-guide-all]')) {
                 openGuideCenter();
                 return;

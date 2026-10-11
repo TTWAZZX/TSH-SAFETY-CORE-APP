@@ -58,6 +58,15 @@ function handle_storage_routes(string $method, string $path): bool
         ], 2 * 1024 * 1024);
         json_response(array_merge(['success' => true, 'message' => 'Logo uploaded successfully'], $file));
     }
+    if ($method === 'POST' && $path === '/upload/branding-background') {
+        require_admin();
+        $file = store_uploaded_file('background', [
+            'image/jpeg' => ['jpg', 'jpeg'],
+            'image/png' => ['png'],
+            'image/webp' => ['webp'],
+        ], 5 * 1024 * 1024);
+        json_response(array_merge(['success' => true, 'message' => 'Login background uploaded successfully'], $file));
+    }
     if ($method === 'DELETE' && $path === '/upload/document') {
         require_admin();
         $body = json_body();

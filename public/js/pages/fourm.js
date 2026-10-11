@@ -373,20 +373,20 @@ async function _renderDashInner() {
 
             ${_isAdmin ? _buildAdminInsights(data.adminInsights || {}, data.byType || []) : ''}
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div class="lg:col-span-2 ds-section p-5">
+            <div class="fourm-chart-grid grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="fourm-chart-card lg:col-span-2 ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">แนวโน้ม Change Notice รายเดือน</h3>
-                    <div style="height:220px"><canvas id="fourm-chart-line"></canvas></div>
+                    <div class="fourm-chart-frame"><canvas id="fourm-chart-line"></canvas></div>
                 </div>
-                <div class="ds-section p-5">
+                <div class="fourm-chart-card ds-section p-5">
                     <h3 class="text-sm font-bold text-slate-600 mb-4">สัดส่วน Change Type</h3>
-                    <div style="height:220px"><canvas id="fourm-chart-pie"></canvas></div>
+                    <div class="fourm-chart-frame"><canvas id="fourm-chart-pie"></canvas></div>
                 </div>
             </div>
 
-            <div class="ds-section p-5">
+            <div class="fourm-chart-card ds-section p-5">
                 <h3 class="text-sm font-bold text-slate-600 mb-4">Change Notice แยกตามแผนก (Top 10)</h3>
-                <div style="height:220px"><canvas id="fourm-chart-bar"></canvas></div>
+                <div class="fourm-chart-frame"><canvas id="fourm-chart-bar"></canvas></div>
             </div>
 
             ${byDeptType.length ? _buildDeptMatrix(byDeptType) : ''}

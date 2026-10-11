@@ -26,7 +26,7 @@ check('Safety Vote uses the global horizontal gutter', css.includes('#safety-vot
 check('Safety Vote and System Console exceptions are neutralized', css.includes('body[data-active-page="safety-vote"]') && css.includes('body[data-active-page="admin"]'));
 check('System Console nested content removes duplicate horizontal padding', css.includes('#admin-page .admin-console-content'));
 check('mobile shell keeps the same full-width contract', /@media \(max-width: 767px\)[\s\S]*?#main-content > \.page-content:not\(\.hidden\)/u.test(css));
-check('stylesheet cache key includes compact full-width revision', html.includes('surface-r1-fullwidth-r1-compact-r1'));
+check('stylesheet cache key includes compact full-width and accessibility revisions', html.includes('surface-r7-fullwidth-r1-compact-r1-a11y-r1'));
 check('main content uses compact responsive project gutters', html.includes('id="main-content" class="flex-1 overflow-x-hidden overflow-y-auto p-2 md:p-2 relative"'));
 check('compact density keeps a bounded desktop gutter', css.includes('--app-page-gutter: .5rem'));
 check('compact density keeps a bounded mobile gutter', css.includes('--app-page-gutter-mobile: .5rem'));

@@ -9,6 +9,11 @@ const db      = require('../db');
 const { isAdmin } = require('../middleware/auth');
 
 const PATROL_FLEXIBLE_MONTHLY_REQUIREMENT_KEY = 'patrol_flexible_monthly_requirement';
+const BRANDING_WORKFLOW_KEYS = new Set([
+    'app_branding',
+    'app_branding_draft',
+    'app_branding_versions',
+]);
 
 function normalizePatrolFlexibleMonthlyRequirement(value) {
     const isNumericString = typeof value === 'string' && value.trim() !== '';
@@ -42,6 +47,13 @@ router.get('/:key', async (req, res) => {
 
 // PUT /api/settings/:key  (admin only)
 router.put('/:key', isAdmin, async (req, res) => {
+    if (BRANDING_WORKFLOW_KEYS.has(String(req.params.key || '').toLowerCase())) {
+        return res.status(409).json({
+            ok: false,
+            code: 'BRANDING_WORKFLOW_REQUIRED',
+            message: 'Branding must be changed through the Draft / Publish / Version workflow.',
+        });
+    }
     let { value } = req.body;
     if (value === null || value === undefined) {
         await db.query('DELETE FROM App_Settings WHERE key_name = ?', [req.params.key]);
