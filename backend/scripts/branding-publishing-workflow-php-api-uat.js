@@ -30,7 +30,7 @@ async function api(route, { method = 'GET', token, body } = {}) {
     });
     let payload = null;
     try { payload = await response.json(); } catch (_) {}
-    return { status: response.status, payload };
+    return { status: response.status, payload, cacheControl: response.headers.get('cache-control') || '' };
 }
 
 async function snapshotSettings() {
@@ -93,6 +93,8 @@ async function main() {
 
     const initial = await api('/branding/workspace', { token: adminToken });
     assert.strictEqual(initial.status, 200, JSON.stringify(initial.payload));
+    assert.match(initial.cacheControl, /private/i, 'PHP Branding workspace must be private');
+    assert.match(initial.cacheControl, /no-store/i, 'PHP Branding workspace must be non-cacheable');
     assert.ok(initial.payload?.data?.published, 'PHP published Branding workspace');
     assert.strictEqual((await api('/branding/workspace', { token: userToken })).status, 403, 'PHP non-Admin denial');
 

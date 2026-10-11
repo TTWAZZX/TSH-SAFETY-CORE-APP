@@ -166,6 +166,16 @@ function branding_audit(array $user, string $action, string $targetId, array $me
     auth_audit_log($action, (string) ($user['id'] ?? $user['EmployeeID'] ?? ''), 200, array_merge(['module' => 'settings', 'targetId' => $targetId], $metadata), $user);
 }
 
+function branding_json_response(array $payload, int $status = 200): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: private, no-store, max-age=0');
+    header('Pragma: no-cache');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 function handle_branding_routes(string $method, string $path): bool
 {
     if (strpos($path, '/branding/') !== 0) return false;
@@ -175,7 +185,7 @@ function handle_branding_routes(string $method, string $path): bool
     branding_ensure_table();
 
     if ($method === 'GET' && $path === '/branding/workspace') {
-        json_response(['success' => true, 'data' => branding_workspace(branding_rows())]);
+        branding_json_response(['success' => true, 'data' => branding_workspace(branding_rows())]);
     }
 
     if ($method === 'PUT' && $path === '/branding/draft') {
@@ -187,7 +197,7 @@ function handle_branding_routes(string $method, string $path): bool
             $expected = (string) ($body['expectedDraftUpdatedAt'] ?? '');
             if ($expected !== '' && $expected !== (string) ($current['draft']['updatedAt'] ?? '')) {
                 $pdo->rollBack();
-                json_response(['success' => false, 'code' => 'BRANDING_DRAFT_CONFLICT', 'message' => 'Draft ถูกแก้ไขจากอีกหน้าต่าง กรุณาโหลดข้อมูลใหม่'], 409);
+                branding_json_response(['success' => false, 'code' => 'BRANDING_DRAFT_CONFLICT', 'message' => 'Draft ถูกแก้ไขจากอีกหน้าต่าง กรุณาโหลดข้อมูลใหม่'], 409);
             }
             $who = branding_actor($user);
             $draft = [
@@ -199,7 +209,7 @@ function handle_branding_routes(string $method, string $path): bool
             branding_upsert(BRANDING_DRAFT_KEY, $draft);
             $pdo->commit();
             branding_audit($user, 'SAVE_BRANDING_DRAFT', BRANDING_DRAFT_KEY, ['baseVersionId' => $draft['baseVersionId']]);
-            json_response(['success' => true, 'data' => $draft]);
+            branding_json_response(['success' => true, 'data' => $draft]);
         } catch (Throwable $error) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $error;
@@ -215,12 +225,12 @@ function handle_branding_routes(string $method, string $path): bool
             $expected = (string) ($body['expectedDraftUpdatedAt'] ?? '');
             if (!$current['draft'] || $expected === '' || $expected !== (string) $current['draft']['updatedAt']) {
                 $pdo->rollBack();
-                json_response(['success' => false, 'code' => 'BRANDING_DRAFT_CONFLICT', 'message' => 'Draft เปลี่ยนแปลงแล้ว กรุณาโหลดข้อมูลใหม่ก่อนทิ้ง Draft'], 409);
+                branding_json_response(['success' => false, 'code' => 'BRANDING_DRAFT_CONFLICT', 'message' => 'Draft เปลี่ยนแปลงแล้ว กรุณาโหลดข้อมูลใหม่ก่อนทิ้ง Draft'], 409);
             }
             db_execute('DELETE FROM app_settings WHERE key_name=?', [BRANDING_DRAFT_KEY]);
             $pdo->commit();
             branding_audit($user, 'DISCARD_BRANDING_DRAFT', BRANDING_DRAFT_KEY);
-            json_response(['success' => true]);
+            branding_json_response(['success' => true]);
         } catch (Throwable $error) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $error;
@@ -230,7 +240,7 @@ function handle_branding_routes(string $method, string $path): bool
     if ($method === 'POST' && $path === '/branding/publish') {
         $body = json_body();
         if (($body['confirmation'] ?? '') !== 'PUBLISH_BRANDING') {
-            json_response(['success' => false, 'code' => 'BRANDING_CONFIRMATION_REQUIRED', 'message' => 'กรุณายืนยันการ Publish Branding'], 400);
+            branding_json_response(['success' => false, 'code' => 'BRANDING_CONFIRMATION_REQUIRED', 'message' => 'กรุณายืนยันการ Publish Branding'], 400);
         }
         $pdo = db();
         $pdo->beginTransaction();
@@ -239,12 +249,12 @@ function handle_branding_routes(string $method, string $path): bool
             $current = branding_workspace($rows);
             if (!$current['draft']) {
                 $pdo->rollBack();
-                json_response(['success' => false, 'code' => 'BRANDING_DRAFT_REQUIRED', 'message' => 'ไม่พบ Draft สำหรับ Publish'], 409);
+                branding_json_response(['success' => false, 'code' => 'BRANDING_DRAFT_REQUIRED', 'message' => 'ไม่พบ Draft สำหรับ Publish'], 409);
             }
             $expected = (string) ($body['expectedDraftUpdatedAt'] ?? '');
             if ($expected === '' || $expected !== (string) $current['draft']['updatedAt']) {
                 $pdo->rollBack();
-                json_response(['success' => false, 'code' => 'BRANDING_DRAFT_CONFLICT', 'message' => 'Draft เปลี่ยนแปลงแล้ว กรุณาตรวจสอบก่อน Publish'], 409);
+                branding_json_response(['success' => false, 'code' => 'BRANDING_DRAFT_CONFLICT', 'message' => 'Draft เปลี่ยนแปลงแล้ว กรุณาตรวจสอบก่อน Publish'], 409);
             }
             $history = branding_history($rows[BRANDING_VERSIONS_KEY]['value'] ?? null);
             $who = branding_actor($user);
@@ -263,7 +273,7 @@ function handle_branding_routes(string $method, string $path): bool
             db_execute('DELETE FROM app_settings WHERE key_name=?', [BRANDING_DRAFT_KEY]);
             $pdo->commit();
             branding_audit($user, 'PUBLISH_BRANDING', $version['id'], ['versionNo' => $version['versionNo'], 'source' => 'publish']);
-            json_response(['success' => true, 'data' => branding_workspace(branding_rows())]);
+            branding_json_response(['success' => true, 'data' => branding_workspace(branding_rows())]);
         } catch (Throwable $error) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $error;
@@ -274,7 +284,7 @@ function handle_branding_routes(string $method, string $path): bool
     if ($method === 'POST' && $rollback !== null) {
         $body = json_body();
         if (($body['confirmation'] ?? '') !== 'ROLLBACK_BRANDING') {
-            json_response(['success' => false, 'code' => 'BRANDING_CONFIRMATION_REQUIRED', 'message' => 'กรุณายืนยันการ Rollback Branding'], 400);
+            branding_json_response(['success' => false, 'code' => 'BRANDING_CONFIRMATION_REQUIRED', 'message' => 'กรุณายืนยันการ Rollback Branding'], 400);
         }
         $pdo = db();
         $pdo->beginTransaction();
@@ -284,14 +294,14 @@ function handle_branding_routes(string $method, string $path): bool
             $expected = (string) ($body['expectedActiveVersionId'] ?? '');
             if ($expected !== '' && $expected !== (string) ($current['activeVersionId'] ?? '')) {
                 $pdo->rollBack();
-                json_response(['success' => false, 'code' => 'BRANDING_VERSION_CONFLICT', 'message' => 'เวอร์ชันที่เผยแพร่เปลี่ยนแล้ว กรุณาโหลดข้อมูลใหม่'], 409);
+                branding_json_response(['success' => false, 'code' => 'BRANDING_VERSION_CONFLICT', 'message' => 'เวอร์ชันที่เผยแพร่เปลี่ยนแล้ว กรุณาโหลดข้อมูลใหม่'], 409);
             }
             $history = branding_history($rows[BRANDING_VERSIONS_KEY]['value'] ?? null);
             $target = null;
             foreach ($history['items'] as $item) if ((string) $item['id'] === (string) $rollback['versionId']) $target = $item;
             if (!$target) {
                 $pdo->rollBack();
-                json_response(['success' => false, 'code' => 'BRANDING_VERSION_NOT_FOUND', 'message' => 'ไม่พบ Branding version ที่เลือก'], 404);
+                branding_json_response(['success' => false, 'code' => 'BRANDING_VERSION_NOT_FOUND', 'message' => 'ไม่พบ Branding version ที่เลือก'], 404);
             }
             $nextNo = 1;
             foreach ($history['items'] as $item) $nextNo = max($nextNo, (int) $item['versionNo'] + 1);
@@ -305,7 +315,7 @@ function handle_branding_routes(string $method, string $path): bool
             branding_upsert(BRANDING_VERSIONS_KEY, $history);
             $pdo->commit();
             branding_audit($user, 'ROLLBACK_BRANDING', $version['id'], ['versionNo' => $version['versionNo'], 'restoredFromVersionId' => $target['id']]);
-            json_response(['success' => true, 'data' => branding_workspace(branding_rows())]);
+            branding_json_response(['success' => true, 'data' => branding_workspace(branding_rows())]);
         } catch (Throwable $error) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $error;
