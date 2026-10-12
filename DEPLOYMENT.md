@@ -1,6 +1,14 @@
 # TSH Safety Core Activity - Deployment
 
-## Admin Public File Library production candidate (2026-10-12, not deployed)
+## Admin Public File Library Production release (PASS, 2026-10-12)
+
+Immutable commit `1db5848f47cd0adc4612536619b523b5e748ae60` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The additive schema is ready with zero item rows and 14 system categories. Eight allowlisted runtime paths were uploaded and FTPS double-download verified `8/8`; all six public assets matched the candidate byte-for-byte over HTTPS.
+
+Authenticated Admin read-only smoke returned `200` with zero files and 14 system categories; anonymous Admin access returned `401` and an unknown public token returned `404`. The smoke created no category, file, audit fixture, email, notification or external delivery. Runtime rollback restores five verified prior files and removes three proven-new paths. The private schema rollback artifact SHA-256 is `a641501b195d9e4ea4af0ca2584d1208f1680483a4f7bbae2ee7f6bef3839417`; it was double-downloaded and denied over public HTTPS. Temporary helper/guard/private-backup residue is zero and root `.htaccess` was restored byte-exact.
+
+Evidence is `backups/production/file-library-deploy-20261012063227/`; result SHA-256 is `ace20d17fcac94a5424ac547acf76186a9d86d07f62d6c1f76af0f57a98dd928`. Decision: `PASS_FILE_LIBRARY_PRODUCTION_DEPLOYMENT`.
+
+Original deployment checklist retained below for operational reference:
 
 Required predeploy sequence:
 

@@ -1,6 +1,9 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
-## 2026-10-12 - Admin Public File Library local production candidate
+## 2026-10-12 - Admin Public File Library Production release
+
+- Deployed immutable commit `1db5848f47cd0adc4612536619b523b5e748ae60`: additive schema ready, eight runtime paths verified `8/8` by FTPS and six public assets verified `6/6` over HTTPS.
+- Production read-only smoke passed Admin `200`, anonymous Admin `401`, unknown token `404`, zero item rows and 14 standard categories. Rollback artifacts were verified, `.htaccess` was restored byte-exact and temporary residue is zero.
 
 - Fixed Thai/UTF-8 original filenames corrupted by multipart Latin-1 interpretation and corrected Public links to target the API origin rather than `PUBLIC_APP_URL`; existing affected rows render/download correctly without data rewriting.
 - Integrated the agreed minimal policy into the existing forms: Public links display a disclosure/confirmation and default to 30 days; Authenticated links default to no expiry without adding an approval workflow.
