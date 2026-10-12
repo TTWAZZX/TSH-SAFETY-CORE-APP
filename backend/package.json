@@ -195,6 +195,7 @@
     "uat:file-library-browser": "node scripts/file-library-browser-uat.js",
     "verify:file-library": "npm run test:file-library && npm run test:file-library-migration && npm run uat:file-library-api && npm run uat:file-library-browser",
     "migrate:file-library-local": "node scripts/file-library-migrate-local.js",
+    "deploy:file-library-production": "node scripts/file-library-production-deploy.js --execute DEPLOY_FILE_LIBRARY_RUNTIME_AND_SCHEMA",
     "audit:patrol-checkin-v2": "node scripts/patrol-checkin-v2-audit.js",
     "migrate:patrol-checkin-v2-local": "node scripts/patrol-checkin-v2-migrate-local.js",
     "test:patrol-checkin-v2": "node scripts/patrol-checkin-v2.test.js",

@@ -1,0 +1,148 @@
+<?php
+declare(strict_types=1);
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: private, no-store, max-age=0');
+header('X-Content-Type-Options: nosniff');
+
+const RUN_TOKEN_SHA256 = '__RUN_TOKEN_SHA256__';
+const CLEANUP_TOKEN_SHA256 = '__CLEANUP_TOKEN_SHA256__';
+const GUARD_NAME = '__GUARD_NAME__';
+const BACKUP_ID = '__BACKUP_ID__';
+const ROLLBACK_NAME = 'file-library-schema-rollback.sql';
+
+function reply(array $body, int $status = 200): void {
+    http_response_code($status);
+    echo json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+function authorized(string $expected): bool {
+    $token = (string) ($_SERVER['HTTP_X_FILE_LIBRARY_DEPLOY_TOKEN'] ?? '');
+    return $token !== '' && hash_equals($expected, hash('sha256', $token));
+}
+function integrity_ready(): bool {
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (!is_file($guard)) return false;
+    $expected = strtolower(trim((string) file_get_contents($guard)));
+    return preg_match('/^[a-f0-9]{64}$/', $expected) === 1
+        && hash_equals($expected, hash_file('sha256', __FILE__));
+}
+function connect_database(): PDO {
+    $config = require __DIR__ . '/config.php';
+    if (!is_array($config)) throw new RuntimeException('CONFIG_NOT_ARRAY');
+    $dsn = 'mysql:host=' . (string) $config['db_host'] . ';port=' . (int) $config['db_port']
+        . ';dbname=' . (string) $config['db_name'] . ';charset=utf8mb4';
+    return new PDO($dsn, (string) $config['db_user'], (string) $config['db_pass'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+}
+function table_exists(PDO $pdo, string $table): bool {
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND LOWER(TABLE_NAME)=LOWER(?)');
+    $stmt->execute([$table]);
+    return (int) $stmt->fetchColumn() === 1;
+}
+function column_exists(PDO $pdo, string $table, string $column): bool {
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND LOWER(TABLE_NAME)=LOWER(?) AND LOWER(COLUMN_NAME)=LOWER(?)');
+    $stmt->execute([$table, $column]);
+    return (int) $stmt->fetchColumn() === 1;
+}
+function index_exists(PDO $pdo, string $table, string $index): bool {
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND LOWER(TABLE_NAME)=LOWER(?) AND LOWER(INDEX_NAME)=LOWER(?)');
+    $stmt->execute([$table, $index]);
+    return (int) $stmt->fetchColumn() > 0;
+}
+function execute_script(PDO $pdo, string $encoded): void {
+    $sql = base64_decode($encoded, true);
+    if ($sql === false) throw new RuntimeException('MIGRATION_DECODE_FAILED');
+    foreach (preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: [] as $statement) {
+        $statement = trim($statement);
+        if ($statement !== '' && strpos($statement, '--') === 0) {
+            $statement = trim((string) preg_replace('/^(?:--[^\r\n]*(?:\r?\n|$))+/', '', $statement));
+        }
+        if ($statement === '') continue;
+        $query = $pdo->prepare($statement);
+        $query->execute();
+        if ($query->columnCount() > 0) $query->fetchAll();
+        $query->closeCursor();
+    }
+}
+function backup_directory(): string {
+    $dir = __DIR__ . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . BACKUP_ID;
+    if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) throw new RuntimeException('BACKUP_DIRECTORY_FAILED');
+    file_put_contents($dir . DIRECTORY_SEPARATOR . '.htaccess', "Require all denied\nDeny from all\n", LOCK_EX);
+    return $dir;
+}
+function write_rollback(string $dir): array {
+    $path = $dir . DIRECTORY_SEPARATOR . ROLLBACK_NAME;
+    $sql = "-- File Library guarded schema rollback; only safe while module rows remain zero.\n"
+        . "DROP TABLE IF EXISTS `FileLibrary_Categories`;\nDROP TABLE IF EXISTS `FileLibrary_Items`;\n";
+    if (file_put_contents($path, $sql, LOCK_EX) === false) throw new RuntimeException('ROLLBACK_WRITE_FAILED');
+    @chmod($path, 0600);
+    return ['relativePath'=>'api/private/' . BACKUP_ID . '/' . ROLLBACK_NAME,'bytes'=>filesize($path),'sha256'=>hash_file('sha256',$path)];
+}
+function cleanup(): array {
+    $dir = __DIR__ . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . BACKUP_ID;
+    $removed = [];
+    foreach ([ROLLBACK_NAME,'.htaccess','.used'] as $name) {
+        $target = $dir . DIRECTORY_SEPARATOR . $name;
+        if (is_file($target) && @unlink($target)) $removed[] = $name;
+    }
+    if (is_dir($dir) && @rmdir($dir)) $removed[] = 'backup-directory';
+    return $removed;
+}
+
+if (!integrity_ready()) reply(['success'=>false,'code'=>'HELPER_INTEGRITY_FAILED'],409);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') reply(['success'=>false,'code'=>'METHOD_NOT_ALLOWED'],405);
+$action = strtolower(trim((string) ($_SERVER['HTTP_X_FILE_LIBRARY_DEPLOY_ACTION'] ?? '')));
+if ($action === 'cleanup') {
+    if (!authorized(CLEANUP_TOKEN_SHA256)) reply(['success'=>false,'code'=>'UNAUTHORIZED'],401);
+    $removed = cleanup();
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (is_file($guard)) @unlink($guard);
+    $self = __FILE__;
+    register_shutdown_function(static function () use ($self): void { @unlink($self); });
+    reply(['success'=>true,'valuesSuppressed'=>true,'removedCount'=>count($removed),'selfRemovalScheduled'=>true]);
+}
+if ($action !== 'migrate') reply(['success'=>false,'code'=>'UNKNOWN_ACTION'],400);
+if (!authorized(RUN_TOKEN_SHA256)) reply(['success'=>false,'code'=>'UNAUTHORIZED'],401);
+
+$stage = 'connect';
+try {
+    set_time_limit(120);
+    $pdo = connect_database();
+    $pdo->exec("SET SESSION sql_mode='STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'");
+    $itemsBefore = table_exists($pdo,'FileLibrary_Items') ? (int) $pdo->query('SELECT COUNT(*) FROM FileLibrary_Items')->fetchColumn() : 0;
+    $categoriesBefore = table_exists($pdo,'FileLibrary_Categories') ? (int) $pdo->query('SELECT COUNT(*) FROM FileLibrary_Categories')->fetchColumn() : 0;
+    if ($itemsBefore !== 0 || $categoriesBefore !== 0) throw new RuntimeException('PREEXISTING_FILE_LIBRARY_DATA');
+    $privateDir = __DIR__ . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . 'file-library';
+    $privateFilesBefore = is_dir($privateDir) ? max(0,count(scandir($privateDir) ?: []) - 2) : 0;
+    if ($privateFilesBefore !== 0) throw new RuntimeException('PREEXISTING_PRIVATE_FILES');
+
+    $stage = 'backup';
+    $dir = backup_directory();
+    $used = @fopen($dir . DIRECTORY_SEPARATOR . '.used','x');
+    if ($used === false) throw new RuntimeException('TOKEN_ALREADY_USED');
+    fwrite($used,gmdate('c')); fclose($used);
+    $backup = write_rollback($dir);
+
+    $stage = 'foundation'; execute_script($pdo,'__FOUNDATION_SQL_B64__');
+    $stage = 'access'; execute_script($pdo,'__ACCESS_SQL_B64__');
+    $stage = 'categories'; execute_script($pdo,'__CATEGORY_SQL_B64__');
+    $stage = 'postcheck';
+    $systemCategories = (int) $pdo->query('SELECT COUNT(*) FROM FileLibrary_Categories WHERE IsSystem=1')->fetchColumn();
+    $ready = table_exists($pdo,'FileLibrary_Items') && table_exists($pdo,'FileLibrary_Categories')
+        && column_exists($pdo,'FileLibrary_Items','AccessMode') && column_exists($pdo,'FileLibrary_Items','DeliveryMode')
+        && column_exists($pdo,'FileLibrary_Items','LastAccessedAt') && column_exists($pdo,'FileLibrary_Items','CategoryDetail')
+        && index_exists($pdo,'FileLibrary_Items','uq_file_library_token')
+        && index_exists($pdo,'FileLibrary_Items','idx_file_library_access_status')
+        && index_exists($pdo,'FileLibrary_Categories','idx_file_library_category_active_sort')
+        && $systemCategories === 14
+        && (int) $pdo->query('SELECT COUNT(*) FROM FileLibrary_Items')->fetchColumn() === 0;
+    if (!$ready) throw new RuntimeException('POSTCHECK_FAILED');
+    reply(['success'=>true,'valuesSuppressed'=>true,'helperIntegrityVerified'=>true,'schemaReady'=>true,
+        'itemRows'=>0,'systemCategories'=>$systemCategories,'privateFilesBefore'=>$privateFilesBefore,'backup'=>$backup]);
+} catch (Throwable $error) {
+    reply(['success'=>false,'code'=>'FILE_LIBRARY_MIGRATION_FAILED','failureStage'=>$stage,'reason'=>$error->getMessage(),'valuesSuppressed'=>true],500);
+}

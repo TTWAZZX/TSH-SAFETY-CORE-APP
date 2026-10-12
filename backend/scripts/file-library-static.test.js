@@ -11,6 +11,8 @@ const api = read('api/index.php');
 const apiConfig = read('api/config.php');
 const ui = read('public/js/pages/admin-file-library.js');
 const linkUi = read('public/js/file-library-link.js');
+const productionDeploy = read('backend/scripts/file-library-production-deploy.js');
+const productionHelper = read('backend/scripts/file-library-production-helper.php.template');
 const admin = read('public/js/pages/admin.js');
 const migration = read('backend/migrations/20261012_file_library_foundation.sql');
 const rollback = read('backend/migrations/20261012_file_library_foundation.rollback.sql');
@@ -77,6 +79,7 @@ check('Member share intent never puts JWT in URL', linkUi.includes("apiFetch(`/f
 check('Admin can rotate a leaked link', ui.includes('/rotate-link') && node.includes("adminRouter.post('/:id/rotate-link'") && php.includes("/admin/file-library/:id/rotate-link"));
 check('UI uses 44px-equivalent controls', ui.includes('min-h-11'));
 check('File Library touch size is independent of root font scaling', css.includes('[data-file-library-workspace] button') && css.includes('min-height: 44px') && css.includes('min-height: 47px'));
+check('Production deployment is checksum guarded with rollback and helper cleanup', productionDeploy.includes('doubleDownload') && productionDeploy.includes('rollback(prepared)') && productionDeploy.includes('zeroResidue') && productionHelper.includes('HELPER_INTEGRITY_FAILED') && productionHelper.includes('PREEXISTING_FILE_LIBRARY_DATA'));
 check('Public delivery is not cached so revocation takes effect immediately', node.includes("Cache-Control', 'no-store, max-age=0") && php.includes("Cache-Control: no-store, max-age=0"));
 check('Migration is additive and indexed', migration.includes('CREATE TABLE IF NOT EXISTS FileLibrary_Items') && migration.includes('UNIQUE KEY uq_file_library_token'));
 check('Access migration is additive and idempotent', accessMigration.includes('ADD COLUMN IF NOT EXISTS AccessMode') && accessMigration.includes('idx_file_library_access_status'));
