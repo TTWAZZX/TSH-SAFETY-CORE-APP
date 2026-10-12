@@ -108,6 +108,7 @@ const safetyVotePhase4Routes = require('./routes/safety-vote-phase4');
 const safetyVotePhase5Routes = require('./routes/safety-vote-phase5');
 const safetyVotePhase6Routes = require('./routes/safety-vote-phase6');
 const safetyVotePhase7Routes = require('./routes/safety-vote-phase7');
+const fileLibraryRoutes      = require('./routes/file-library');
 const safetyVotePhase104Routes = require('./routes/safety-vote-phase10-4');
 const safetyVoteEngagementRoutes = require('./routes/safety-vote-engagement');
 const safetyVotePlanningRoutes = require('./routes/safety-vote-planning');
@@ -2017,6 +2018,10 @@ app.delete('/api/upload/document', authenticateToken, isAdmin, async (req, res) 
 if (forkliftRoutes.publicVerify) {
     app.get('/api/forklift/verify/:token', forkliftRoutes.publicVerify);
 }
+
+app.use('/api/public/file-library', fileLibraryRoutes.publicRouter);
+app.use('/api/file-library', authenticateToken, fileLibraryRoutes.authenticatedRouter);
+app.use('/api/admin/file-library', authenticateToken, isAdmin, fileLibraryRoutes.adminRouter);
 
 app.use('/api/bbs',               (_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

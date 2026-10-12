@@ -3,6 +3,7 @@ import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { createLatestRenderTarget, guardActionHandler, guardSubmitHandler, sectionSkeleton, withActionLock } from '../utils/async-ui.js?v=20261009-safety-vote-phase96-r1';
 import { beginBbsOperation } from '../utils/bbs-async-ui.js?v=20260908-bbs-navigation-loading-r1';
 import { renderSafetyVoteFoundation } from './admin-safety-vote-ux1.js?v=20261010-safety-vote-admin-review-r1';
+import { renderFileLibrary } from './admin-file-library.js?v=20261012-file-library-admin-r6';
 
 // â”€â”€â”€ Button loading helper (disable + spinner, returns original HTML) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const _SPIN_HTML = `<svg class="w-3.5 h-3.5 animate-spin inline-block" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>`;
@@ -164,6 +165,7 @@ let _bbsImportPreview = null;
 
 // â”€â”€â”€ Tab Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const TABS = [
+    { key: 'file-library', label: 'คลังไฟล์', icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>` },
     { key: 'safety-vote-foundation', label: 'Safety Vote', icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M5 4h14a2 2 0 012 2v14H3V6a2 2 0 012-2z"/></svg>` },
     { key: 'dashboard',    label: 'ภาพรวม',           icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>` },
     { key: 'scheduler',    label: 'กำหนดการตรวจ',      icon: `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>` },
@@ -196,7 +198,7 @@ const ADMIN_TAB_GROUPS = [
     { key: 'overview', label: 'ภาพรวม', tabs: ['dashboard', 'health'] },
     { key: 'operations', label: 'การดำเนินงาน', tabs: ['safety-vote-foundation', 'scheduler', 'safety-data', 'bbs-foundation'] },
     { key: 'people', label: 'บุคลากรและสิทธิ์', tabs: ['employees', 'registrations', 'permissions'] },
-    { key: 'governance', label: 'การกำกับดูแล', tabs: ['reference', 'audit', 'branding', 'targets'] },
+    { key: 'governance', label: 'การกำกับดูแล', tabs: ['file-library', 'reference', 'audit', 'branding', 'targets'] },
 ];
 const ADMIN_GROUP_BY_TAB = Object.fromEntries(ADMIN_TAB_GROUPS.flatMap(group => group.tabs.map(tab => [tab, group.key])));
 
@@ -387,6 +389,7 @@ async function switchTab(key) {
     else if (key === 'safety-data')   renderTask = renderSafetyCoreData(target);
     else if (key === 'bbs-foundation') renderTask = renderBbsFoundation(target);
     else if (key === 'safety-vote-foundation') renderTask = renderSafetyVoteFoundation(target);
+    else if (key === 'file-library') renderTask = renderFileLibrary(target);
     else if (key === 'reference')     renderTask = renderReference(target);
     else if (key === 'permissions')   renderTask = renderPermissions(target);
     else if (key === 'health')        renderTask = renderSystemHealth(target);

@@ -1,5 +1,16 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current Admin Public File Library handoff (Local production candidate, 2026-10-12)
+
+- Multipart UTF-8 filenames are normalized for new and legacy rows. Anonymous Public links use optional `PUBLIC_API_URL` or the request API origin, never the frontend-only `PUBLIC_APP_URL`; authenticated application links still use the frontend origin.
+- Minimal sharing policy is integrated: new Public links default to 30 days and require warning confirmation, while Authenticated defaults to no expiry. Permanent deletion is manual only, Admin-only and available after revoke, with exact-title/row-version guards, private-byte and metadata removal, plus retained audit evidence.
+- Category Master is now managed by Admins from the File Library frontend. Node/PHP assign each new category the next display order automatically, then retain editable bilingual labels/order/active state and audited soft archive; system defaults remain available, `OTHER` cannot be disabled, and its additional detail is required in UI and server validation.
+- Runtime DDL remains prohibited. Apply the foundation, access-control and category-management migrations in that order. Latest focused verification passes 60 static assertions, disposable idempotency, Node/PHP UTF-8/category/file/purge lifecycle and responsive Chrome UAT.
+
+- The System Console `คลังไฟล์` tab now prioritizes list management with a compact KPI/filter view and modal upload. Category is a governed bilingual 14-code dropdown (not free text), filterable server-side, with Node/PHP validation. It also has parity for Public/Authenticated links, expiry, delivery mode, Draft/Published lifecycle, rotation, metrics and soft revoke.
+- Runtime files never execute DDL. Apply both `20261012_file_library_foundation.sql` and `20261012_file_library_access_controls.sql` before runtime deployment; Local is migrated. Back up MySQL and `api/private/` together and retain additive schema/private files during normal rollback.
+- Focused verification passes: 60-assertion static/security contract, idempotent disposable migrations, authenticated Node/PHP lifecycle covering UTF-8 names, automatic category ordering, API-origin URLs, category/access/expiry/rotation/revoke/purge with zero residue, plus five-viewport Chrome UX UAT. No Production connection/deploy, commit or push occurred.
+
 ## Current Forgot Password modal Production follow-up (2026-09-24)
 
 - `main` commit `2ac8894` is deployed. The logged-out Forgot Password modal now renders above Login and is immediately visible/interactive; regression verifies computed z-order and the real pointer-hit top layer.

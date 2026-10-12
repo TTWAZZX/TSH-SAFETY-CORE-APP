@@ -1,5 +1,18 @@
 # TSH Safety Core Activity - Architecture
 
+## Admin Public File Library (2026-10-12)
+
+Public-sharing safeguards are presentation defaults rather than a new approval state: a new Public upload defaults to 30 days and requires an explicit disclosure confirmation, while Authenticated defaults to no expiry; Admin can still deliberately select another preset, custom expiry or no expiry. Revoke remains immediate and data-preserving. Permanent purge is a separate Admin-only, revoke-first action requiring exact title plus `RowVersion`; it removes the private object and metadata while retaining `FILE_LIBRARY_PURGE` audit evidence. There is no scheduled deletion.
+`FileLibrary_Categories` is the database-owned category master. Admin routes can create custom opaque category codes, edit labels/order, activate entries and soft-archive them; mutations are audited in both Node and PHP. Existing file references are preserved when a category is archived. The seeded `OTHER` row is always active, and `FileLibrary_Items.CategoryDetail` is required and bounded to 120 characters only when `Category='OTHER'`.
+
+The file library is an independently bounded System Console capability. Management routes are Admin-only at `/api/admin/file-library`. `AccessMode=Public` permits anonymous delivery through `/api/public/file-library/:token`; `AccessMode=Authenticated` uses an application share intent and bearer-protected `/api/file-library/:token`. The JWT is never placed in the share URL. The opaque token is 32 random bytes encoded as 43-character base64url and can be rotated. Delivery requires Published, non-expired metadata and a present basename-confined private file, so Draft, expired, revoked, wrong-access, unknown and missing files fail closed. Delivery is `no-store` so rotation/revocation is immediate.
+
+`FileLibrary_Items` owns metadata, content SHA-256, access/delivery modes, expiry, lifecycle, optimistic `RowVersion`, aggregate view count, last-access time and audit actor fields. Node stores bytes in `backend/private-uploads/file-library/`; PHP shared hosting stores them in `api/private/file-library/` beneath the existing deny-all `api/private/.htaccess`. Neither location is served statically. Normal revoke retains bytes; database and private storage must be backed up/restored together.
+
+`Category` stores one stable code from the shared bilingual information-management master rather than a display label. Fourteen system categories are seeded, while Admin-created categories receive server-generated `CUSTOM_*` codes. Node and PHP reject unknown or inactive codes for new writes and support exact category filtering; labels can evolve without rewriting stored item rows.
+
+Upload accepts one file up to 25 MB and verifies both allowlisted extension and content signature. Supported types are JPG, PNG, WebP, PDF, DOCX, XLSX and PPTX. Images/PDF use inline delivery; Office files use attachment delivery. Responses set MIME-sniffing denial, no-referrer, sandbox CSP and short revalidation caching. Node additionally applies route rate limiting. Runtime performs no DDL; the additive migration is the only schema owner.
+
 ## Account email delivery and retry boundary (Local, 2026-09-24)
 
 Company Email verification and Password Reset reuse the shared Node/PHP SMTP transport but intentionally do not enter a durable module outbox. Their tokens are short-lived security credentials: a retry must mint a fresh random token, store only its SHA-256 digest and supersede the older Pending link. Company Email exposes this as Resend; Password Reset repeats the enumeration-safe request. Delivery outcomes are retained in account audit data, and Password Reset additionally retains `DeliveryStatus` on its request row.

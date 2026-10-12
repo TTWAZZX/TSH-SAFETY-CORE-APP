@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - Roadmap
 
+## Admin Public File Library (2026-10-12)
+
+The minimal sharing policy is complete locally: Public defaults to 30 days with disclosure confirmation, Authenticated defaults to no expiry, and Admin can manually purge a revoked file through an exact-title two-step flow. No approval workflow or automatic deletion scheduler is planned for this release.
+Admin-managed Category Master and conditional Other detail are complete locally: create/edit/order/activate/soft-archive runs from the frontend, all mutations are audited with Node/PHP parity, standard rows remain seeded, and historical file references are retained.
+
+Core implementation is complete locally and is a Production candidate: compact list-first Admin UX, modal upload, governed/filterable 14-code category master, Public or Authenticated access, expiry, delivery mode, token rotation, revoke, access metrics, Node/PHP parity, private storage and additive schema all pass focused verification. The remaining phase is an explicitly authorized controlled Production deployment. Optional later enhancements are QR generation, per-department/person ACL, password-protected external links, versioned replacement and antivirus integration; each requires a separate policy decision.
+
 ## BBS Admin-only Designer UAT in progress (2026-09-05)
 
 Visual Designer and Designer printing are enabled for Admin-only UAT with the staged gate still `1/0`. Next, create a real Draft layout for each required Personal/Department template, verify print output through the business printer, and retain the Active layout only after acceptance. Then add safe Template/Designer edit and archive/delete behavior without removing historical cards, print records or private artwork. Ordinary-user rollout remains a separate Phase 10E decision.

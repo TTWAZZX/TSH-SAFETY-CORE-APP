@@ -19,7 +19,7 @@ const loadPatrolPage = lazyPage('./pages/patrol.js?v=20261011-design-system-a11y
 const loadCccfPage = lazyPage('./pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2', 'loadCccfPage');
 const loadKpiPage = lazyPage('./pages/kpi.js?v=20261011-design-system-a11y-r1', 'loadKpiPage');
 const loadYokotenPage = lazyPage('./pages/yokoten.js?v=20260825-yokoten-department-relevance-r1', 'loadYokotenPage');
-const loadAdminPage = lazyPage('./pages/admin.js?v=20261011-login-communications-r9-portrait-preview', 'loadAdminPage');
+const loadAdminPage = lazyPage('./pages/admin.js?v=20261012-file-library-admin-r6', 'loadAdminPage');
 const loadMachineSafetyPage = lazyPage('./pages/machine-safety.js?v=20261011-design-system-a11y-r1', 'loadMachineSafetyPage');
 const loadForkliftPage = lazyPage('./pages/forklift.js?v=20261011-design-system-a11y-r1', 'loadForkliftPage');
 const loadOjtPage = lazyPage('./pages/ojt.js?v=20260820-card-image-phase2d', 'loadOjtPage');
@@ -40,6 +40,7 @@ const loadSearchPage = lazyPage('./pages/search.js?v=20261005-safety360-data-int
 import { initLoginModuleGuides } from './login-guides.js?v=20261011-login-branding-background-r2';
 import { MODULE_ORDER, moduleTitleMap } from './module-meta.js?v=20260825-bbs-phase4-r1';
 import { BBS_QR_INTENT_KEY, BBS_QR_PENDING_KEY, shouldDiscardBbsQrIntent, isBbsRolloutBlockedError, normalizeBbsQrRoute } from './utils/bbs-qr-intent.js?v=20260917-bbs-qr-login-intent-r1';
+import { captureFileLibraryIntent, consumeFileLibraryIntent } from './file-library-link.js?v=20261012-file-library-access-r2';
 
 const CARD_IMAGE_EXPORT_V2_MODULES = Object.freeze([
     'dashboard',
@@ -313,6 +314,7 @@ async function bootstrapFrontend() {
 
     await captureCompanyEmailVerification();
     capturePasswordResetLink();
+    captureFileLibraryIntent();
     await captureBbsQrIntent();
 
     // 🔒 รอ session ให้จบก่อนทำอย่างอื่น
@@ -592,7 +594,8 @@ async function startApp(user, onboardingStatus = null) {
 
     if (await consumeBbsQrIntent()) return;
     consumePendingGuideRoute();
-    handleRouting();
+    await handleRouting();
+    await consumeFileLibraryIntent();
 }
 
 async function captureBbsQrIntent() {

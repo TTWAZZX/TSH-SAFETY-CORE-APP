@@ -1,0 +1,37 @@
+-- Admin-managed public file library.
+-- Additive and idempotent. Runtime code must not execute this DDL.
+
+CREATE TABLE IF NOT EXISTS FileLibrary_Items (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  PublicToken CHAR(43) NOT NULL,
+  Title VARCHAR(200) NOT NULL,
+  Description VARCHAR(1000) NULL,
+  Category VARCHAR(80) NULL,
+  OriginalName VARCHAR(255) NOT NULL,
+  StoredName VARCHAR(255) NOT NULL,
+  MimeType VARCHAR(160) NOT NULL,
+  FileExtension VARCHAR(16) NOT NULL,
+  FileSize BIGINT UNSIGNED NOT NULL,
+  ContentSha256 CHAR(64) NOT NULL,
+  Status VARCHAR(16) NOT NULL DEFAULT 'Published',
+  AccessMode VARCHAR(20) NOT NULL DEFAULT 'Public',
+  DeliveryMode VARCHAR(16) NOT NULL DEFAULT 'Auto',
+  ExpiresAt DATETIME NULL,
+  PublishedAt DATETIME NULL,
+  ViewCount BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  LastAccessedAt DATETIME NULL,
+  UploadedBy VARCHAR(50) NOT NULL,
+  UpdatedBy VARCHAR(50) NOT NULL,
+  RemovedAt DATETIME NULL,
+  RemovedBy VARCHAR(50) NULL,
+  RowVersion INT UNSIGNED NOT NULL DEFAULT 1,
+  CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_file_library_token (PublicToken),
+  KEY idx_file_library_status_created (Status, CreatedAt),
+  KEY idx_file_library_access_status (AccessMode, Status),
+  KEY idx_file_library_category (Category),
+  KEY idx_file_library_expiry (ExpiresAt),
+  KEY idx_file_library_sha256 (ContentSha256)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -5149,3 +5149,36 @@ body[data-active-page="admin"] #admin-page:not(.hidden) {
 :is(.sv-campaign-table td, .sv-action-bar, .sv-context-actions, .sv-campaign-card__actions, .sv-review-detail > section) {
     border-color: var(--app-border);
 }
+/* Admin File Library: keep controls touch-safe even when the root font size is compacted. */
+[data-file-library-workspace] button,
+[data-file-library-workspace] a,
+[data-file-library-workspace] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-file-library-workspace] select,
+#file-library-upload-form button,
+#file-library-upload-form input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+#file-library-upload-form select,
+#file-library-upload-form textarea,
+#file-library-edit-form button,
+#file-library-edit-form input:not([type="radio"]),
+#file-library-edit-form select,
+#file-library-edit-form textarea,
+#file-library-category-form button,
+#file-library-category-form input:not([type="checkbox"]),
+#file-library-category-form select,
+#file-library-upload-form [data-access-choice],
+#file-library-edit-form [data-access-choice] {
+    /* The shared modal opens at scale(.95); 47px remains >= 44px while it animates. */
+    min-height: 47px;
+}
+
+[data-file-library-workspace] a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#file-library-upload-form [data-access-choice],
+#file-library-edit-form [data-access-choice] {
+    display: flex;
+    align-items: center;
+}

@@ -9,6 +9,7 @@ require __DIR__ . '/handlers/foundation.php';
 require __DIR__ . '/handlers/platform.php';
 require __DIR__ . '/handlers/branding.php';
 require __DIR__ . '/handlers/storage.php';
+require __DIR__ . '/handlers/file_library.php';
 require __DIR__ . '/handlers/targets.php';
 require __DIR__ . '/handlers/people.php';
 require __DIR__ . '/handlers/content.php';
@@ -711,6 +712,7 @@ try {
     handle_branding_routes($method, $path);
     handle_platform_routes($method, $path);
     handle_storage_routes($method, $path);
+    handle_file_library_routes($method, $path);
     handle_target_routes($method, $path);
     handle_people_routes($method, $path);
     handle_content_routes($method, $path);

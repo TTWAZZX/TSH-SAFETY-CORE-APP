@@ -1,5 +1,19 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-10-12 - Admin Public File Library local production candidate
+
+- Fixed Thai/UTF-8 original filenames corrupted by multipart Latin-1 interpretation and corrected Public links to target the API origin rather than `PUBLIC_APP_URL`; existing affected rows render/download correctly without data rewriting.
+- Integrated the agreed minimal policy into the existing forms: Public links display a disclosure/confirmation and default to 30 days; Authenticated links default to no expiry without adding an approval workflow.
+- Added Admin-only revoke-first permanent deletion with exact-title confirmation, optimistic concurrency, private-byte/metadata removal, Node/PHP parity and retained audit logging. Automatic deletion remains disabled.
+- Upgraded the fixed category dropdown to an Admin-managed frontend Category Master with add/edit/reorder/activate/soft-archive actions, automatic next-order assignment for new categories, audited Node/PHP API parity and data-preserving references. The seeded `OTHER` category remains mandatory and now reveals and requires a 120-character detail field.
+- Added the idempotent `20261012_file_library_category_management.sql` migration and expanded verification to 60 static/security assertions plus Node/PHP UTF-8/API-origin, automatic category order, category CRUD, Other-detail and revoke-first purge lifecycle coverage.
+
+- Added an Admin-only, responsive System Console file library with Public/Authenticated access, never/preset/custom expiry, inline/forced download, link rotation, progress upload, searchable lifecycle cards and data-preserving revoke.
+- Reworked the Admin workspace into a compact list-first layout with modal upload and added a governed bilingual 14-code category dropdown plus server-side category filtering/validation.
+- Added Node/PHP parity for Admin management, anonymous Public delivery and bearer-protected member delivery. Member share links survive Login without placing JWT in the URL. Files use private storage, verified signatures, 25 MB limit, basename confinement, content hashes, secure disposition/headers, optimistic updates and mutation audit.
+- Added and locally applied the additive/idempotent `FileLibrary_Items` migration. Focused static/security, disposable migration, authenticated Node/PHP lifecycle and five-viewport Browser UAT pass with zero fixture row/file residue.
+- Production remains unchanged. Fresh Production database/private-storage backup, migration, scoped upload/hash verification and authenticated/anonymous smoke require separate deployment authorization.
+
 ## 2026-10-06 - Johnny AI Phase 1-7.1 deployed to Production
 
 - Deployed immutable release commit `a79927c` to the PHP Production target: 13 runtime files covering the global responsive Side Drawer, 21-module system-usage knowledge, answer feedback/observability, safe workflow navigation, privacy/retention controls, authenticated private KB files, fail-closed system-data/schema behavior and Node/PHP parity.

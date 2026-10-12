@@ -70,6 +70,7 @@ return [
     'fourm_admin_email' => (string) $read('FOURM_ADMIN_EMAIL', ''),
     'public_upload_base_url' => (string) $read('PUBLIC_UPLOAD_BASE_URL', ''),
     'public_app_url' => (string) $read('PUBLIC_APP_URL', $read('APP_BASE_URL', '')),
+    'public_api_url' => (string) $read('PUBLIC_API_URL', ''),
     'gemini_api_key' => (string) $read('GEMINI_API_KEY', ''),
     'gemini_model' => (string) $read('GEMINI_MODEL', 'gemini-3.5-flash'),
     'gemini_models' => (string) $read('GEMINI_MODELS', $read('GEMINI_MODEL', 'gemini-3.5-flash') . ',gemini-2.5-flash,gemini-2.5-flash-lite'),

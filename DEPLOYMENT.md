@@ -1,5 +1,20 @@
 # TSH Safety Core Activity - Deployment
 
+## Admin Public File Library production candidate (2026-10-12, not deployed)
+
+Required predeploy sequence:
+
+1. Build an immutable scoped candidate and confirm no unrelated dirty file is included.
+   If the browser and API use different origins, configure `PUBLIC_API_URL` to the externally reachable API origin; keep `PUBLIC_APP_URL` as the frontend application origin. If they share an origin, `PUBLIC_API_URL` may remain unset.
+2. Take and verify a fresh Production backup of MySQL plus the complete `api/private/` tree. Do not back up or publish secret configuration values.
+3. Apply `backend/migrations/20261012_file_library_foundation.sql`, `backend/migrations/20261012_file_library_access_controls.sql`, then `backend/migrations/20261012_file_library_category_management.sql`; verify the access/delivery/last-access/category-detail columns, 14 seeded system categories, unique token/access/category indexes and unchanged counts for unrelated tables.
+4. Upload only the allowlisted PHP/frontend runtime paths: `api/index.php`, `api/handlers/file_library.php`, `public/js/file-library-link.js`, `public/js/pages/admin-file-library.js`, `public/js/pages/admin.js`, `public/js/main.js`, `public/style.css` and `index.html`. Node parity files are not PHP shared-hosting runtime.
+5. Download every uploaded path and verify SHA-256 byte equality before smoke testing. Confirm `api/private/.htaccess` still denies direct HTTP access.
+6. Authenticated Admin smoke: create/edit/archive one temporary category from the frontend, validate inactive/unknown categories and required Other detail, confirm Public defaults to 30 days with disclosure, Authenticated defaults to no expiry, then test both access modes, custom expiry, inline/forced download, Draft denial, member Login flow, token rotation and revoke. Public access to member-only bytes must be `404`; anonymous member access must be `401`; ordinary User and category management must be `403`.
+7. On the disposable smoke item only, prove purge is denied before revoke and on wrong title, then permanently delete it after revoke. Verify metadata, original private bytes and `.purge-*` quarantine residue are all zero while the `FILE_LIBRARY_PURGE` audit row remains. Never run this smoke against a real file.
+
+Normal runtime rollback restores the prior allowlisted files and leaves remaining `FileLibrary_Items` plus private bytes intact. A completed permanent purge is intentionally irreversible and cannot be recovered by runtime rollback; Production backup/restore is the recovery boundary.
+
 ## Johnny AI Phase 1-7.1 (2026-10-06)
 
 Commit `a79927c` is deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The scoped PHP runtime contains 13 files from the approved candidate manifest; Node files remain parity/test source.
