@@ -9,6 +9,7 @@ const phpRoute = read('api/handlers/workflow_phase6.php');
 const frontend = read('public/js/pages/ky.js');
 const main = read('public/js/main.js');
 const index = read('index.html');
+const apiUat = read('backend/scripts/ky-annual-video-evidence-api-uat.js');
 
 for (const source of [nodeRoute, phpRoute]) {
     assert.match(source, /ky_activity_external_video_evidence/i, 'per-activity external video evidence table must exist in both runtimes');
@@ -28,7 +29,9 @@ for (const source of [nodeRoute, phpRoute]) {
     assert.match(source, /KY_ANNUAL_VIDEO_HASH_MISMATCH|failed SHA-256 verification/, 'physical deletion must fail on hash mismatch');
     assert.match(source, /RowVersion/, 'mutations must use optimistic concurrency');
     assert.match(source, /ProductionDeletedAt/, 'metadata must retain deletion state');
-    assert.match(source, /KY_VIDEO_PROTECTED_BY_RETENTION/, 'legacy replacement and activity deletion paths must fail closed');
+    assert.match(source, /KY_VIDEO_PROTECTED_BY_RETENTION/, 'legacy video replacement paths must fail closed');
+    assert.match(source, /KY_ACTIVITY_VOID_DUPLICATE/, 'protected duplicate activities must be voided with audit instead of deleting retained evidence');
+    assert.match(source, /excludedFromStatistics/, 'protected duplicate void must explicitly record statistics exclusion');
     assert.match(source, /ProductionDeletedAt=NULL/, 'a corrected replacement must reset the previous physical-deletion marker');
     assert.match(source, /activity video reference changed|Activity.*VideoUrl.*FOR UPDATE/is, 'deletion must lock and revalidate the current activity video reference');
     assert.match(source, /HasProductionVideo/, 'activity projections must identify Production video evidence');
@@ -120,7 +123,16 @@ assert.match(frontend, /Production \$\{row\.productionVideo\}\/\$\{row\.producti
 assert.match(frontend, /External verified \$\{row\.verifiedExternalVideo\}\/\$\{row\.externalRequired\}/, 'follow-up must show verified External requirement progress');
 assert.match(frontend, /btn-ky-contest-entry/, 'eligible Unit activities must expose contest submission');
 assert.match(frontend, /Unit contest entry/, 'Showcase cards must identify annual Unit representatives');
-assert.match(main, /ky\.js\?v=20260923-ky-annual-contest-r9/, 'cache chain must expose the annual compliance and contest bundle');
-assert.match(index, /main\.js\?v=20260923-fourm-curriculum-soft-disable-r1/, 'HTML entry point must invalidate the cached main module');
+assert.match(frontend, /btn-ky-production-video-manager/, 'Production activities must expose the guided video-file manager to Admin');
+assert.match(frontend, /\['admin', 'super_admin'\]\.includes\(String\(user\.role \|\| user\.Role/, 'KY Admin UX must normalize role casing consistently with the API');
+assert.match(frontend, /data-ky-video-manager-register/, 'guided manager must expose External Backup registration when missing');
+assert.match(frontend, /data-ky-video-manager-verify/, 'guided manager must expose the pending Admin Verify step');
+assert.match(frontend, /data-ky-video-manager-delete/, 'guided manager must expose direct guarded Production deletion when ready');
+assert.match(frontend, /ต้องเปลี่ยนตัวแทนก่อนลบ/, 'guided manager must explain the active contest retention hold');
+assert.match(apiUat, /uploadFollowupVideo\(inventoryActivityId/, 'API UAT must create the Inventory fixture through the real follow-up upload lifecycle');
+assert.match(apiUat, /video-upload\/\$\{uploadId\}\/chunk/, 'API UAT must send the follow-up video through the chunk endpoint');
+assert.match(apiUat, /video-inventory\/declare[\s\S]*video-inventory\/\$\{inventoryDeclared\.data\.id\}\/verify[\s\S]*video-inventory\/delete-production/, 'API UAT must cover follow-up upload through Inventory declare, Verify, and guarded Production deletion');
+assert.match(main, /ky\.js\?v=20261015-ky-video-manager-r1/, 'cache chain must expose the guided video-manager KY bundle');
+assert.match(index, /main\.js\?v=20261015-ky-video-manager-r1/, 'HTML entry point must invalidate the cached main module');
 
 console.log('KY annual video evidence contract: PASS');

@@ -613,7 +613,7 @@ async function buildKyReminderQueue(year, month) {
         db.query(
             `SELECT DISTINCT Department, COALESCE(SafetyUnit, '') AS SafetyUnit
              FROM KY_Activities
-             WHERE YEAR(ActivityDate) = ? AND MONTH(ActivityDate) = ?`,
+             WHERE YEAR(ActivityDate) = ? AND MONTH(ActivityDate) = ? AND Status <> 'Voided'`,
             [year, month]
         ).then(([rows]) => rows),
         db.query(
@@ -1424,7 +1424,7 @@ router.get('/stats', async (req, res) => {
                 SUM(Status = 'Reviewed')               AS reviewed,
                 SUM(Status = 'Closed')                 AS closed
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ? ${deptFilter}
+            WHERE YEAR(ActivityDate) = ? AND Status <> 'Voided' ${deptFilter}
         `, [year, ...deptParams]);
 
         const productionVideo = kyProductionVideoSql('a');
@@ -1437,7 +1437,7 @@ router.get('/stats', async (req, res) => {
                 SUM(${productionVideo} OR ${verifiedExternal}) AS videoEvidenceTotal,
                    SUM(NOT (${productionVideo}) AND NOT (${verifiedExternal}) AND ${pendingExternal}) AS pendingExternalVideo
             FROM KY_Activities a
-            WHERE YEAR(a.ActivityDate) = ? ${evidenceDeptFilter}
+            WHERE YEAR(a.ActivityDate) = ? AND a.Status <> 'Voided' ${evidenceDeptFilter}
         `, [year, ...deptParams]);
         const videoEvidenceTotal = Number(videoEvidenceRow?.videoEvidenceTotal || 0);
         const activityTotal = Number(kpi.total || 0);
@@ -1454,7 +1454,7 @@ router.get('/stats', async (req, res) => {
         const [monthly] = await db.query(`
             SELECT MONTH(ActivityDate) AS month, COUNT(*) AS count
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ? ${deptFilter}
+            WHERE YEAR(ActivityDate) = ? AND Status <> 'Voided' ${deptFilter}
             GROUP BY MONTH(ActivityDate)
             ORDER BY month
         `, [year, ...deptParams]);
@@ -1465,14 +1465,14 @@ router.get('/stats', async (req, res) => {
         const [rawByDept] = await db.query(`
             SELECT Department, COUNT(*) AS count
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ?
+            WHERE YEAR(ActivityDate) = ? AND Status <> 'Voided'
             GROUP BY Department
             ORDER BY count DESC`, [year]);
 
         const [rawDeptMonthly] = await db.query(`
             SELECT Department, MONTH(ActivityDate) AS month, COUNT(*) AS count
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ?
+            WHERE YEAR(ActivityDate) = ? AND Status <> 'Voided'
             GROUP BY Department, MONTH(ActivityDate)
             ORDER BY Department, month`, [year]);
         const canonicalDeptByKey = new Map(targetDepts.map(dept => [kyNormKey(dept), dept]));
@@ -1509,7 +1509,7 @@ router.get('/stats', async (req, res) => {
         const [statusDist] = await db.query(`
             SELECT Status, COUNT(*) AS count
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ? ${deptFilter}
+            WHERE YEAR(ActivityDate) = ? AND Status <> 'Voided' ${deptFilter}
             GROUP BY Status
         `, [year, ...deptParams]);
 
@@ -1517,7 +1517,7 @@ router.get('/stats', async (req, res) => {
         const [riskCat] = await db.query(`
             SELECT COALESCE(RiskCategory, 'ทั่วไป') AS label, COUNT(*) AS count
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ? ${deptFilter}
+            WHERE YEAR(ActivityDate) = ? AND Status <> 'Voided' ${deptFilter}
             GROUP BY RiskCategory
             ORDER BY count DESC
         `, [year, ...deptParams]);
@@ -1526,7 +1526,7 @@ router.get('/stats', async (req, res) => {
         const [yearlyByDeptUnit] = await db.query(`
             SELECT Department, COALESCE(SafetyUnit, '') AS SafetyUnit, COUNT(*) AS submitted
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ? ${deptFilter}
+            WHERE YEAR(ActivityDate) = ? AND Status <> 'Voided' ${deptFilter}
             GROUP BY Department, COALESCE(SafetyUnit, '')
         `, [year, ...deptParams]);
 
@@ -1534,7 +1534,7 @@ router.get('/stats', async (req, res) => {
         const [topKeywords] = await db.query(`
             SELECT KYTKeyword AS keyword, COUNT(*) AS count
             FROM KY_Activities
-            WHERE YEAR(ActivityDate) = ? AND KYTKeyword IS NOT NULL AND KYTKeyword != '' ${deptFilter}
+            WHERE YEAR(ActivityDate) = ? AND Status <> 'Voided' AND KYTKeyword IS NOT NULL AND KYTKeyword != '' ${deptFilter}
             GROUP BY KYTKeyword
             ORDER BY count DESC
             LIMIT 10
@@ -1557,7 +1557,7 @@ router.get('/stats', async (req, res) => {
             try {
                 const [submitted] = await db.query(
                     `SELECT DISTINCT Department, COALESCE(SafetyUnit, '') AS SafetyUnit FROM KY_Activities
-                     WHERE MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? ${deptFilter}`,
+                     WHERE MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? AND Status <> 'Voided' ${deptFilter}`,
                     [curMonth, curYear, ...deptParams]
                 );
                 const submittedDeptSet = new Set(submitted.map(r => r.Department));
@@ -1576,7 +1576,7 @@ router.get('/stats', async (req, res) => {
             } catch (_) {
                 const [submitted] = await db.query(
                     `SELECT DISTINCT Department FROM KY_Activities
-                     WHERE MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? ${deptFilter}`,
+                     WHERE MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? AND Status <> 'Voided' ${deptFilter}`,
                     [curMonth, curYear, ...deptParams]
                 );
                 const submittedSet = new Set(submitted.map(r => r.Department));
@@ -1686,12 +1686,12 @@ router.get('/check', async (req, res) => {
         const [rows] = hasUnits && validUnit
             ? await db.query(
                 `SELECT COUNT(*) AS cnt FROM KY_Activities
-                 WHERE Department = ? AND SafetyUnit = ? AND YEAR(ActivityDate) = ?`,
+                 WHERE Department = ? AND SafetyUnit = ? AND YEAR(ActivityDate) = ? AND Status <> 'Voided'`,
                 [dept, validUnit, y]
             )
             : await db.query(
                 `SELECT COUNT(*) AS cnt FROM KY_Activities
-                 WHERE Department = ? AND YEAR(ActivityDate) = ?`,
+                 WHERE Department = ? AND YEAR(ActivityDate) = ? AND Status <> 'Voided'`,
                 [dept, y]
             );
         const count = rows[0]?.cnt || 0;
@@ -1701,7 +1701,7 @@ router.get('/check', async (req, res) => {
         const [monthRows] = hasUnits && validUnit
             ? await db.query(
                 `SELECT id FROM KY_Activities
-                 WHERE Department = ? AND SafetyUnit = ? AND MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ?
+                 WHERE Department = ? AND SafetyUnit = ? AND MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? AND Status <> 'Voided'
                  LIMIT 1`,
                 [dept, validUnit, now.getMonth() + 1, y]
             )
@@ -1709,7 +1709,7 @@ router.get('/check', async (req, res) => {
                 ? [[], null]
                 : await db.query(
                     `SELECT id FROM KY_Activities
-                     WHERE Department = ? AND MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ?
+                     WHERE Department = ? AND MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? AND Status <> 'Voided'
                      LIMIT 1`,
                     [dept, now.getMonth() + 1, y]
                 );
@@ -2111,6 +2111,7 @@ router.get('/video-showcase', async (req, res) => {
             ) rc ON rc.ActivityID = a.id
             LEFT JOIN KY_Video_Reactions ur ON ur.ActivityID = a.id AND ur.EmployeeID = ?
             WHERE ce.EntryYear = ? AND ce.Status='Submitted'
+              AND a.Status <> 'Voided'
               AND a.VideoUrl IS NOT NULL AND a.VideoUrl <> ''
               AND COALESCE(a.ShowVideoOnDashboard, 1) = 1
             ORDER BY COALESCE(a.IsVideoPinned, 0) DESC, COALESCE(rc.ReactionTotal, 0) DESC, a.CreatedAt DESC
@@ -2339,7 +2340,7 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
                     SUM(CASE WHEN COALESCE(TRIM(a.VideoUrl),'')='' AND ${annualScopeVerifiedExternal} THEN 1 ELSE 0 END) AS VerifiedExternalVideo,
                     SUM(CASE WHEN COALESCE(TRIM(a.VideoUrl),'')='' AND NOT (${annualScopeVerifiedExternal}) AND ${annualScopePendingExternal} THEN 1 ELSE 0 END) AS PendingExternalVideo
              FROM KY_Activities a
-             WHERE YEAR(a.ActivityDate)=? GROUP BY a.Department,a.SafetyUnit`, [year]
+             WHERE YEAR(a.ActivityDate)=? AND a.Status <> 'Voided' GROUP BY a.Department,a.SafetyUnit`, [year]
         );
         const activityScopeState = new Map(scopeActivityRows.map(row => [kyAnnualScopeKey(row.Department, row.SafetyUnit), {
             productionVideo: Number(row.ProductionVideo || 0),
@@ -2375,7 +2376,7 @@ router.get('/annual-video-evidence', isAdmin, async (req, res) => {
                     a.ReporterName, a.VideoUrl
              FROM KY_Activities a
              LEFT JOIN KY_Annual_Video_Evidence e ON e.ActivityID = a.id
-             WHERE YEAR(a.ActivityDate) = ? AND COALESCE(TRIM(a.VideoUrl), '') <> '' AND e.id IS NULL
+             WHERE YEAR(a.ActivityDate) = ? AND a.Status <> 'Voided' AND COALESCE(TRIM(a.VideoUrl), '') <> '' AND e.id IS NULL
              ORDER BY a.ActivityDate DESC, a.CreatedAt DESC LIMIT 300`,
             [year]
         );
@@ -2958,7 +2959,7 @@ router.get('/evidence-overview', async (req, res) => {
                    a.AttachmentUrl, a.VideoUrl, a.Status, a.Participants, a.CreatedAt,
                    ${kyVideoEvidenceSelectSql('a')}
             FROM KY_Activities a
-            WHERE YEAR(a.ActivityDate) = ?
+            WHERE YEAR(a.ActivityDate) = ? AND a.Status <> 'Voided'
             ORDER BY a.ActivityDate DESC, a.CreatedAt DESC
         `, [year]);
         const unmatchedActivities = [];
@@ -3201,6 +3202,7 @@ router.get('/videos', async (req, res) => {
         const where = [
             'a.VideoUrl IS NOT NULL',
             "a.VideoUrl <> ''",
+            "a.Status <> 'Voided'",
             'YEAR(a.ActivityDate) = ?',
         ];
         const params = [year];
@@ -3680,7 +3682,7 @@ router.get('/', async (req, res) => {
         const verifiedExternal = kyVerifiedExternalVideoSql('a');
         const pendingExternal = kyPendingExternalVideoSql('a');
         const videoEvidence = kyVideoEvidenceSql('a');
-        let sql = `SELECT a.*, ${kyVideoEvidenceSelectSql('a')} FROM KY_Activities a WHERE 1=1`;
+        let sql = `SELECT a.*, ${kyVideoEvidenceSelectSql('a')} FROM KY_Activities a WHERE a.Status <> 'Voided'`;
         const params = [];
 
         if (status && status !== 'all') { sql += ' AND a.Status = ?'; params.push(status); }
@@ -3963,7 +3965,7 @@ router.post('/', handleKyUpload, async (req, res) => {
 
         const [[{ cnt }]] = await db.query(
             `SELECT COUNT(*) AS cnt FROM KY_Activities
-             WHERE Department = ? ${safeSafetyUnit ? 'AND SafetyUnit = ?' : ''} AND YEAR(ActivityDate) = ?`,
+             WHERE Department = ? ${safeSafetyUnit ? 'AND SafetyUnit = ?' : ''} AND YEAR(ActivityDate) = ? AND Status <> 'Voided'`,
             safeSafetyUnit ? [dept, safeSafetyUnit, year] : [dept, year]
         );
         if (cnt >= target) {
@@ -3980,7 +3982,7 @@ router.post('/', handleKyUpload, async (req, res) => {
         const month = parsedDate.getMonth() + 1;
         const [monthCheck] = await db.query(
             `SELECT id FROM KY_Activities
-             WHERE Department = ? ${safeSafetyUnit ? 'AND SafetyUnit = ?' : ''} AND MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ?
+             WHERE Department = ? ${safeSafetyUnit ? 'AND SafetyUnit = ?' : ''} AND MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? AND Status <> 'Voided'
              LIMIT 1`,
             safeSafetyUnit ? [dept, safeSafetyUnit, month, year] : [dept, month, year]
         );
@@ -4182,7 +4184,7 @@ router.put('/:id', isAdmin, handleKyUpload, async (req, res) => {
 
         const [[scopedYearCount]] = await db.query(
             `SELECT COUNT(*) AS cnt FROM KY_Activities
-             WHERE Department = ? ${useScopedUnit ? 'AND SafetyUnit = ?' : ''} AND YEAR(ActivityDate) = ? AND id <> ?`,
+             WHERE Department = ? ${useScopedUnit ? 'AND SafetyUnit = ?' : ''} AND YEAR(ActivityDate) = ? AND id <> ? AND Status <> 'Voided'`,
             useScopedUnit ? [targetDepartment, safeScopedUnit, scopedYear, id] : [targetDepartment, scopedYear, id]
         );
         if ((scopedYearCount?.cnt || 0) >= scopedTarget) {
@@ -4197,7 +4199,7 @@ router.put('/:id', isAdmin, handleKyUpload, async (req, res) => {
 
         const [scopedMonthRows] = await db.query(
             `SELECT id FROM KY_Activities
-             WHERE Department = ? ${useScopedUnit ? 'AND SafetyUnit = ?' : ''} AND MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? AND id <> ?
+             WHERE Department = ? ${useScopedUnit ? 'AND SafetyUnit = ?' : ''} AND MONTH(ActivityDate) = ? AND YEAR(ActivityDate) = ? AND id <> ? AND Status <> 'Voided'
              LIMIT 1`,
             useScopedUnit ? [targetDepartment, safeScopedUnit, scopedMonth, scopedYear, id] : [targetDepartment, scopedMonth, scopedYear, id]
         );
@@ -4370,18 +4372,53 @@ router.delete('/:id', isAdmin, async (req, res) => {
     try {
         await ensureTables();
         connection = await db.getConnection();
+        await connection.beginTransaction();
         const [rows] = await connection.query(
-            `SELECT a.id, a.AttachmentUrl, a.VideoUrl,
+            `SELECT a.id, a.AttachmentUrl, a.VideoUrl, a.Status,
                     EXISTS(SELECT 1 FROM KY_Annual_Video_Evidence ave WHERE ave.ActivityID = a.id) AS HasAnnualVideoEvidence,
-                    EXISTS(SELECT 1 FROM KY_Video_File_Inventory inv WHERE inv.ActivityID = a.id) AS HasVideoInventory
-             FROM KY_Activities a WHERE a.id = ?`,
+                    EXISTS(SELECT 1 FROM KY_Video_File_Inventory inv WHERE inv.ActivityID = a.id) AS HasVideoInventory,
+                    EXISTS(SELECT 1 FROM KY_Activity_External_Video_Evidence ext WHERE ext.ActivityID = a.id) AS HasActivityExternalEvidence,
+                    EXISTS(SELECT 1 FROM KY_Annual_Unit_Contest_Entries ce WHERE ce.ActivityID = a.id AND ce.Status='Submitted') AS HasActiveContestEntry
+             FROM KY_Activities a WHERE a.id = ? FOR UPDATE`,
             [req.params.id]
         );
-        if (!rows.length) return res.status(404).json({ success: false, message: 'ไม่พบกิจกรรม KY' });
-        if (rows[0]?.VideoUrl || Number(rows[0]?.HasAnnualVideoEvidence || 0) || Number(rows[0]?.HasVideoInventory || 0)) {
-            return res.status(409).json({ success: false, code: 'KY_VIDEO_PROTECTED_BY_RETENTION', message: 'This activity is protected by its video evidence retention record and cannot be deleted.' });
+        if (!rows.length) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: 'ไม่พบกิจกรรม KY' });
         }
-        await connection.beginTransaction();
+        if (rows[0].Status === 'Voided') {
+            await connection.rollback();
+            return res.json({ success: true, data: { id: req.params.id, voided: true }, message: 'รายการนี้ถูกยกเลิกแล้ว' });
+        }
+        if (Number(rows[0]?.HasActiveContestEntry || 0)) {
+            await connection.rollback();
+            return res.status(409).json({ success: false, code: 'KY_CONTEST_ENTRY_RETENTION_HOLD', message: 'ยกเลิกรายการนี้ไม่ได้ขณะที่เป็นรายการประกวดประจำปี กรุณาถอนรายการประกวดก่อน' });
+        }
+        if (rows[0]?.VideoUrl || Number(rows[0]?.HasAnnualVideoEvidence || 0) || Number(rows[0]?.HasVideoInventory || 0) || Number(rows[0]?.HasActivityExternalEvidence || 0)) {
+            const reason = String(req.body?.reason || 'Duplicate monthly submission').trim().slice(0, 500);
+            await connection.query(
+                `UPDATE KY_Activities
+                 SET Status='Voided', ShowVideoOnDashboard=0, IsVideoPinned=0,
+                     AdminComment=CONCAT_WS('\n', NULLIF(AdminComment,''), ?)
+                 WHERE id=?`,
+                [`ยกเลิกรายการซ้ำ: ${reason}`, req.params.id]
+            );
+            await connection.commit();
+            committed = true;
+            await logAudit(req, {
+                action: 'KY_ACTIVITY_VOID_DUPLICATE',
+                module: 'ky',
+                targetType: 'KY_Activities',
+                targetId: req.params.id,
+                detail: reason,
+                metadata: { evidenceRetained: true, excludedFromStatistics: true },
+            });
+            return res.json({
+                success: true,
+                data: { id: req.params.id, voided: true, evidenceRetained: true },
+                message: 'ยกเลิกรายการซ้ำแล้ว รายการนี้จะไม่ถูกนับในสถิติ',
+            });
+        }
         await connection.query('DELETE FROM KY_Video_Reactions WHERE ActivityID = ?', [req.params.id]);
         await connection.query('DELETE FROM KY_Activities WHERE id = ?', [req.params.id]);
         await connection.commit();

@@ -47,6 +47,34 @@ async function post(route, headers, body) {
     })).body;
 }
 
+async function uploadFollowupVideo(activityId, headers, payload, originalName) {
+    const config = (await request('ky/video-upload/config', { headers })).body.data;
+    const initialized = await post(`ky/${activityId}/video-upload/init`, headers, {
+        fileName: originalName,
+        fileSize: payload.length,
+        mimeType: 'video/mp4',
+    });
+    const uploadId = initialized.data.uploadId;
+    const chunkSize = Number(config.chunkSize || initialized.data.chunkSize);
+    const totalChunks = Number(initialized.data.totalChunks);
+    try {
+        for (let index = 0; index < totalChunks; index += 1) {
+            const chunk = payload.subarray(index * chunkSize, Math.min(payload.length, (index + 1) * chunkSize));
+            const form = new FormData();
+            form.append('chunk', new Blob([chunk], { type: 'application/octet-stream' }), `chunk-${index}.part`);
+            await request(`ky/${activityId}/video-upload/${uploadId}/chunk/${index}`, {
+                method: 'POST',
+                headers: { ...headers, 'X-KY-Chunk-SHA256': crypto.createHash('sha256').update(chunk).digest('hex') },
+                body: form,
+            });
+        }
+        return await post(`ky/${activityId}/video-upload/${uploadId}/complete`, headers, {});
+    } catch (error) {
+        await request(`ky/${activityId}/video-upload/${uploadId}`, { method: 'DELETE', headers }).catch(() => {});
+        throw error;
+    }
+}
+
 function syntheticMp4(seed) {
     const buffer = Buffer.alloc(384 * 1024 + seed, seed);
     buffer.writeUInt32BE(buffer.length, 0);
@@ -205,22 +233,26 @@ async function cleanup() {
         await db.query('DELETE FROM KY_Activities WHERE id=?', [duplicateActivityId]);
 
         const inventoryActivityId = crypto.randomUUID();
-        const inventoryStoredName = `ky-inventory-uat-${runId}.mp4`;
         const inventoryOriginalName = 'inventory-external-backup.mp4';
-        const inventoryPath = path.join(uploadRoot, inventoryStoredName);
         const inventoryPayload = syntheticMp4(77);
-        fs.writeFileSync(inventoryPath, inventoryPayload);
-        localFiles.push(inventoryPath);
         const inventorySha = crypto.createHash('sha256').update(inventoryPayload).digest('hex');
-        const inventoryVideoUrl = `/safety/tsh-safety-core/uploads/${inventoryStoredName}?filename=${encodeURIComponent(inventoryOriginalName)}`;
         await db.query(
             `INSERT INTO KY_Activities
              (id,ActivityDate,ReporterID,ReporterName,SubmittedByID,SubmittedByName,Department,SafetyUnit,TeamName,Participants,KYTKeyword,RiskCategory,HazardDescription,Countermeasure,AttachmentUrl,VideoUrl,Status)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'video-inventory-uat', 'General', 'Production inventory UAT', 'Temporary test row', '/uploads/ky-inventory-uat-evidence.pdf', ?, 'Closed')`,
             [inventoryActivityId, `${testYear}-10-10`, admin.EmployeeID, admin.EmployeeName, admin.EmployeeID, admin.EmployeeName,
-                `__KY_INVENTORY_UAT_${runId}`, 'Inventory Unit', 'Inventory UAT', inventoryVideoUrl]
+                `__KY_INVENTORY_UAT_${runId}`, 'Inventory Unit', 'Inventory UAT', null]
         );
-        inventoryActivities.push({ id: inventoryActivityId, localPath: inventoryPath, sha256: inventorySha });
+        inventoryActivities.push({ id: inventoryActivityId });
+        const followupUploaded = await uploadFollowupVideo(inventoryActivityId, headers, inventoryPayload, inventoryOriginalName);
+        assert.strictEqual(followupUploaded.data.sha256, inventorySha, 'follow-up upload must return the assembled Production SHA-256');
+        const uploadedPathname = new URL(followupUploaded.data.videoUrl, 'http://placeholder.local').pathname;
+        const inventoryPath = path.join(uploadRoot, path.basename(decodeURIComponent(uploadedPathname)));
+        localFiles.push(inventoryPath);
+        const [[uploadedInventoryActivity]] = await db.query('SELECT VideoUrl FROM KY_Activities WHERE id=?', [inventoryActivityId]);
+        assert.ok(String(uploadedInventoryActivity.VideoUrl || '').includes('/uploads/'), 'follow-up upload must attach a Production URL to the existing activity');
+        assert.strictEqual(uploadedInventoryActivity.VideoUrl, followupUploaded.data.videoUrl, 'follow-up upload response and saved activity URL must match');
+        assert.ok(fs.existsSync(inventoryPath), 'follow-up upload must create the Production file before Inventory registration');
         const inventoryDashboard = (await request(`ky/annual-video-evidence?year=${testYear}`, { headers })).body.data;
         const unregisteredInventory = inventoryDashboard.inventory.find(row => String(row.ActivityID) === inventoryActivityId);
         assert.ok(unregisteredInventory && !unregisteredInventory.registered, 'every Production video must appear in Inventory before registration');
@@ -330,11 +362,14 @@ async function cleanup() {
         assert.ok(inventoryEvidence.ExternalReference && inventoryEvidence.ProductionDeletedAt && inventoryEvidence.ProductionDeletionReason, 'Inventory metadata must remain after deletion');
         const [[inventoryAudit]] = await db.query("SELECT COUNT(*) AS count FROM KY_Video_File_Inventory_Audit WHERE InventoryID=? AND Action='PRODUCTION_FILE_DELETED'", [inventoryDeclared.data.id]);
         assert.strictEqual(Number(inventoryAudit.count), 1, 'Inventory deletion must create an immutable audit event');
-        await assert.rejects(
-            request(`ky/${inventoryActivityId}`, { method: 'DELETE', headers }),
-            /409 KY_VIDEO_PROTECTED_BY_RETENTION|409.*retention record/i,
-            'an activity retained by Inventory metadata must not be deletable after its Production file is removed'
-        );
+        const voided = await request(`ky/${inventoryActivityId}`, {
+            method: 'DELETE',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'Duplicate monthly submission UAT' }),
+        });
+        assert.strictEqual(voided.body?.data?.voided, true, 'a retained duplicate activity must be voided');
+        const [[voidedActivity]] = await db.query('SELECT Status FROM KY_Activities WHERE id=?', [inventoryActivityId]);
+        assert.strictEqual(voidedActivity.Status, 'Voided', 'voided duplicate must remain as retained evidence metadata');
 
         passed = true;
     } finally {

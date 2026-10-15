@@ -112,7 +112,37 @@ async function connectChrome() {
             return kyNativeFetch(typeof input === 'string' ? normalizedUrl : new Request(normalizedUrl, input), init);
         };
     ` : '';
-    await command('Page.addScriptToEvaluateOnNewDocument', { source: `window.API_BASE=${JSON.stringify(browserApiBase)};${phpRouteFetchShim}` });
+    await command('Page.addScriptToEvaluateOnNewDocument', { source: `
+        window.API_BASE=${JSON.stringify(browserApiBase)};
+        ${phpRouteFetchShim}
+        // Local UAT must remain deterministic when the public Chart.js CDN is unavailable.
+        if (!window.Chart) {
+            class KyUatChart {
+                static instances = new Map();
+                constructor(context, config) {
+                    this.canvas = context?.canvas || context;
+                    this.data = config?.data || {};
+                    this.options = config?.options || {};
+                    if (this.canvas) {
+                        KyUatChart.instances.set(this.canvas, this);
+                        if (this.canvas.id) KyUatChart.instances.set(this.canvas.id, this);
+                    }
+                }
+                destroy() {
+                    if (!this.canvas) return;
+                    KyUatChart.instances.delete(this.canvas);
+                    if (this.canvas.id) KyUatChart.instances.delete(this.canvas.id);
+                }
+                update() {}
+                resize() {}
+                static getChart(target) {
+                    const key = typeof target === 'string' ? target : (target?.canvas || target);
+                    return KyUatChart.instances.get(key) || (key?.id ? KyUatChart.instances.get(key.id) : undefined);
+                }
+            }
+            window.Chart = KyUatChart;
+        }
+    ` });
 }
 
 async function apiJson(route, token) {
@@ -165,6 +195,9 @@ async function startNodeApiIfRequested() {
     const beforeStats = await apiJson(`ky/stats?year=${year}`, token);
     const beforeEvidenceOverview = await apiJson(`ky/evidence-overview?year=${year}`, token);
     const beforeAnnual = await apiJson(`ky/annual-video-evidence?year=${year}`, token);
+    const productionEvidenceScope = (beforeEvidenceOverview.data?.rows || []).find((row) =>
+        (row.records || []).some((record) => Boolean(record.hasProductionVideo))
+    );
 
     await connectChrome();
     await command('Page.navigate', { url: appUrl });
@@ -172,6 +205,9 @@ async function startNodeApiIfRequested() {
     await evaluate(`(()=>{localStorage.setItem('tsh_token',${JSON.stringify(token)});localStorage.setItem('tsh_user',${JSON.stringify(JSON.stringify(user))});localStorage.removeItem('tsh_active_tab_ky');location.hash='#ky';location.reload();return true;})()`);
     await waitFor(`document.querySelector('#ky-tab-btn-dashboard') && document.querySelector('#ky-kpi-row [data-ky-kpi-filter="all"]')`);
     await waitFor(`document.querySelector('#ky-evidence-completion-panel')?.innerText && !document.querySelector('#ky-evidence-completion-panel')?.innerText.includes('Loading file / video progress')`);
+    // Ignore expected anonymous-shell requests aborted by the authenticated reload.
+    consoleErrors.length = 0;
+    failedResponses.length = 0;
     const evidenceRecordCount = (beforeEvidenceOverview.data?.rows || []).reduce((total, row) => total + (row.records || []).length, 0);
     if (evidenceRecordCount > 0) {
         const splitEvidenceControls = await evaluate(`({
@@ -230,6 +266,52 @@ async function startNodeApiIfRequested() {
         await sleep(250);
     }
 
+    if (productionEvidenceScope) {
+        await evaluate(`document.querySelector('#ky-tab-btn-dashboard').click()`);
+        await waitFor(`document.querySelector('#ky-evidence-completion-panel [data-ky-evidence-unit]')`);
+        const scopeEntry = await evaluate(`(()=>{
+            const expectedKey=${JSON.stringify(productionEvidenceScope.key)};
+            const scope=[...document.querySelectorAll('[data-ky-evidence-unit]')]
+                .find((button)=>button.dataset.kyEvidenceUnit===expectedKey);
+            if (!scope) return {found:false,expectedKey,available:[...document.querySelectorAll('[data-ky-evidence-unit]')].map((button)=>button.dataset.kyEvidenceUnit)};
+            scope.click();
+            return {found:true,expectedKey};
+        })()`);
+        assert.ok(scopeEntry.found, `Dashboard must render the Production evidence scope: ${JSON.stringify(scopeEntry)}`);
+        await waitFor(`document.querySelector('.btn-ky-production-video-manager[data-id]')`);
+        const managerEntry = await evaluate(`(()=>{
+            const manager=document.querySelector('.btn-ky-production-video-manager[data-id]');
+            if (!manager) return {found:false,activityId:''};
+            const activityId=manager.dataset.id;
+            manager.click();
+            return {found:true,activityId};
+        })()`);
+        assert.ok(managerEntry.found, `Admin must see Manage video file for Production scope ${productionEvidenceScope.key}`);
+        await waitFor(`document.querySelector('#ky-production-video-manager') && /จัดการไฟล์วิดีโอ Production/.test(document.querySelector('#modal-title')?.textContent||'')`);
+        const managerState = await evaluate(`(()=>({
+            body:document.querySelector('#ky-production-video-manager')?.innerText||'',
+            register:Boolean(document.querySelector('[data-ky-video-manager-register]')),
+            verify:Boolean(document.querySelector('[data-ky-video-manager-verify]')),
+            remove:Boolean(document.querySelector('[data-ky-video-manager-delete]'))
+        }))()`);
+        assert.match(managerState.body, /External Backup[\s\S]*Verification[\s\S]*Contest/, 'guided manager must show Backup, Verify, and Contest state');
+        if (/Active\s*[—-]\s*ลบไม่ได้/.test(managerState.body)) {
+            assert.strictEqual(managerState.remove, false, 'active contest entry must not expose Production deletion');
+            assert.match(managerState.body, /ต้องเปลี่ยนตัวแทนก่อนลบ/, 'active contest entry must explain the required replacement');
+        } else if (/พร้อมลบจาก Production/.test(managerState.body)) {
+            assert.deepStrictEqual([managerState.register, managerState.verify, managerState.remove], [false, false, true], 'ready video must expose only guarded Production deletion');
+        } else if (/ยังไม่ได้ลงทะเบียน External Backup/.test(managerState.body)) {
+            assert.deepStrictEqual([managerState.register, managerState.verify, managerState.remove], [true, false, false], 'unregistered video must expose only Backup registration');
+        } else if (/รอ Admin Verify|ข้อมูล Backup ต้องแก้ไข/.test(managerState.body)) {
+            assert.deepStrictEqual([managerState.register, managerState.verify, managerState.remove], [false, true, false], 'pending video must expose only Admin Verify');
+        } else {
+            assert.match(managerState.body, /ตรวจสอบแล้ว แต่ยังไม่ผ่านเงื่อนไขลบ/, 'a fail-closed verified video must explain why no destructive action is available');
+            assert.strictEqual(managerState.remove, false, 'a fail-closed verified video must not expose Production deletion');
+        }
+        await evaluate(`document.querySelector('[data-ky-video-manager-close]')?.click()`);
+        await sleep(250);
+    }
+
     const hasManageRecord = await evaluate(`Boolean(document.querySelector('.btn-ky-manage[data-id]'))`);
     if (hasManageRecord) {
         await evaluate(`document.querySelector('.btn-ky-manage[data-id]').click()`);
@@ -250,13 +332,13 @@ async function startNodeApiIfRequested() {
     await evaluate(`document.querySelector('#ky-msub-annual-video').click()`);
     await waitFor(`document.querySelector('[data-ky-annual-admin-toolbar]') && document.querySelector('#ky-manage-panel')?.textContent.includes('Annual Compliance Dashboard')`);
 
-    const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,summaryClickable:[...document.querySelector('[data-ky-annual-summary]')?.children||[]].every(card=>card.getAttribute('role')==='button'),views:[...document.querySelectorAll('[data-ky-annual-view]')].map(button=>button.dataset.kyAnnualView),sticky:getComputedStyle(document.querySelector('[data-ky-annual-admin-toolbar]')).position,activityExternal:Boolean(document.querySelector('[data-ky-annual-view-panel="activity"]')),activityExternalRows:document.querySelectorAll('[data-ky-activity-external-detail]').length,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},detail:Boolean(document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail],[data-ky-activity-external-detail]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0 && (beforeAnnual.data?.inventory || []).length === 0 && (beforeAnnual.data?.activityExternalEvidence || []).length === 0)},cleanup:Boolean(document.querySelector('[data-ky-cleanup-panel]')),bulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-annual-delete-selected]')),inventory:Boolean(document.querySelector('[data-ky-video-inventory]')),inventoryRows:document.querySelectorAll('[data-ky-inventory-row]').length,inventoryDates:[...document.querySelectorAll('[data-ky-inventory-row]')].every(row=>/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(row.dataset.activityDate||'')),inventoryBulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-inventory-delete-selected]')),inventoryMaxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight,normalAnnualDeleteVisible:[...document.querySelectorAll('[data-ky-annual-view-panel="annual"] [data-ky-annual-delete-one]')].some(el=>!el.classList.contains('hidden')),normalInventoryDeleteVisible:[...document.querySelectorAll('[data-ky-video-inventory] [data-ky-inventory-delete-one]')].some(el=>!el.classList.contains('hidden'))}))()`);
+    const annualUi = await evaluate(`(()=>({summaryCards:document.querySelector('[data-ky-annual-summary]')?.children.length||0,summaryClickable:[...document.querySelector('[data-ky-annual-summary]')?.children||[]].every(card=>card.getAttribute('role')==='button'),views:[...document.querySelectorAll('[data-ky-annual-view]')].map(button=>button.dataset.kyAnnualView),sticky:document.querySelector('[data-ky-annual-admin-toolbar]')?.classList.contains('sticky')||false,activityExternal:Boolean(document.querySelector('[data-ky-annual-view-panel="activity"]')),activityExternalRows:document.querySelectorAll('[data-ky-activity-external-detail]').length,hasDownload:Boolean(document.querySelector('[data-ky-annual-download]'))||${JSON.stringify((beforeAnnual.data?.summary?.productionFiles || 0) === 0)},hasAudit:Boolean(document.querySelector('[data-ky-annual-audit]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0)},detail:Boolean(document.querySelector('[data-ky-annual-detail],[data-ky-inventory-detail],[data-ky-activity-external-detail]'))||${JSON.stringify((beforeAnnual.data?.evidence || []).length === 0 && (beforeAnnual.data?.inventory || []).length === 0 && (beforeAnnual.data?.activityExternalEvidence || []).length === 0)},cleanup:Boolean(document.querySelector('[data-ky-cleanup-panel]')),bulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-annual-delete-selected]')),inventory:Boolean(document.querySelector('[data-ky-video-inventory]')),inventoryRows:document.querySelectorAll('[data-ky-inventory-row]').length,inventoryDates:[...document.querySelectorAll('[data-ky-inventory-row]')].every(row=>/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(row.dataset.activityDate||'')),inventoryBulk:Boolean(document.querySelector('[data-ky-cleanup-panel] [data-ky-inventory-delete-selected]')),inventoryMaxHeight:getComputedStyle(document.querySelector('[data-ky-inventory-list]')).maxHeight,normalAnnualDeleteVisible:[...document.querySelectorAll('[data-ky-annual-view-panel="annual"] [data-ky-annual-delete-one]')].some(el=>!el.classList.contains('hidden')),normalInventoryDeleteVisible:[...document.querySelectorAll('[data-ky-video-inventory] [data-ky-inventory-delete-one]')].some(el=>!el.classList.contains('hidden'))}))()`);
     assert.strictEqual(annualUi.summaryCards, 6, 'Annual dashboard must render six summary metrics');
     assert.ok(annualUi.summaryClickable, 'Annual summary cards must be keyboard-clickable filters');
     assert.deepStrictEqual(annualUi.views, ['overview', 'annual', 'activity', 'inventory', 'cleanup'], 'Admin workspace must expose the Activity External review view separately');
     assert.ok(annualUi.activityExternal, 'Activity External Admin review panel must render');
     assert.strictEqual(annualUi.activityExternalRows, (beforeAnnual.data?.activityExternalEvidence || []).length, 'Activity External UI must render every API evidence row');
-    assert.strictEqual(annualUi.sticky, 'sticky', 'Admin filters must remain sticky');
+    assert.strictEqual(annualUi.sticky, true, 'Admin filters must retain the sticky positioning contract');
     assert.ok(annualUi.hasDownload && annualUi.hasAudit && annualUi.detail, `Annual Admin controls must match available records: ${JSON.stringify(annualUi)}`);
     assert.ok(annualUi.cleanup && annualUi.bulk && annualUi.inventoryBulk, 'guarded Annual and Inventory bulk cleanup must live in Cleanup Queue');
     assert.ok(annualUi.inventory, 'separate Production Video Inventory controls must render');

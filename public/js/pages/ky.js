@@ -555,7 +555,7 @@ export async function loadKyPage() {
     if (!container) return;
 
     const user = TSHSession.getUser() || {};
-    _isAdmin = user.role === 'Admin' || user.Role === 'Admin';
+    _isAdmin = ['admin', 'super_admin'].includes(String(user.role || user.Role || '').trim().toLowerCase());
 
     window.closeModal = closeModal;
 
@@ -1550,6 +1550,110 @@ function renderKyContestEntryAction(record) {
     return `<button type="button" class="btn-ky-contest-entry rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700" data-id="${escHtml(record.id || '')}">${record?.contestEntryId ? 'Replace contest entry' : 'Submit contest entry'}</button>`;
 }
 
+function renderKyProductionVideoManagerAction(record) {
+    if (!_isAdmin || !kyHasProductionVideo(record)) return '';
+    return `<button type="button" class="btn-ky-production-video-manager rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100" data-id="${escHtml(record.id || '')}"><i class="fas fa-hard-drive mr-1"></i>จัดการไฟล์วิดีโอ</button>`;
+}
+
+async function openKyProductionVideoManager(record) {
+    const activityId = String(record?.id || '');
+    if (!_isAdmin || !activityId || !kyHasProductionVideo(record)) return;
+    showLoading('กำลังตรวจสอบสถานะไฟล์วิดีโอ...');
+    try {
+        const year = Number(String(record.ActivityDate || '').slice(0, 4)) || _statsYear || new Date().getFullYear();
+        const response = await API.get(`/ky/annual-video-evidence?year=${encodeURIComponent(year)}`);
+        const data = normalizeApiObject(response?.data ?? response) || {};
+        const inventory = normalizeApiArray(data.inventory).find(item => String(item.ActivityID) === activityId) || null;
+        _kyAnnualVideoData = data;
+        const activeContest = Boolean(record.isContestEntry || inventory?.contestRetentionHold);
+        const registered = Boolean(inventory?.registered);
+        const status = String(inventory?.Status || 'Unregistered');
+        const ready = Boolean(inventory?.canDeleteProductionFile);
+        const deleted = Boolean(inventory?.fileDeleted);
+        const statusTone = deleted ? 'border-slate-200 bg-slate-50 text-slate-700'
+            : ready ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : status === 'Verified' ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
+                    : ['Pending', 'NeedsCorrection'].includes(status) ? 'border-amber-200 bg-amber-50 text-amber-800'
+                        : 'border-rose-200 bg-rose-50 text-rose-800';
+        const stateTitle = deleted ? 'ลบไฟล์ Production แล้ว'
+            : ready ? 'พร้อมลบจาก Production'
+                : activeContest ? 'ต้องเปลี่ยนตัวแทนก่อนลบ'
+                    : status === 'Verified' ? 'ตรวจสอบแล้ว แต่ยังไม่ผ่านเงื่อนไขลบ'
+                        : registered ? (status === 'NeedsCorrection' ? 'ข้อมูล Backup ต้องแก้ไข' : 'รอ Admin Verify')
+                            : 'ยังไม่ได้ลงทะเบียน External Backup';
+        const nextStep = deleted ? 'Metadata, SHA-256 และ Audit ยังคงอยู่ และ Dashboard จะนับรายการนี้เป็น External verified'
+            : activeContest ? 'รายการนี้เป็น Active contest entry ของ Unit กรุณาเลือกวิดีโอ Production รายการอื่นแล้วกด Replace contest entry ก่อนกลับมาลบไฟล์นี้'
+                : ready ? 'External Backup ผ่านการ Verify และ fingerprint ตรงกับไฟล์ Production แล้ว สามารถลบไฟล์ด้านล่างได้'
+                    : status === 'Verified' ? 'กรุณารีเฟรชข้อมูลหรือตรวจสอบว่าไฟล์ Production ปัจจุบันยังตรงกับ Inventory'
+                        : registered ? 'ตรวจสอบว่าไฟล์บนเครื่องกลางตรงกับ Production แล้วกด Admin Verify'
+                            : 'เก็บสำเนาไฟล์ไว้ที่เครื่องกลางก่อน แล้วลงทะเบียนชื่อไฟล์เพื่อให้ระบบบันทึกขนาดและ SHA-256';
+        const actions = deleted ? '' : `
+            ${!registered ? `<button type="button" data-ky-video-manager-register class="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white">ลงทะเบียน External Backup</button>` : ''}
+            ${registered && status !== 'Verified' ? `<button type="button" data-ky-video-manager-verify data-id="${escHtml(inventory.id || '')}" data-version="${Number(inventory.RowVersion || 0)}" class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white">Admin Verify</button>` : ''}
+            ${ready ? `<button type="button" data-ky-video-manager-delete data-id="${escHtml(inventory.id || '')}" data-version="${Number(inventory.RowVersion || 0)}" class="rounded-lg bg-rose-600 px-3 py-2 text-sm font-bold text-white">ลบจาก Production</button>` : ''}`;
+        openModal('จัดการไฟล์วิดีโอ Production', `
+            <div id="ky-production-video-manager" class="space-y-4" data-activity-id="${escHtml(activityId)}">
+                <div><p class="text-sm font-black text-slate-800">${escHtml(record.TeamName || record.KYTKeyword || 'KY Activity')}</p><p class="mt-1 text-xs text-slate-500">${escHtml(record.Department || '-')} · ${escHtml(record.SafetyUnit || 'Department level')} · ${escHtml(formatKyActivityDate(record.ActivityDate))}</p></div>
+                <div class="rounded-xl border p-4 ${statusTone}"><div class="flex items-start gap-3"><i class="fas ${activeContest ? 'fa-lock' : ready ? 'fa-circle-check' : 'fa-circle-info'} mt-0.5"></i><div><p class="text-sm font-black">${escHtml(stateTitle)}</p><p class="mt-1 text-xs leading-5">${escHtml(nextStep)}</p></div></div></div>
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <div class="rounded-lg border border-slate-200 p-3"><p class="text-[10px] font-bold uppercase text-slate-400">External Backup</p><p class="mt-1 text-sm font-black text-slate-700">${registered ? 'ลงทะเบียนแล้ว' : 'ยังไม่ลงทะเบียน'}</p></div>
+                    <div class="rounded-lg border border-slate-200 p-3"><p class="text-[10px] font-bold uppercase text-slate-400">Verification</p><p class="mt-1 text-sm font-black text-slate-700">${escHtml(status)}</p></div>
+                    <div class="rounded-lg border border-slate-200 p-3"><p class="text-[10px] font-bold uppercase text-slate-400">Contest</p><p class="mt-1 text-sm font-black ${activeContest ? 'text-indigo-700' : 'text-slate-700'}">${activeContest ? 'Active — ลบไม่ได้' : 'ไม่ติด Retention hold'}</p></div>
+                </div>
+                ${registered ? `<div class="rounded-lg bg-slate-50 p-3 text-xs text-slate-600"><p><b>Backup:</b> ${escHtml(inventory.OriginalFileName || '-')}</p><p class="mt-1 break-all"><b>Reference:</b> ${escHtml(inventory.ExternalReference || '-')}</p>${inventory.SHA256 ? `<p class="mt-1 break-all"><b>SHA-256:</b> ${escHtml(inventory.SHA256)}</p>` : ''}</div>` : ''}
+                <div class="flex flex-wrap justify-end gap-2">${actions}<button type="button" data-ky-video-manager-close class="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600">ปิด</button></div>
+            </div>`, 'max-w-2xl');
+        document.querySelector('[data-ky-video-manager-close]')?.addEventListener('click', closeModal);
+        document.querySelector('[data-ky-video-manager-register]')?.addEventListener('click', guardActionHandler(async event => {
+            const button = event.currentTarget;
+            try {
+                const productionName = String(inventory?.ProductionOriginalFileName || inventory?.OriginalFileName || '').trim();
+                const enteredName = window.prompt('ระบุชื่อไฟล์วิดีโอที่เก็บไว้ในเครื่องกลาง', productionName) ?? null;
+                const fileName = String(enteredName || '').trim().replace(/[\\/]+/g, '_').slice(0, 255);
+                if (!fileName) return;
+                await runKyButtonAction(button, 'กำลังลงทะเบียน...', () => API.post('/ky/video-inventory/declare', {
+                    activityId, externalReference: buildKyInventoryBackupReference({ name: fileName }), externalBackupConfirmed: true,
+                    originalFileName: fileName, registrationMode: 'AdminAttested',
+                }));
+                showToast('ลงทะเบียน External Backup แล้ว · กรุณาตรวจสอบไฟล์และกด Admin Verify', 'success');
+                await openKyProductionVideoManager(record);
+            } catch (error) { showError(kyInventoryRegistrationError(error)); }
+        }, { render: false }));
+        document.querySelector('[data-ky-video-manager-verify]')?.addEventListener('click', guardActionHandler(async event => {
+            const button = event.currentTarget;
+            try {
+                const note = window.prompt('หมายเหตุการตรวจสอบ (เว้นว่างได้)', '') ?? null;
+                if (note === null) return;
+                await runKyButtonAction(button, 'กำลัง Verify...', () => API.post(`/ky/video-inventory/${encodeURIComponent(button.dataset.id)}/verify`, {
+                    status: 'Verified', rowVersion: Number(button.dataset.version || 0), note: note.trim(),
+                }));
+                showToast('Admin Verify Inventory สำเร็จ', 'success');
+                await openKyProductionVideoManager(record);
+            } catch (error) { showError(error); }
+        }, { render: false }));
+        document.querySelector('[data-ky-video-manager-delete]')?.addEventListener('click', guardActionHandler(async event => {
+            const button = event.currentTarget;
+            try {
+                const reason = window.prompt('ระบุเหตุผลการลบไฟล์ Production (Metadata, SHA-256 และ Audit จะยังอยู่)', '') ?? null;
+                if (!reason?.trim()) return;
+                const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', 'ลบไฟล์วิดีโอนี้ออกจาก Production ใช่หรือไม่? ระบบจะคง External Backup metadata, SHA-256 และ Audit ไว้ และเปลี่ยนการนับเป็น External verified');
+                if (!confirmed) return;
+                await runKyButtonAction(button, 'กำลังลบ...', () => API.post('/ky/video-inventory/delete-production', {
+                    items: [{ id: button.dataset.id, rowVersion: Number(button.dataset.version || 0) }], reason: reason.trim(),
+                }));
+                closeModal();
+                showToast('ลบไฟล์ Production แล้ว และเปลี่ยน Dashboard เป็น External verified', 'success');
+                await loadAndRenderKyEvidenceCompletion();
+                await renderVideoShowcase();
+            } catch (error) { showError(error); }
+        }, { render: false }));
+    } catch (error) {
+        showError(error);
+    } finally {
+        hideLoading();
+    }
+}
+
 function canUploadKyFollowupVideo(record) {
     if (record && Object.prototype.hasOwnProperty.call(record, 'canUploadVideo')) return Boolean(record.canUploadVideo);
     if (_isAdmin) return true;
@@ -1657,6 +1761,7 @@ function renderConfiguredKyEvidenceDrilldown(row, records) {
                             <div class="flex items-center gap-2">
                                 <button type="button" class="btn-ky-view px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700" data-id="${escHtml(record.id || '')}">View</button>
                                 ${renderKyContestEntryAction(record)}
+                                ${renderKyProductionVideoManagerAction(record)}
                                 ${['waiting_video','external_pending'].includes(status.id) && canUploadKyFollowupVideo(record) ? `<button type="button" class="btn-ky-video-followup px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#7c3aed" data-id="${escHtml(record.id || '')}">${status.id === 'external_pending' ? 'แก้หลักฐาน' : 'เพิ่มวิดีโอ'}</button>` : ''}
                                 ${_isAdmin && status.id === 'missing_file' ? `<button type="button" class="btn-ky-manage px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#4f46e5" data-id="${escHtml(record.id || '')}">แนบไฟล์</button>` : ''}
                             </div>
@@ -1710,6 +1815,7 @@ function openConfiguredKyEvidencePopup(row, records) {
                             <div class="flex flex-wrap md:flex-nowrap items-center gap-2">
                                 <button type="button" class="btn-ky-view px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700" data-id="${escHtml(record.id || '')}">View</button>
                                 ${renderKyContestEntryAction(record)}
+                                ${renderKyProductionVideoManagerAction(record)}
                                 ${['waiting_video','external_pending'].includes(status.id) && canUploadKyFollowupVideo(record) ? `<button type="button" class="btn-ky-video-followup px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#7c3aed" data-id="${escHtml(record.id || '')}">${status.id === 'external_pending' ? 'แก้หลักฐาน' : 'เพิ่มวิดีโอ'}</button>` : ''}
                                 ${_isAdmin && status.id === 'missing_file' ? `<button type="button" class="btn-ky-manage px-3 py-2 rounded-lg text-xs font-bold text-white" style="background:#4f46e5" data-id="${escHtml(record.id || '')}">แนบไฟล์</button>` : ''}
                             </div>
@@ -6269,6 +6375,13 @@ function setupEventListeners() {
             return;
         }
 
+        const productionVideoManagerBtn = e.target.closest('.btn-ky-production-video-manager');
+        if (productionVideoManagerBtn) {
+            const record = _kyEvidenceRecords.find(item => String(item.id) === String(productionVideoManagerBtn.dataset.id));
+            if (record) await openKyProductionVideoManager(record);
+            return;
+        }
+
         // Manage
         const manageBtn = e.target.closest('.btn-ky-manage');
         if (manageBtn) {
@@ -6281,12 +6394,14 @@ function setupEventListeners() {
         // Delete record
         const delBtn = e.target.closest('.btn-ky-delete');
         if (delBtn) {
-            const confirmed = await showConfirmationModal('ยืนยันการลบ', `ต้องการลบกิจกรรม KY ของแผนก "${escHtml(delBtn.dataset.name)}" ใช่หรือไม่?`);
+            const confirmed = await showConfirmationModal('ยืนยันการลบรายการซ้ำ', `ต้องการนำกิจกรรม KY ของแผนก "${escHtml(delBtn.dataset.name)}" ออกจากประวัติและสถิติใช่หรือไม่? หากมีหลักฐานวิดีโอ ระบบจะเก็บหลักฐานและ Audit ไว้ตามนโยบาย`);
             if (confirmed) {
+                const reason = window.prompt('ระบุเหตุผลการลบ/ยกเลิกรายการ (เช่น ลงข้อมูลซ้ำประจำเดือน)', 'ลงข้อมูลซ้ำประจำเดือน');
+                if (reason === null || !reason.trim()) return;
                 showLoading('กำลังลบ...');
                 try {
-                    await API.delete(`/ky/${delBtn.dataset.id}`);
-                    showToast('ลบกิจกรรม KY สำเร็จ', 'success');
+                    const result = await API.delete(`/ky/${delBtn.dataset.id}`, { body: JSON.stringify({ reason: reason.trim() }) });
+                    showToast(result?.message || 'นำรายการออกจากประวัติและสถิติแล้ว', 'success');
                     if (_activeTab === 'history') await fetchAndRenderHistory();
                     if (_activeTab === 'manage') await fetchAndRenderManage('all');
                     await _loadHeroStats();
