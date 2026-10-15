@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Promotion and Live Results Production Deployment (PASS, 2026-10-15)
+
+- Immutable recovery candidate `1e13e68f37e0364dc20872ea827187e75dbdbefb` deployed 20 allowlisted Safety Vote runtime paths after a guarded first attempt stopped before runtime upload. The first attempt had already applied the additive six-column Live Results schema, but its postcheck incorrectly counted `SafetyVote_Settings` metadata rows as business-row drift.
+- Recovery accepted only the exact pre-applied schema/version contract with zero live-enabled campaign versions. It created and double-downloaded a private data-preserving rollback artifact, preserved all business-row counts, uploaded and double-download verified `20/20` runtime files, and verified all 11 public runtime assets byte-exact over HTTPS.
+- Production now reports schema `2026-10-15-live-results-r1` ready with module enabled. Authenticated health, campaign discovery and promotion discovery return `200` with private/no-store policy; anonymous health remains `401`. Promotion StartAt/EndAt is independent from campaign OpenAt/CloseAt, scheduled campaigns remain discoverable before voting, and early ballot submission is blocked by Node/PHP.
+- Live Results remains default OFF for every campaign version (`0` enabled), no external delivery or permission change occurred, `.htaccess` was restored byte-exact to `7c648d9a72e469b427cb65e40aff98d329bd2631d5a9fea0dc3787d9b9bb730d`, and helper/private rollback residue is zero. Evidence: `backups/production/safety-vote-live-promotion-deploy-20261015134645/`, result SHA-256 `108a50fa69d23d9c30ae8f8ec51d12dcc3709021800bdb269c6cec89c33b4286`. Decision: `PASS_SAFETY_VOTE_LIVE_PROMOTION_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Promotion Remediation + Full Production DB Local Mirror (2026-10-15)
 
 - Promotion Publish now survives the confirmation callback, saved private images reappear in edit preview, priority is allocated automatically and preserved on update, and expired eligible promotions appear under `ป้ายกิจกรรมที่ผ่านมา` with campaign navigation. Campaign/promotion records are retained rather than automatically deleted.
