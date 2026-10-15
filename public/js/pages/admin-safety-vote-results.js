@@ -2,13 +2,12 @@ import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { isSafetyVoteUxV1Enabled, safetyVoteJourneyNav, safetyVoteRoleNav, safetyVoteStatusBadge, openSafetyVoteConfirmDialog, openSafetyVoteReasonDialog, openSafetyVoteHashReasonDialog } from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
 import { snapshotList, selectedSnapshot, resultReadiness, verificationChecks, publicPreview, isSecretCampaign } from './safety-vote-results-model.mjs?v=20261008-safety-vote-ux6-r1';
+import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const state = { container: null, campaign: null, onClose: null, onNavigate: null, snapshots: [], stages: [], verification: null, published: null, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null };
 
 function dateTime(value) {
-    if (!value) return '—';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    return formatThaiDateTime(value, '—');
 }
 
 function statePage() {

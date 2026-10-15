@@ -2,6 +2,7 @@ import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { openSafetyVoteConfirmDialog, safetyVoteCampaignPreview, safetyVoteJourneyNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
+import { formatThaiDateTime, formatThaiTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import {
     WIZARD_STEPS, CORE_TEMPLATES, applyTemplate, builderPayload, campaignPayload, contentValid,
     createWizardDraft, defaultOptionsForType, defaultQuestion, defaultValidationForType, hasOptions,
@@ -29,14 +30,19 @@ const RESULT_OPTIONS = [
 ];
 
 function localInputDate(value) {
-    if (!value) return '';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '';
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    return value ? toBangkokInputValue(value) : '';
 }
 
 function inputField(name, label, value = '', type = 'text', options = '') {
     return `<label class="svw-field"><span>${escHtml(label)}</span><input id="svw-${name}" data-svw-field="${name}" type="${type}" value="${escHtml(value ?? '')}" ${options}></label>`;
+}
+
+function dateTime24Field(name, label, value) {
+    const parts = splitBangkokInput(value);
+    const [selectedHour = '00', selectedMinute = '00'] = parts.time.split(':');
+    const hours = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'));
+    const minutes = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, '0'));
+    return `<fieldset class="svw-field svw-field--datetime"><legend>${escHtml(label)} (เวลาไทย UTC+7)</legend><input type="date" lang="th-TH" data-svw-date-part="${name}" value="${parts.date}" required><span class="sv-time24"><select data-svw-hour-part="${name}" aria-label="ชั่วโมง" required>${hours.map(hour => `<option value="${hour}" ${hour === selectedHour ? 'selected' : ''}>${hour}</option>`).join('')}</select><b aria-hidden="true">:</b><select data-svw-minute-part="${name}" aria-label="นาที" required>${minutes.map(minute => `<option value="${minute}" ${minute === selectedMinute ? 'selected' : ''}>${minute}</option>`).join('')}</select><small>น. (24 ชั่วโมง)</small></span></fieldset>`;
 }
 
 function textareaField(name, label, value = '', rows = 3) {
@@ -105,7 +111,7 @@ function stepEligibility(draft) {
 }
 
 function stepSchedule(draft) {
-    return `<div class="svw-form-grid">${inputField('openAt', 'วันเวลาเปิดกิจกรรม', draft.openAt, 'datetime-local')}${inputField('closeAt', 'วันเวลาปิดกิจกรรม', draft.closeAt, 'datetime-local')}</div><div class="svw-inline-note" role="note"><strong>เขตเวลา Asia/Bangkok</strong><p>ระบบจะใช้กลไกกำหนดเวลาปัจจุบันและจะไม่เปลี่ยนสถานะหากข้อมูลไม่ครบหรือไม่ถูกต้อง</p></div>`;
+    return `<div class="svw-form-grid">${dateTime24Field('openAt', 'เปิดกิจกรรม', draft.openAt)}${dateTime24Field('closeAt', 'ปิดกิจกรรม', draft.closeAt)}</div><div class="svw-inline-note" role="note"><strong>เวลาไทย (UTC+7) · รูปแบบ 24 ชั่วโมง</strong><p>ตัวอย่าง 17:30 คือห้าโมงครึ่งเย็น ระบบจะไม่ใช้ AM/PM และจะไม่เปลี่ยนสถานะหากข้อมูลไม่ครบหรือไม่ถูกต้อง</p></div>`;
 }
 
 function stepResults(draft) {
@@ -238,6 +244,7 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
 
     const readFields = () => {
         container.querySelectorAll('[data-svw-field]').forEach(input => { if (input.type === 'radio' && !input.checked) return; state.draft[input.dataset.svwField] = input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value; });
+        container.querySelectorAll('[data-svw-date-part]').forEach(input => { const name = input.dataset.svwDatePart, hour = container.querySelector(`[data-svw-hour-part="${name}"]`)?.value, minute = container.querySelector(`[data-svw-minute-part="${name}"]`)?.value; state.draft[name] = joinBangkokInput(input.value, `${hour}:${minute}`); });
         container.querySelectorAll('[data-svw-question-field]').forEach(input => { const index = Number(input.dataset.index), question = state.draft.questions[index]; if (question) question[input.dataset.svwQuestionField] = input.value; });
         state.draft.questions.forEach((question,index)=>{
             const title=container.querySelector(`[data-svw-field="question-${index}-title"]`),help=container.querySelector(`[data-svw-field="question-${index}-help"]`);
@@ -286,7 +293,7 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
             if (codeField && state.draft.campaignCode) codeField.value = state.draft.campaignCode;
             state.dirty = false;
             clearRecovery();
-            setSaveState('saved', `บันทึกแล้ว ${new Intl.DateTimeFormat('th-TH',{hour:'2-digit',minute:'2-digit'}).format(new Date())}`);
+            setSaveState('saved', `บันทึกแล้ว ${formatThaiTime(new Date())}`);
             return true;
         } catch (error) {
             writeRecovery();
@@ -407,8 +414,8 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         const [stepKey, stepTitle] = WIZARD_STEPS[state.step];
         const editing = Boolean(state.persisted.campaignId);
         const readiness = readinessItems(state.draft, state.persisted), readyCount = readiness.filter(item => item.pass).length;
-        const recovery = state.recovery ? `<section class="svw-recovery" role="status"><div><strong>พบข้อมูลล่าสุดที่ยังไม่ได้บันทึก</strong><span>บันทึกชั่วคราวในเบราว์เซอร์เมื่อ ${new Intl.DateTimeFormat('th-TH',{dateStyle:'short',timeStyle:'short'}).format(new Date(state.recovery.savedAt))}</span></div><div><button type="button" class="sv-button sv-button--primary" data-svw-recovery="restore">กู้คืนข้อมูล</button><button type="button" class="sv-button sv-button--secondary" data-svw-recovery="discard">ไม่ใช้ข้อมูลที่กู้คืน</button></div></section>` : '';
-        container.innerHTML = `<div class="svw-shell" data-sv-wizard="2026-10-11-admin-guided-drafts-r1"><header class="svw-header"><button type="button" class="sv-icon-button" data-svw-action="close" aria-label="กลับศูนย์จัดการ">←</button><div><p class="sv-eyebrow">${editing ? 'แก้ไขแคมเปญฉบับร่าง' : 'สร้างแคมเปญ'}${sourceLabel ? ` · ${escHtml(sourceLabel)}` : ''}</p><h1>${escHtml(stepTitle)}</h1>${state.persisted.serverUpdatedAt ? `<small>แก้ไขล่าสุด ${new Intl.DateTimeFormat('th-TH',{dateStyle:'short',timeStyle:'short'}).format(new Date(state.persisted.serverUpdatedAt))}</small>` : ''}</div><div class="svw-progress-copy">ขั้น ${state.step + 1} จาก ${WIZARD_STEPS.length}</div></header><div class="svw-progress" role="progressbar" aria-label="ความคืบหน้าการสร้างแคมเปญ" aria-valuemin="1" aria-valuemax="8" aria-valuenow="${state.step + 1}"><span style="width:${(state.step + 1) / WIZARD_STEPS.length * 100}%"></span></div>${recovery}<section class="svw-readiness-summary" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อม ${readyCount}/${readiness.length}</strong><span>${readyCount === readiness.length ? 'พร้อมตรวจสอบขั้นสุดท้าย' : 'ระบบจะอัปเดตตามข้อมูลที่กรอก'}</span></div><div class="sv-readiness-meter" role="progressbar" aria-label="ความพร้อมของแคมเปญ" aria-valuemin="0" aria-valuemax="${readiness.length}" aria-valuenow="${readyCount}"><span style="width:${readiness.length ? readyCount/readiness.length*100 : 0}%"></span></div></section><div class="svw-layout"><nav class="svw-step-nav" aria-label="ขั้นตอนสร้างแคมเปญ">${WIZARD_STEPS.map(([key,label],index)=>`<button type="button" data-svw-step="${index}" ${index===state.step?'aria-current="step"':''} ${index>state.maxStep?'disabled':''}><span>${index+1}</span><span>${escHtml(label)}</span></button>`).join('')}</nav><main class="svw-main" data-step="${stepKey}">${state.errors.length?`<section class="svw-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบข้อมูล</h2><ul>${state.errors.map(error=>`<li>${escHtml(error)}</li>`).join('')}</ul></section>`:''}<section class="svw-card">${stepMarkup(state.step,state.draft,state.persisted,state.previewMode)}</section></main></div><div class="svw-save-status" data-svw-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage)}</div><footer class="svw-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svw-action="back" ${state.step===0?'disabled':''}>ย้อนกลับ</button><div>${state.saveState==='error'?'<button type="button" class="sv-button sv-button--secondary" data-svw-action="retry">ลองบันทึกอีกครั้ง</button>':''}${state.step===7?reviewAction():`<button type="button" class="sv-button sv-button--primary" data-svw-action="next">ถัดไป</button>`}</div></footer></div>`;
+        const recovery = state.recovery ? `<section class="svw-recovery" role="status"><div><strong>พบข้อมูลล่าสุดที่ยังไม่ได้บันทึก</strong><span>บันทึกชั่วคราวในเบราว์เซอร์เมื่อ ${formatThaiDateTime(state.recovery.savedAt)}</span></div><div><button type="button" class="sv-button sv-button--primary" data-svw-recovery="restore">กู้คืนข้อมูล</button><button type="button" class="sv-button sv-button--secondary" data-svw-recovery="discard">ไม่ใช้ข้อมูลที่กู้คืน</button></div></section>` : '';
+        container.innerHTML = `<div class="svw-shell" data-sv-wizard="2026-10-15-thai-time-r1"><header class="svw-header"><button type="button" class="sv-icon-button" data-svw-action="close" aria-label="กลับศูนย์จัดการ">←</button><div><p class="sv-eyebrow">${editing ? 'แก้ไขแคมเปญฉบับร่าง' : 'สร้างแคมเปญ'}${sourceLabel ? ` · ${escHtml(sourceLabel)}` : ''}</p><h1>${escHtml(stepTitle)}</h1>${state.persisted.serverUpdatedAt ? `<small>แก้ไขล่าสุด ${formatThaiDateTime(state.persisted.serverUpdatedAt)}</small>` : ''}</div><div class="svw-progress-copy">ขั้น ${state.step + 1} จาก ${WIZARD_STEPS.length}</div></header><div class="svw-progress" role="progressbar" aria-label="ความคืบหน้าการสร้างแคมเปญ" aria-valuemin="1" aria-valuemax="8" aria-valuenow="${state.step + 1}"><span style="width:${(state.step + 1) / WIZARD_STEPS.length * 100}%"></span></div>${recovery}<section class="svw-readiness-summary" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อม ${readyCount}/${readiness.length}</strong><span>${readyCount === readiness.length ? 'พร้อมตรวจสอบขั้นสุดท้าย' : 'ระบบจะอัปเดตตามข้อมูลที่กรอก'}</span></div><div class="sv-readiness-meter" role="progressbar" aria-label="ความพร้อมของแคมเปญ" aria-valuemin="0" aria-valuemax="${readiness.length}" aria-valuenow="${readyCount}"><span style="width:${readiness.length ? readyCount/readiness.length*100 : 0}%"></span></div></section><div class="svw-layout"><nav class="svw-step-nav" aria-label="ขั้นตอนสร้างแคมเปญ">${WIZARD_STEPS.map(([key,label],index)=>`<button type="button" data-svw-step="${index}" ${index===state.step?'aria-current="step"':''} ${index>state.maxStep?'disabled':''}><span>${index+1}</span><span>${escHtml(label)}</span></button>`).join('')}</nav><main class="svw-main" data-step="${stepKey}">${state.errors.length?`<section class="svw-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบข้อมูล</h2><ul>${state.errors.map(error=>`<li>${escHtml(error)}</li>`).join('')}</ul></section>`:''}<section class="svw-card">${stepMarkup(state.step,state.draft,state.persisted,state.previewMode)}</section></main></div><div class="svw-save-status" data-svw-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage)}</div><footer class="svw-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svw-action="back" ${state.step===0?'disabled':''}>ย้อนกลับ</button><div>${state.saveState==='error'?'<button type="button" class="sv-button sv-button--secondary" data-svw-action="retry">ลองบันทึกอีกครั้ง</button>':''}${state.step===7?reviewAction():`<button type="button" class="sv-button sv-button--primary" data-svw-action="next">ถัดไป</button>`}</div></footer></div>`;
         container.querySelector('.svw-header')?.insertAdjacentHTML('beforebegin', safetyVoteJourneyNav({ role: 'admin', current: 'readiness', campaign: state.draft, onPage: typeof onNavigate !== 'function' }));
         bind();
         if (state.step === 7) bindSafetyVoteImageGallery(container);
@@ -446,7 +453,7 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
     const bind = () => {
         container.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => requestNavigate(button.dataset.svJourneyStep)));
         container.querySelectorAll('[data-svw-recovery]').forEach(button => button.addEventListener('click', () => { if (button.dataset.svwRecovery === 'restore') { state.draft = clone(state.recovery.draft); state.step = Math.max(0, Math.min(7, Number(state.recovery.step || 0))); state.maxStep = Math.max(state.step, Math.min(7, Number(state.recovery.maxStep || 0))); state.dirty = true; state.recovery = null; setSaveState('dirty', 'กู้คืนข้อมูลแล้ว — ยังไม่ได้บันทึก'); writeRecovery(); } else clearRecovery(); render(); }));
-        container.querySelectorAll('[data-svw-field],[data-svw-question-field],[data-svw-option-field],[data-svw-question-config],[data-svw-validation-field],[data-svw-condition-field],[data-svw-rule-field]').forEach(input=>input.addEventListener('input',()=>{readFields();if(input.dataset.svwRuleField){state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;}if(input.dataset.svwOptionField||input.dataset.svwQuestionConfig||input.dataset.svwValidationField||input.dataset.svwConditionField)state.persisted.builderSaved=false;enqueueSave();}));
+        container.querySelectorAll('[data-svw-field],[data-svw-date-part],[data-svw-hour-part],[data-svw-minute-part],[data-svw-question-field],[data-svw-option-field],[data-svw-question-config],[data-svw-validation-field],[data-svw-condition-field],[data-svw-rule-field]').forEach(input=>input.addEventListener('input',()=>{readFields();if(input.dataset.svwRuleField){state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;}if(input.dataset.svwOptionField||input.dataset.svwQuestionConfig||input.dataset.svwValidationField||input.dataset.svwConditionField)state.persisted.builderSaved=false;enqueueSave();}));
         container.querySelectorAll('[data-svw-option-field]').forEach(input=>input.addEventListener('change',()=>{readFields();render();}));
         container.querySelectorAll('[data-svw-question-config],[data-svw-validation-field]').forEach(input=>input.addEventListener('change',()=>{readFields();const question=state.draft.questions[Number(input.dataset.questionIndex)];if(question&&input.dataset.svwQuestionConfig==='isRequired')question.minSelections=question.isRequired===false?0:Math.max(1,Number(question.minSelections||1));state.persisted.builderSaved=false;render();}));
         container.querySelectorAll('[data-svw-condition-field]').forEach(input=>input.addEventListener('change',()=>{readFields();state.persisted.builderSaved=false;render();}));

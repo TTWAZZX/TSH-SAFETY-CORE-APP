@@ -12,12 +12,13 @@ import {
 } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9a-r1';
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
 import { CORE_TEMPLATES } from './safety-vote-wizard-model.mjs?v=20261015-safety-vote-live-results-r1';
-import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261015-safety-vote-live-results-r1';
-import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261015-safety-vote-live-results-r1';
-import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261009-safety-vote-ux8-r1';
-import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261009-safety-vote-ux8-r1';
-import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261010-safety-vote-ux9c-r1';
-import { renderSafetyVoteReviewWorkspace } from './admin-safety-vote-review.js?v=20261010-safety-vote-admin-review-r1';
+import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261015-safety-vote-thai-time-r1';
+import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261015-safety-vote-thai-time-r1';
+import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261015-safety-vote-thai-time-r1';
+import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261015-safety-vote-thai-time-r1';
+import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261015-safety-vote-thai-time-r1';
+import { renderSafetyVoteReviewWorkspace } from './admin-safety-vote-review.js?v=20261015-safety-vote-thai-time-r1';
+import { bangkokInputToIso, formatThaiDateTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const VIEW_LABELS = {
     active: 'กำลังดำเนินการ',
@@ -75,9 +76,14 @@ const state = {
 };
 
 function localInputDate(value, fallbackHours = 0) {
-    const date = value ? new Date(value) : new Date(Date.now() + fallbackHours * 3600000);
-    if (Number.isNaN(date.getTime())) return '';
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    return toBangkokInputValue(value || Date.now() + fallbackHours * 3600000);
+}
+
+function time24Select(name, value) {
+    const [selectedHour = '00', selectedMinute = '00'] = String(value || '00:00').split(':');
+    const hours = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'));
+    const minutes = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, '0'));
+    return `<span class="sv-time24" aria-label="เวลาไทยแบบ 24 ชั่วโมง"><select name="${name}Hour" aria-label="ชั่วโมง" required>${hours.map(hour => `<option value="${hour}" ${hour === selectedHour ? 'selected' : ''}>${hour}</option>`).join('')}</select><b aria-hidden="true">:</b><select name="${name}Minute" aria-label="นาที" required>${minutes.map(minute => `<option value="${minute}" ${minute === selectedMinute ? 'selected' : ''}>${minute}</option>`).join('')}</select><small>น.</small></span>`;
 }
 
 function relativeUpdated(value) {
@@ -133,11 +139,13 @@ function promotionWorkspaceMarkup() {
     if (state.engagementUnavailable) return `<section class="sv-state-panel sv-state-panel--warning" role="status"><h1>เครื่องมือประชาสัมพันธ์ยังไม่พร้อม</h1><p>ระบบแคมเปญยังใช้งานได้ตามปกติ และยังไม่มีการอ่านหรือแก้ไขข้อมูลป้าย</p></section>`;
     const editing = state.promotions.find(item => Number(item.id) === Number(state.promotionEditorId)) || null;
     const campaignId = editing?.campaignId || state.selectedId || state.campaigns.find(row => row.Status !== 'Voided')?.id || '';
+    const startInput = splitBangkokInput(editing?.startAt || Date.now());
+    const endInput = splitBangkokInput(editing?.endAt || Date.now() + 168 * 3600000);
     const form = state.promotionEditorId === null ? '' : `<section class="sv-promotion-editor" aria-labelledby="sv-promotion-editor-title"><div class="sv-promotion-editor__heading"><div><p class="sv-eyebrow">${editing ? 'แก้ไขป้าย' : 'ป้ายใหม่'}</p><h2 id="sv-promotion-editor-title">${editing ? escHtml(editing.titleTh) : 'สร้างป้ายประชาสัมพันธ์'}</h2></div><button type="button" class="sv-button sv-button--secondary" data-sv-promotion-cancel>กลับรายการป้าย</button></div><div class="sv-promotion-editor__layout"><form class="sv-promotion-form" data-sv-promotion-form>
         <label><span>กิจกรรม</span><select name="campaignId" required>${state.campaigns.filter(row => row.Status !== 'Voided').map(row => `<option value="${Number(row.id)}" ${Number(row.id) === Number(campaignId) ? 'selected' : ''}>${escHtml(row.CampaignCode)} · ${escHtml(row.TitleTh || 'ไม่มีชื่อ')}</option>`).join('')}</select></label>
         <label><span>หัวข้อ</span><input name="titleTh" maxlength="160" required value="${escHtml(editing?.titleTh || '')}"></label>
         <label><span>คำอธิบายสั้น</span><textarea name="subtitleTh" maxlength="500" rows="3">${escHtml(editing?.subtitleTh || '')}</textarea></label>
-        <div class="sv-promotion-form__grid"><label><span>ข้อความบนปุ่ม</span><input name="ctaLabel" maxlength="40" required value="${escHtml(editing?.ctaLabel || 'ดูรายละเอียด')}"></label><div class="sv-promotion-guidance" role="note"><strong>ลำดับอัตโนมัติ</strong><br><span>ระบบจัดป้ายใหม่ให้อยู่ก่อนป้ายเดิม และคงลำดับเดิมเมื่อแก้ไข</span></div><label><span>เริ่มแสดง</span><input name="startAt" type="datetime-local" required value="${localInputDate(editing?.startAt)}"></label><label><span>สิ้นสุด</span><input name="endAt" type="datetime-local" required value="${localInputDate(editing?.endAt, 168)}"></label></div>
+        <div class="sv-promotion-form__grid"><label><span>ข้อความบนปุ่ม</span><input name="ctaLabel" maxlength="40" required value="${escHtml(editing?.ctaLabel || 'ดูรายละเอียด')}"></label><div class="sv-promotion-guidance" role="note"><strong>ลำดับอัตโนมัติ</strong><br><span>ระบบจัดป้ายใหม่ให้อยู่ก่อนป้ายเดิม และคงลำดับเดิมเมื่อแก้ไข</span></div><label><span>วันที่เริ่มแสดง (เวลาไทย)</span><input name="startDate" type="date" lang="th-TH" required value="${startInput.date}"></label><label><span>เวลาเริ่ม — 24 ชั่วโมง</span>${time24Select('start', startInput.time)}</label><label><span>วันที่สิ้นสุด (เวลาไทย)</span><input name="endDate" type="date" lang="th-TH" required value="${endInput.date}"></label><label><span>เวลาสิ้นสุด — 24 ชั่วโมง</span>${time24Select('end', endInput.time)}</label></div>
         <label><span>คำอธิบายภาพสำหรับ Screen Reader</span><input name="altText" maxlength="240" value="${escHtml(editing?.altText || '')}" placeholder="อธิบายสาระสำคัญของภาพ ไม่ต้องขึ้นต้นว่า รูปภาพ"></label>
         <div class="sv-promotion-assets"><label><span>ภาพ Desktop</span><small>แนะนำ 1600×800 px (2:1) ขั้นต่ำ 1200×600 px</small><input name="desktop" type="file" accept="image/jpeg,image/png,image/webp" data-sv-promotion-image="desktop"></label><label><span>ภาพ Mobile</span><small>แนะนำ 1080×1350 px (4:5) ขั้นต่ำ 720×900 px</small><input name="mobile" type="file" accept="image/jpeg,image/png,image/webp" data-sv-promotion-image="mobile"></label></div>
         <p class="sv-promotion-guidance" role="note">ใช้ JPG หรือ WebP ไม่เกิน 10 MB และควรต่ำกว่า 1.5 MB เพื่อโหลดเร็ว ไม่ควรฝังข้อความหรือปุ่มลงในภาพ เพราะระบบจะแสดงหัวข้อและปุ่มให้เหมาะกับแต่ละหน้าจอ</p>
@@ -176,10 +184,7 @@ function visibleCampaigns() {
 }
 
 function formattedDate(value) {
-    if (!value) return 'ยังไม่กำหนด';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return 'ยังไม่กำหนด';
-    return new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    return formatThaiDateTime(value);
 }
 
 function selectedCampaign() {
@@ -423,7 +428,10 @@ async function savePromotion(form, status) {
     const editing = state.promotions.find(item => Number(item.id) === Number(state.promotionEditorId));
     const altText = String(values.get('altText') || '').trim();
     if ((desktop?.size || mobile?.size || editing?.desktopFileId || editing?.mobileFileId || state.promotionAssetSelection.size) && !altText) { showToast('กรุณาระบุคำอธิบายภาพสำหรับผู้ใช้ Screen Reader', 'warning'); form.elements.altText?.focus(); return; }
-    const payload = { campaignId: Number(values.get('campaignId')), titleTh: String(values.get('titleTh') || '').trim(), subtitleTh: String(values.get('subtitleTh') || '').trim(), ctaLabel: String(values.get('ctaLabel') || '').trim(), altText, startAt: new Date(String(values.get('startAt'))).toISOString(), endAt: new Date(String(values.get('endAt'))).toISOString(), status, rowVersion: Number(values.get('rowVersion') || 0) || undefined };
+    const startAt = bangkokInputToIso(joinBangkokInput(values.get('startDate'), `${values.get('startHour')}:${values.get('startMinute')}`));
+    const endAt = bangkokInputToIso(joinBangkokInput(values.get('endDate'), `${values.get('endHour')}:${values.get('endMinute')}`));
+    if (!startAt || !endAt || new Date(startAt) >= new Date(endAt)) { showToast('กรุณากำหนดวันและเวลาไทย โดยเวลาเริ่มต้องมาก่อนเวลาสิ้นสุด', 'warning'); return; }
+    const payload = { campaignId: Number(values.get('campaignId')), titleTh: String(values.get('titleTh') || '').trim(), subtitleTh: String(values.get('subtitleTh') || '').trim(), ctaLabel: String(values.get('ctaLabel') || '').trim(), altText, startAt, endAt, status, rowVersion: Number(values.get('rowVersion') || 0) || undefined };
     [...form.elements].forEach(element => { element.disabled = true; });
     try {
         let response = editing ? await API.put(`/safety-vote/admin/promotions/${Number(editing.id)}`, payload) : await API.post('/safety-vote/admin/promotions', payload);

@@ -7,6 +7,7 @@ import {
 } from './safety-vote-operations-model.mjs?v=20261008-safety-vote-ux5-r1';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261015-safety-vote-live-results-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
+import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const state = {
     container: null, campaign: null, onClose: null, onNavigate: null, operations: null, analytics: null, analyticsPrivacy: false,
@@ -35,9 +36,7 @@ function warningLabel(code) {
 }
 
 function dateTime(value) {
-    if (!value) return 'ยังไม่กำหนด';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? 'ยังไม่กำหนด' : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    return formatThaiDateTime(value);
 }
 
 function loadingMarkup() {

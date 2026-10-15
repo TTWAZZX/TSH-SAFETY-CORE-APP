@@ -20,7 +20,12 @@ let server;
 let browser;
 
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
-const localDate = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+const bangkokFields = date => {
+    const value = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date).replace(' ', 'T');
+    const [day, time] = value.split('T');
+    const [hour, minute] = time.split(':');
+    return { day, hour, minute };
+};
 
 async function waitForServer() {
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -105,8 +110,13 @@ async function adminWorkflow(campaignId) {
     }
     await page.locator('input[name="titleTh"]').fill(title);
     await page.locator('input[name="altText"]').fill('ภาพทดสอบป้ายกิจกรรม');
-    await page.locator('input[name="startAt"]').fill(localDate(new Date(Date.now() - 86400000)));
-    await page.locator('input[name="endAt"]').fill(localDate(new Date(Date.now() + 86400000)));
+    const start = bangkokFields(new Date(Date.now() - 86400000)), end = bangkokFields(new Date(Date.now() + 86400000));
+    await page.locator('input[name="startDate"]').fill(start.day);
+    await page.locator('select[name="startHour"]').selectOption(start.hour);
+    await page.locator('select[name="startMinute"]').selectOption(start.minute);
+    await page.locator('input[name="endDate"]').fill(end.day);
+    await page.locator('select[name="endHour"]').selectOption(end.hour);
+    await page.locator('select[name="endMinute"]').selectOption(end.minute);
     await page.locator('input[data-sv-promotion-image="desktop"]').setInputFiles({ name: 'banner.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') });
     await page.locator('button[value="Draft"]').click();
     try {

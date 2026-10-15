@@ -245,6 +245,7 @@ body {
     .sv-tablet-drawer .sv-campaign-cards { display: grid; }
 }
 @media (max-width: 767px) {
+    .svpl-datetime { grid-template-columns: 1fr; }
     .sv-ux-shell { padding: .75rem; }
     .sv-admin-hero { align-items: stretch; flex-direction: column; }
     .sv-admin-hero .sv-button { width: 100%; }
@@ -335,6 +336,13 @@ body {
 .svw-template__mark { position: absolute; top: .75rem; right: .75rem; color: #059669; font-size: 1.1rem; }
 .svw-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .85rem; }
 .svw-field { display: grid; min-width: 0; gap: .35rem; color: #475569; font-size: .8rem; font-weight: 800; }
+.svw-field--datetime { margin: 0; border: 1px solid #dbe4ee; border-radius: .9rem; padding: .75rem; }
+.svw-field--datetime legend { padding: 0 .25rem; color: #334155; }
+.sv-time24 { display: grid; grid-template-columns: minmax(4.5rem,1fr) auto minmax(4.5rem,1fr) auto; align-items: center; gap: .4rem; }
+.sv-time24 select { min-height: 44px; width: 100%; border: 1px solid #cbd5e1; border-radius: .7rem; background: #fff; padding: .55rem .65rem; color: #0f172a; font: inherit; font-weight: 700; }
+.sv-time24 b { font-size: 1.1rem; color: #334155; }
+.sv-time24 small { white-space: nowrap; color: #64748b; }
+.svpl-datetime { display: grid; grid-template-columns: minmax(9rem,1fr) minmax(12rem,1fr); gap: .5rem; }
 .svw-field:has(textarea) { grid-column: 1 / -1; }
 .svw-field input, .svw-field select, .svw-field textarea, .svw-question input, .svw-question select, .svw-question textarea, .svw-rule input, .svw-rule select { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: .7rem; background: #fff; padding: .65rem .75rem; color: #0f172a; font: inherit; font-weight: 500; }
 .svw-choice-fieldset { margin: 0; padding: 0; border: 0; }

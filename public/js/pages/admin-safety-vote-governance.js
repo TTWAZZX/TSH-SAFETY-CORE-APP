@@ -2,13 +2,12 @@ import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { isSafetyVoteUxV1Enabled, safetyVoteJourneyNav, safetyVoteRoleNav, safetyVoteStatusBadge, openSafetyVoteTypedConfirmationDialog } from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
 import { normalizeVerification, normalizeAcceptance, normalizePreflight, normalizeObservability, normalizeCatalog, normalizePreview, evidenceTimeline } from './safety-vote-governance-model.mjs?v=20261008-safety-vote-ux7-r1';
+import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const state = { container: null, campaign: null, onClose: null, onNavigate: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], verification: null, acceptance: null, preflight: null, observability: null, catalog: [], providers: null, preview: null, receipts: [], busy: false, notice: '', actionError: '' };
 
 function dateTime(value) {
-    if (!value) return '—';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    return formatThaiDateTime(value, '—');
 }
 
 function partialIssue(label, error) {

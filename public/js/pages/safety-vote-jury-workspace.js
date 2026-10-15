@@ -5,6 +5,7 @@ import {
     JURY_VIEW_LABELS, assignmentProgress, assignmentState, buildScorePayload, filterAssignments,
     normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateScoreSheet, valueOf
 } from './safety-vote-jury-model.mjs?v=20261008-safety-vote-ux4-r1';
+import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const STORAGE_PREFIX = 'safety-vote-jury-draft:';
 const state = {
@@ -14,9 +15,7 @@ const state = {
 };
 
 function dateTime(value) {
-    if (!value) return 'ไม่ระบุเวลา';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? 'ไม่ระบุเวลา' : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    return formatThaiDateTime(value, 'ไม่ระบุเวลา');
 }
 
 function storageKey(id) { return `${STORAGE_PREFIX}${Number(id)}`; }

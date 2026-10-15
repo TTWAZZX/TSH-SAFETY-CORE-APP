@@ -41,7 +41,7 @@ async function setup() {
     await adminDb.query(`CREATE DATABASE \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: dbName, multipleStatements: true });
     await db.query("CREATE TABLE Admin_RolePermissions(role VARCHAR(50),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(role,permission));CREATE TABLE Admin_UserPermissions(employee_id VARCHAR(20),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(employee_id,permission));CREATE TABLE Master_Departments(id INT PRIMARY KEY,Name VARCHAR(100),Status VARCHAR(20),CreatedAt DATETIME,is_safety_core TINYINT);CREATE TABLE Master_SafetyUnits(id INT PRIMARY KEY,name VARCHAR(100),short_code VARCHAR(30),department_id INT,sort_order INT,created_at DATETIME);CREATE TABLE Master_Positions(id INT PRIMARY KEY,Name VARCHAR(100),IsSupervisorPatrol TINYINT,PatrolPassPct DECIMAL(5,2));CREATE TABLE Employees(EmployeeID VARCHAR(20) PRIMARY KEY,EmployeeName VARCHAR(255),Department VARCHAR(100),Unit VARCHAR(100),Role VARCHAR(50),Team VARCHAR(100),Position VARCHAR(100),CompanyEmail VARCHAR(150),Password VARCHAR(255),MustChangePassword TINYINT);INSERT INTO Master_Departments VALUES(1,'Safety','active',NOW(),1);INSERT INTO Master_SafetyUnits VALUES(10,'Core','CORE',1,1,NOW());INSERT INTO Master_Positions VALUES(100,'Officer',0,NULL);INSERT INTO Employees VALUES('SV-ADMIN','Admin','Safety','Core','Admin','A','Officer','admin@example.test','x',0),('SV-USER','User','Production','Line 1','User','A','Officer','user@example.test','x',0),('SV-USER2','Juror','Production','Line 1','User','A','Officer','juror@example.test','x',0);");
-    for (const file of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261010_safety_vote_ux_phase9a_engagement.sql', '20261010_safety_vote_ux_phase9b_planning_content_communication.sql']) await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', file), 'utf8'));
+    for (const file of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261010_safety_vote_ux_phase9a_engagement.sql', '20261010_safety_vote_ux_phase9b_planning_content_communication.sql', '20261010_safety_vote_ux_phase9c_engagement_analytics.sql', '20261015_safety_vote_live_results.sql']) await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', file), 'utf8'));
     await db.query("UPDATE SafetyVote_Settings SET SettingValue='1' WHERE SettingKey IN ('module_enabled','engagement_enabled')");
     children.push(spawn(process.execPath, [path.join(__dirname, 'safety-vote-phase1-node-fixture-host.js')], { cwd: root, env: { ...process.env, DB_NAME: dbName, SAFETY_VOTE_FIXTURE_DB: dbName, SAFETY_VOTE_FIXTURE_PORT: String(port) }, stdio: 'ignore', windowsHide: true }));
     await waitReady();
@@ -78,7 +78,7 @@ async function inspect(viewport) {
     assert.strictEqual(await chooser.locator('[data-sv-built-in-template]').count(), 6);
     assert.strictEqual(await chooser.locator('[data-sv-reusable-template]').count(), 1);
     await chooser.locator('[data-sv-built-in-template="survey"]').click();
-    await page.locator('[data-sv-wizard="2026-10-11-admin-guided-drafts-r1"]').waitFor();
+    await page.locator('[data-sv-wizard="2026-10-15-thai-time-r1"]').waitFor();
     assert.strictEqual(await page.locator('.svw-readiness-summary [role="progressbar"]').count(), 1);
     await page.getByRole('button', { name: 'กลับศูนย์จัดการ' }).click();
     await page.getByRole('heading', { name: 'จัดการ Safety Vote' }).waitFor();
@@ -95,7 +95,7 @@ async function inspect(viewport) {
     await page.getByRole('button', { name: 'ยกเลิก', exact: true }).click();
     if (viewport.width >= 768 && viewport.width < 1200) await page.getByRole('button', { name: 'เลือกแคมเปญ' }).click();
     await page.locator('[data-sv-duplicate-campaign]:visible').first().click();
-    await page.locator('[data-sv-wizard="2026-10-11-admin-guided-drafts-r1"]').waitFor();
+    await page.locator('[data-sv-wizard="2026-10-15-thai-time-r1"]').waitFor();
     assert((await page.locator('.svw-header').innerText()).includes('สำเนา'));
     await page.getByRole('button', { name: 'กลับศูนย์จัดการ' }).click();
     if (await page.locator('[data-sv-dialog="confirm"]:visible').count()) await page.getByRole('button', { name: 'ออกจากหน้านี้' }).click();

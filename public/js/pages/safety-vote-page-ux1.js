@@ -3,8 +3,9 @@ import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js?v=20261008-safety-vote-phase4-r1';
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
-import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261009-safety-vote-ux8-r1';
-import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261015-safety-vote-live-results-r1';
+import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
+import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261015-safety-vote-thai-time-r1';
+import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261015-safety-vote-thai-time-r1';
 import {
     CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignType, filterCampaigns,
     isBallotCampaign, isChoiceQuestion, isQuestionVisible, participationState, privacyMode,
@@ -113,9 +114,7 @@ function startUserLivePolling() {
 }
 
 function dateTime(value) {
-    if (!value) return 'ไม่ระบุเวลา';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? 'ไม่ระบุเวลา' : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    return formatThaiDateTime(value, 'ไม่ระบุเวลา');
 }
 
 function loadingMarkup() {

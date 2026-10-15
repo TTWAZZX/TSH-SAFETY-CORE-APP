@@ -1,5 +1,6 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
+import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const model = { rows: [], summary: {}, selectedId: null, detail: null, filter: 'all', loading: false, error: null };
 const stateLabels = { needs_attention: 'ต้องแก้ไขก่อนตรวจ', ready_for_authoritative_check: 'พร้อมตรวจความพร้อมจริง', monitoring: 'ติดตามการดำเนินงาน' };
@@ -9,7 +10,7 @@ const actionLabels = {
 };
 
 function filteredRows() { return model.filter === 'all' ? model.rows : model.rows.filter(row => row.derivedQueueState === model.filter || (model.filter === 'conflict' && row.scheduleConflictCount > 0)); }
-function thaiDate(value) { if (!value) return 'ยังไม่กำหนด'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'ยังไม่กำหนด' : date.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }); }
+function thaiDate(value) { return formatThaiDateTime(value); }
 function queueMarkup() {
     const s = model.summary || {}, rows = filteredRows();
     return `<section class="sv-review" aria-labelledby="sv-review-title">
