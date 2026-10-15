@@ -1638,9 +1638,9 @@ async function openKyProductionVideoManager(record) {
                 if (!reason?.trim()) return;
                 const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', 'ลบไฟล์วิดีโอนี้ออกจาก Production ใช่หรือไม่? ระบบจะคง External Backup metadata, SHA-256 และ Audit ไว้ และเปลี่ยนการนับเป็น External verified');
                 if (!confirmed) return;
-                const deletionResponse = await runKyButtonAction(button, 'กำลังลบ...', () => API.post('/ky/video-inventory/delete-production', {
+                const deletionResponse = await API.post('/ky/video-inventory/delete-production', {
                     items: [{ id: button.dataset.id, activityId, rowVersion: Number(button.dataset.version || 0) }], reason: reason.trim(),
-                }));
+                });
                 const deletionResult = normalizeApiObject(deletionResponse?.data ?? deletionResponse) || {};
                 const deletedItem = normalizeApiArray(deletionResult.items).find(item => String(item.activityId || '') === activityId);
                 const verificationResponse = await API.get(`/ky/annual-video-evidence?year=${encodeURIComponent(year)}&verifyDeletion=${encodeURIComponent(Date.now())}`);
