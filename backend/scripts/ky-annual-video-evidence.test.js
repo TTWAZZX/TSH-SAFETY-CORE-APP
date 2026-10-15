@@ -131,12 +131,13 @@ assert.match(frontend, /data-ky-video-manager-register/, 'guided manager must ex
 assert.match(frontend, /data-ky-video-manager-verify/, 'guided manager must expose the pending Admin Verify step');
 assert.match(frontend, /data-ky-video-manager-delete/, 'guided manager must expose direct guarded Production deletion when ready');
 assert.match(frontend, /items: \[\{ id: button\.dataset\.id, activityId, rowVersion:/, 'guided manager deletion must bind Inventory ID to the exact KY Activity ID');
-assert.match(frontend, /deletedItem\?\.fileDeleted.*deletedItem\?\.videoUrlCleared/, 'guided manager must verify the server deletion postcondition before showing success');
+assert.match(frontend, /deletedItem\?\.fileDeleted.*deletedItem\?\.videoUrlCleared/, 'guided manager must verify the explicit server deletion postcondition before showing success');
+assert.match(frontend, /verifiedInventory\?\.fileDeleted.*verifiedInventory\?\.CurrentVideoUrl/, 'guided manager must verify the persisted Inventory state for backward-compatible API responses');
 assert.match(frontend, /ต้องเปลี่ยนตัวแทนก่อนลบ/, 'guided manager must explain the active contest retention hold');
 assert.match(apiUat, /uploadFollowupVideo\(inventoryActivityId/, 'API UAT must create the Inventory fixture through the real follow-up upload lifecycle');
 assert.match(apiUat, /video-upload\/\$\{uploadId\}\/chunk/, 'API UAT must send the follow-up video through the chunk endpoint');
 assert.match(apiUat, /video-inventory\/declare[\s\S]*video-inventory\/\$\{inventoryDeclared\.data\.id\}\/verify[\s\S]*video-inventory\/delete-production/, 'API UAT must cover follow-up upload through Inventory declare, Verify, and guarded Production deletion');
-assert.match(main, /ky\.js\?v=20261015-ky-video-manager-r2/, 'cache chain must expose the guided video-manager KY bundle');
-assert.match(index, /main\.js\?v=20261015-ky-video-manager-r2/, 'HTML entry point must invalidate the cached main module');
+assert.match(main, /ky\.js\?v=20261015-ky-video-manager-r3/, 'cache chain must expose the guided video-manager KY bundle');
+assert.match(index, /main\.js\?v=20261015-ky-video-manager-r3/, 'HTML entry point must invalidate the cached main module');
 
 console.log('KY annual video evidence contract: PASS');

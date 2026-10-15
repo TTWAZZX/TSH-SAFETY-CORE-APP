@@ -1643,7 +1643,12 @@ async function openKyProductionVideoManager(record) {
                 }));
                 const deletionResult = normalizeApiObject(deletionResponse?.data ?? deletionResponse) || {};
                 const deletedItem = normalizeApiArray(deletionResult.items).find(item => String(item.activityId || '') === activityId);
-                if (Number(deletionResult.deleted || 0) !== 1 || !deletedItem?.fileDeleted || !deletedItem?.videoUrlCleared) {
+                const verificationResponse = await API.get(`/ky/annual-video-evidence?year=${encodeURIComponent(year)}&verifyDeletion=${encodeURIComponent(Date.now())}`);
+                const verificationData = normalizeApiObject(verificationResponse?.data ?? verificationResponse) || {};
+                const verifiedInventory = normalizeApiArray(verificationData.inventory).find(item => String(item.ActivityID || '') === activityId);
+                const responseConfirmed = Number(deletionResult.deleted || 0) === 1 && deletedItem?.fileDeleted && deletedItem?.videoUrlCleared;
+                const inventoryConfirmed = Boolean(verifiedInventory?.fileDeleted) && !String(verifiedInventory?.CurrentVideoUrl || '').trim();
+                if (!responseConfirmed && !inventoryConfirmed) {
                     throw new Error('ระบบยังยืนยันการลบไฟล์ Production ของรายการนี้ไม่ได้ กรุณารีเฟรชแล้วลองใหม่');
                 }
                 closeModal();
