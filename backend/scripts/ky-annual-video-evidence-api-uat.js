@@ -273,7 +273,7 @@ async function cleanup() {
         inventoryIds.push(inventoryDeclared.data.id);
         await assert.rejects(
             post('ky/video-inventory/delete-production', headers, {
-                items: [{ id: inventoryDeclared.data.id, rowVersion: inventoryDeclared.data.RowVersion }], reason: 'must fail before verify',
+                items: [{ id: inventoryDeclared.data.id, activityId: inventoryActivityId, rowVersion: inventoryDeclared.data.RowVersion }], reason: 'must fail before verify',
             }),
             /409 KY_VIDEO_INVENTORY_NOT_VERIFIED|409.*verified matching external backup/i
         );
@@ -283,9 +283,12 @@ async function cleanup() {
         const inventoryDownload = await request(`ky/video-inventory/${inventoryDeclared.data.id}/download`, { headers });
         assert.strictEqual(crypto.createHash('sha256').update(Buffer.from(inventoryDownload.body)).digest('hex'), inventorySha, 'Inventory download must preserve SHA-256');
         const inventoryDeleted = await post('ky/video-inventory/delete-production', headers, {
-            items: [{ id: inventoryDeclared.data.id, rowVersion: inventoryVerified.data.RowVersion }], reason: 'Local Production inventory deletion UAT',
+            items: [{ id: inventoryDeclared.data.id, activityId: inventoryActivityId, rowVersion: inventoryVerified.data.RowVersion }], reason: 'Local Production inventory deletion UAT',
         });
         assert.strictEqual(inventoryDeleted.data.deleted, 1, 'Inventory cleanup must remove exactly one verified file');
+        assert.strictEqual(inventoryDeleted.data.items[0].activityId, inventoryActivityId, 'Inventory cleanup must confirm the exact KY activity that was deleted');
+        assert.strictEqual(inventoryDeleted.data.items[0].fileDeleted, true, 'Inventory cleanup must confirm its deletion marker');
+        assert.strictEqual(inventoryDeleted.data.items[0].videoUrlCleared, true, 'Inventory cleanup must confirm the activity Production URL was cleared');
 
         const deletedOne = await post('ky/annual-video-evidence/delete-production', headers, {
             items: [{ id: activities[0].evidence.id, rowVersion: activities[0].evidence.RowVersion }],

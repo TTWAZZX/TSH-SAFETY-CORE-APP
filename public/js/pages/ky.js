@@ -1638,13 +1638,22 @@ async function openKyProductionVideoManager(record) {
                 if (!reason?.trim()) return;
                 const confirmed = await showConfirmationModal('ยืนยันลบไฟล์ Production', 'ลบไฟล์วิดีโอนี้ออกจาก Production ใช่หรือไม่? ระบบจะคง External Backup metadata, SHA-256 และ Audit ไว้ และเปลี่ยนการนับเป็น External verified');
                 if (!confirmed) return;
-                await runKyButtonAction(button, 'กำลังลบ...', () => API.post('/ky/video-inventory/delete-production', {
-                    items: [{ id: button.dataset.id, rowVersion: Number(button.dataset.version || 0) }], reason: reason.trim(),
+                const deletionResponse = await runKyButtonAction(button, 'กำลังลบ...', () => API.post('/ky/video-inventory/delete-production', {
+                    items: [{ id: button.dataset.id, activityId, rowVersion: Number(button.dataset.version || 0) }], reason: reason.trim(),
                 }));
+                const deletionResult = normalizeApiObject(deletionResponse?.data ?? deletionResponse) || {};
+                const deletedItem = normalizeApiArray(deletionResult.items).find(item => String(item.activityId || '') === activityId);
+                if (Number(deletionResult.deleted || 0) !== 1 || !deletedItem?.fileDeleted || !deletedItem?.videoUrlCleared) {
+                    throw new Error('ระบบยังยืนยันการลบไฟล์ Production ของรายการนี้ไม่ได้ กรุณารีเฟรชแล้วลองใหม่');
+                }
                 closeModal();
-                showToast('ลบไฟล์ Production แล้ว และเปลี่ยน Dashboard เป็น External verified', 'success');
                 await loadAndRenderKyEvidenceCompletion();
                 await renderVideoShowcase();
+                const refreshedRecord = _kyEvidenceRecords.find(item => String(item.id || '') === activityId);
+                if (kyHasProductionVideo(refreshedRecord) || !refreshedRecord?.HasVerifiedExternalVideo) {
+                    throw new Error('ลบไฟล์แล้ว แต่สถานะ Dashboard ยังไม่ตรงกับ External verified กรุณาแจ้งผู้ดูแลระบบ');
+                }
+                showToast('ลบไฟล์ Production แล้ว และเปลี่ยน Dashboard เป็น External verified', 'success');
             } catch (error) { showError(error); }
         }, { render: false }));
     } catch (error) {

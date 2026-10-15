@@ -2630,6 +2630,8 @@ router.post('/video-inventory/delete-production', isAdmin, async (req, res) => {
             const [found] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=? FOR UPDATE', [String(item.id || '')]);
             const row = found[0];
             if (!row || Number(row.RowVersion) !== Number(item.rowVersion)) throw Object.assign(new Error('Inventory record is missing or stale.'), { status: 409, code: 'KY_VIDEO_INVENTORY_STALE' });
+            const expectedActivityId = String(item.activityId || '').trim();
+            if (expectedActivityId && String(row.ActivityID) !== expectedActivityId) throw Object.assign(new Error('The selected inventory record does not belong to this KY activity.'), { status: 409, code: 'KY_VIDEO_INVENTORY_ACTIVITY_MISMATCH' });
             if (await kyActiveContestEntry(connection, row.ActivityID, true)) throw Object.assign(new Error('This Production video is the active annual Unit contest entry and cannot be deleted.'), { status: 409, code: 'KY_CONTEST_ENTRY_RETENTION_HOLD' });
             if (!kyVideoInventoryPublic(row).canDeleteProductionFile) throw Object.assign(new Error('Every selected file must have a verified matching external backup.'), { status: 409, code: 'KY_VIDEO_INVENTORY_NOT_VERIFIED' });
             const [activityRows] = await connection.query('SELECT id,VideoUrl FROM KY_Activities WHERE id=? FOR UPDATE', [row.ActivityID]);
@@ -2646,23 +2648,29 @@ router.post('/video-inventory/delete-production', isAdmin, async (req, res) => {
         }
         const actorId = currentUserId(req) || null;
         const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin';
+        const results = [];
         for (const entry of quarantined) {
             const [clearResult] = await connection.query('UPDATE KY_Activities SET VideoUrl=NULL WHERE id=? AND VideoUrl=?', [entry.row.ActivityID, entry.row.ProductionVideoUrl]);
-            const [activityAfterRows] = await connection.query('SELECT VideoUrl FROM KY_Activities WHERE id=?', [entry.row.ActivityID]);
-            if (Number(clearResult.affectedRows) !== 1 || String(activityAfterRows[0]?.VideoUrl || '').trim()) {
+            if (Number(clearResult.affectedRows) !== 1) {
                 throw Object.assign(new Error('Production file was quarantined but the activity reference could not be cleared.'), { status: 409, code: 'KY_VIDEO_INVENTORY_ACTIVITY_CLEAR_FAILED' });
             }
-            await connection.query(
-                `UPDATE KY_Video_File_Inventory SET ProductionDeletedByID=?,ProductionDeletedByName=?,ProductionDeletedAt=NOW(),ProductionDeletionReason=?,RowVersion=RowVersion+1 WHERE id=?`,
-                [actorId, actorName, reason, entry.row.id]
+            const [markResult] = await connection.query(
+                `UPDATE KY_Video_File_Inventory SET ProductionDeletedByID=?,ProductionDeletedByName=?,ProductionDeletedAt=NOW(),ProductionDeletionReason=?,RowVersion=RowVersion+1 WHERE id=? AND ActivityID=? AND ProductionDeletedAt IS NULL`,
+                [actorId, actorName, reason, entry.row.id, entry.row.ActivityID]
             );
-            const [afterRows] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=?', [entry.row.id]);
-            await kyVideoInventoryAudit(connection, req, 'PRODUCTION_FILE_DELETED', entry.row, afterRows[0], reason);
+            const [activityAfterRows] = await connection.query('SELECT VideoUrl FROM KY_Activities WHERE id=?', [entry.row.ActivityID]);
+            const [afterRows] = await connection.query('SELECT * FROM KY_Video_File_Inventory WHERE id=? AND ActivityID=?', [entry.row.id, entry.row.ActivityID]);
+            const after = afterRows[0];
+            if (Number(markResult.affectedRows) !== 1 || String(activityAfterRows[0]?.VideoUrl || '').trim() || !after?.ProductionDeletedAt) {
+                throw Object.assign(new Error('Production deletion could not be verified for the selected KY activity.'), { status: 409, code: 'KY_VIDEO_INVENTORY_DELETE_NOT_VERIFIED' });
+            }
+            await kyVideoInventoryAudit(connection, req, 'PRODUCTION_FILE_DELETED', entry.row, after, reason);
+            results.push({ inventoryId: String(entry.row.id), activityId: String(entry.row.ActivityID), fileDeleted: true, videoUrlCleared: true, productionDeletedAt: after.ProductionDeletedAt, rowVersion: Number(after.RowVersion) });
         }
         await connection.commit();
         committed = true;
         for (const entry of quarantined) { try { fs.unlinkSync(entry.quarantine); } catch (error) { console.error('KY inventory quarantine cleanup error:', error); } }
-        res.json({ success: true, data: { deleted: quarantined.length } });
+        res.json({ success: true, data: { deleted: results.length, items: results } });
     } catch (error) {
         if (connection && !committed) { try { await connection.rollback(); } catch (_) {} }
         if (!committed) for (const entry of quarantined.reverse()) { try { if (fs.existsSync(entry.quarantine) && !fs.existsSync(entry.localPath)) fs.renameSync(entry.quarantine, entry.localPath); } catch (_) {} }
