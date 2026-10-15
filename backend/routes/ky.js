@@ -1260,7 +1260,9 @@ async function kyAnnualEvidenceRows(year) {
 }
 
 function kyProductionVideoSql(alias = 'a') {
-    return `COALESCE(TRIM(${alias}.VideoUrl), '') <> ''`;
+    return `COALESCE(TRIM(${alias}.VideoUrl), '') <> ''
+        AND NOT EXISTS (SELECT 1 FROM KY_Video_File_Inventory inv_deleted WHERE inv_deleted.ActivityID=${alias}.id AND inv_deleted.ProductionDeletedAt IS NOT NULL)
+        AND NOT EXISTS (SELECT 1 FROM KY_Annual_Video_Evidence ave_deleted WHERE ave_deleted.ActivityID=${alias}.id AND ave_deleted.ProductionDeletedAt IS NOT NULL)`;
 }
 
 function kyVerifiedExternalVideoSql(alias = 'a') {
@@ -2645,7 +2647,11 @@ router.post('/video-inventory/delete-production', isAdmin, async (req, res) => {
         const actorId = currentUserId(req) || null;
         const actorName = req.user?.name || req.user?.EmployeeName || req.user?.username || 'Admin';
         for (const entry of quarantined) {
-            await connection.query('UPDATE KY_Activities SET VideoUrl=NULL WHERE id=? AND VideoUrl=?', [entry.row.ActivityID, entry.row.ProductionVideoUrl]);
+            const [clearResult] = await connection.query('UPDATE KY_Activities SET VideoUrl=NULL WHERE id=? AND VideoUrl=?', [entry.row.ActivityID, entry.row.ProductionVideoUrl]);
+            const [activityAfterRows] = await connection.query('SELECT VideoUrl FROM KY_Activities WHERE id=?', [entry.row.ActivityID]);
+            if (Number(clearResult.affectedRows) !== 1 || String(activityAfterRows[0]?.VideoUrl || '').trim()) {
+                throw Object.assign(new Error('Production file was quarantined but the activity reference could not be cleared.'), { status: 409, code: 'KY_VIDEO_INVENTORY_ACTIVITY_CLEAR_FAILED' });
+            }
             await connection.query(
                 `UPDATE KY_Video_File_Inventory SET ProductionDeletedByID=?,ProductionDeletedByName=?,ProductionDeletedAt=NOW(),ProductionDeletionReason=?,RowVersion=RowVersion+1 WHERE id=?`,
                 [actorId, actorName, reason, entry.row.id]

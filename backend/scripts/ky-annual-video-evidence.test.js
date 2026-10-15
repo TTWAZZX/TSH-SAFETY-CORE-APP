@@ -29,11 +29,13 @@ for (const source of [nodeRoute, phpRoute]) {
     assert.match(source, /KY_ANNUAL_VIDEO_HASH_MISMATCH|failed SHA-256 verification/, 'physical deletion must fail on hash mismatch');
     assert.match(source, /RowVersion/, 'mutations must use optimistic concurrency');
     assert.match(source, /ProductionDeletedAt/, 'metadata must retain deletion state');
+    assert.match(source, /ProductionDeletedAt IS NOT NULL/, 'a deletion marker must override a stale Activity VideoUrl in Production counts');
     assert.match(source, /KY_VIDEO_PROTECTED_BY_RETENTION/, 'legacy video replacement paths must fail closed');
     assert.match(source, /KY_ACTIVITY_VOID_DUPLICATE/, 'protected duplicate activities must be voided with audit instead of deleting retained evidence');
     assert.match(source, /excludedFromStatistics/, 'protected duplicate void must explicitly record statistics exclusion');
     assert.match(source, /ProductionDeletedAt=NULL/, 'a corrected replacement must reset the previous physical-deletion marker');
     assert.match(source, /activity video reference changed|Activity.*VideoUrl.*FOR UPDATE/is, 'deletion must lock and revalidate the current activity video reference');
+    assert.match(source, /activity reference could not be cleared/, 'deletion must fail closed unless the Activity VideoUrl is cleared and re-read');
     assert.match(source, /HasProductionVideo/, 'activity projections must identify Production video evidence');
     assert.match(source, /HasVerifiedExternalVideo/, 'activity projections must identify verified external video evidence');
     assert.match(source, /HasPendingExternalVideo/, 'activity projections must keep pending external video separate');
