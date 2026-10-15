@@ -1,5 +1,21 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-10-15 - Safety Vote promotion remediation and current Local data mirror
+
+- Fixed the silent Publish confirmation path, restored saved banner previews, moved ordering to automatic server allocation with Node/PHP parity, and retained expired eligible banners in a user-visible activity history linked back to campaigns.
+- Decoupled banner visibility from the campaign voting window. Eligible users now see Published banners and campaign details before `OpenAt`, while both UI and Node/PHP block early voting; Admin can preview without joining the frozen voter snapshot and cannot submit for users.
+- Dedicated Browser UAT passed Draft image upload/reopen, Publish confirmation, automatic priority, pre-open display/API blocking and expired-history navigation at Admin desktop plus User mobile/desktop. Static/parity passed 41 assertions and guarded Node/PHP API UAT passed with zero residue.
+- After explicit authorization for all sensitive rows, exported the full Production database read-only, verified two downloads by SHA-256, restored it through a disposable Local database, and matched 256 tables/28,521 rows before replacing Local. Production helper/export residue is zero and `.htaccess` was restored byte-exact.
+- After separate authorization, downloaded all seven Active Safety Vote private files read-only and matched stored size/SHA-256 metadata. Applied the additive Live Results migration to refreshed Local with the feature OFF. Production application runtime/schema remain unchanged.
+
+## 2026-10-15 - Safety Vote Live Results / Live Leaderboard (local only)
+
+- Added versioned, default-OFF configuration, validation and Draft/revision persistence for Top 5/10, score display, User visibility, refresh interval and privacy threshold with Node/PHP parity.
+- Added privacy-safe User/Admin endpoints that use current-version Accepted ballots, competition ranking, deterministic boundary ties and per-question valid-answer denominators. Unsupported types, disabled/non-Open campaigns, ineligible users, pre-submit users and below-threshold data fail closed.
+- Added responsive User/Admin boards with provisional-result disclosure, progress bars, tie labels, private option images, manual refresh/pause and lifecycle-safe polling with AbortController and bounded backoff.
+- Added the additive/idempotent migration, data-preserving rollback, guarded Local migration command, 26-assertion static/parity suite, disposable migration test, Node/PHP API lifecycle and three-viewport Chromium UAT. Local schema migration preserved campaign/version/ballot/answer counts and left Live Results disabled by default.
+- Relevant Phase 10.4, UX Phase 8/9A/9B/9C and disabled-mode regressions pass. The repository-wide `npm test` still stops at the pre-existing permission audit because ten unrelated routes remain classified `UNREVIEWED`. No Production connection, deploy, commit or push occurred.
+
 ## 2026-10-12 - Admin Public File Library Production release
 
 - Deployed immutable commit `1db5848f47cd0adc4612536619b523b5e748ae60`: additive schema ready, eight runtime paths verified `8/8` by FTPS and six public assets verified `6/6` over HTTPS.

@@ -85,6 +85,8 @@ export function createWizardDraft() {
         campaignType: 'survey', campaignCode: '', titleTh: '', titleEn: '', summary: '', description: '',
         privacyMode: 'identified', privacyThreshold: 5, discoveryMode: 'eligible_only',
         openAt: '', closeAt: '', resultVisibility: 'hidden_until_close',
+        liveLeaderboardEnabled: false, liveLeaderboardTopN: 5, liveLeaderboardScoreMode: 'count_percentage',
+        liveLeaderboardVisibility: 'after_submit', liveLeaderboardRefreshSeconds: 15, liveLeaderboardPrivacyThreshold: 5,
         questions: [defaultQuestion('survey')],
         rules: [{ ruleGroup: 1, ruleOrder: 1, effect: 'include', attributeKey: 'all', operator: 'EQUALS', values: [], reason: 'พนักงานทั้งหมด' }],
         eligibilityPreview: null, eligibilityFrozen: false
@@ -98,6 +100,7 @@ export function applyTemplate(draft, type) {
         campaignType: template.key,
         privacyMode: template.privacyMode,
         resultVisibility: template.key === 'secret_election' ? 'certified_only' : 'hidden_until_close',
+        liveLeaderboardEnabled: false,
         questions: [defaultQuestion(template.key)],
         eligibilityPreview: null,
         eligibilityFrozen: false
@@ -170,7 +173,14 @@ export function validateStep(step, draft) {
         if (!draft.eligibilityFrozen) errors.push('กรุณายืนยันและตรึงรายชื่อผู้มีสิทธิ์ก่อนดำเนินการต่อ');
     }
     if (step === 5 && !scheduleValid(draft)) errors.push('วันเวลาเปิดต้องอยู่ก่อนวันเวลาปิด');
-    if (step === 6 && !privacyValid(draft)) errors.push('การแสดงผลไม่สอดคล้องกับความเป็นส่วนตัว');
+    if (step === 6) {
+        if (!privacyValid(draft)) errors.push('การแสดงผลไม่สอดคล้องกับความเป็นส่วนตัว');
+        if (draft.liveLeaderboardEnabled && draft.campaignType !== 'popular_vote') errors.push('Live Leaderboard รองรับเฉพาะแคมเปญโหวตยอดนิยม');
+        if (draft.liveLeaderboardEnabled && draft.questions.some(question => Number(question.maxSelections) !== 1 || !hasOptions(question.questionType))) errors.push('Live Leaderboard รองรับเฉพาะคำถามแบบตัวเลือกที่เลือกได้สูงสุด 1 รายการ');
+        if (draft.liveLeaderboardEnabled && ![5,10].includes(Number(draft.liveLeaderboardTopN))) errors.push('จำนวนอันดับต้องเป็น Top 5 หรือ Top 10');
+        if (draft.liveLeaderboardEnabled && (Number(draft.liveLeaderboardRefreshSeconds) < 10 || Number(draft.liveLeaderboardRefreshSeconds) > 60)) errors.push('ความถี่อัปเดตต้องอยู่ระหว่าง 10–60 วินาที');
+        if (draft.liveLeaderboardEnabled && Number(draft.liveLeaderboardPrivacyThreshold) < Math.max(5, Number(draft.privacyThreshold))) errors.push('จำนวนขั้นต่ำของผลสดต้องไม่น้อยกว่า Privacy threshold และข้อกำหนด Server');
+    }
     return errors;
 }
 
@@ -200,6 +210,12 @@ export function campaignPayload(draft) {
         privacyThreshold: Number(draft.privacyThreshold || 5),
         discoveryMode: draft.discoveryMode,
         resultVisibility: draft.resultVisibility,
+        liveLeaderboardEnabled: Boolean(draft.liveLeaderboardEnabled),
+        liveLeaderboardTopN: Number(draft.liveLeaderboardTopN || 5),
+        liveLeaderboardScoreMode: draft.liveLeaderboardScoreMode,
+        liveLeaderboardVisibility: draft.liveLeaderboardVisibility,
+        liveLeaderboardRefreshSeconds: Number(draft.liveLeaderboardRefreshSeconds || 15),
+        liveLeaderboardPrivacyThreshold: Math.max(5, Number(draft.privacyThreshold || 5), Number(draft.liveLeaderboardPrivacyThreshold || 5)),
         openAt: apiDate(draft.openAt),
         closeAt: apiDate(draft.closeAt)
     };

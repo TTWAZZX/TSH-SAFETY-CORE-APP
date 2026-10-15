@@ -1,5 +1,14 @@
 # TSH Safety Core Activity - AI Quick Start
 
+## Current Safety Vote Live Results + promotion handoff (Production candidate, not deployed, 2026-10-15)
+
+- Live Leaderboard is version-scoped and default OFF. It supports only Popular Vote plus single-choice questions, uses Accepted ballots from the current version, competition ranking with boundary ties, per-question valid-answer denominators and server-side privacy suppression.
+- User visibility is enforced server-side (`after_submit`, `always`, `admin_only`) in addition to frozen eligibility and existing permissions. Below threshold, neither exact participation totals nor option results are returned. Admin receives full option detail; User receives Top N only.
+- Polling is 10–60 seconds with manual refresh/pause, visibility pause, no overlap, AbortController cleanup and bounded backoff. The board is provisional only and remains separate from certified/official results.
+- Promotion Publish confirmation, saved-image preview, automatic order and expired-banner history are remediated with Node/PHP parity and dedicated Browser UAT. Campaigns and promotion history are retained after end time.
+- Local now mirrors the explicitly authorized full Production database snapshot (256 tables/28,521 rows) plus seven verified Active Safety Vote private files. The additive Live Results migration was reapplied locally and remains OFF. Production application runtime/schema were not changed; no deploy, commit or push was performed.
+- Before release, use `docs/safety-vote-live-results-promotion-production-candidate-manifest.json`, create an immutable commit plus byte-exact rollback package, and repeat protected Production drift/authenticated smoke gates.
+
 ## Current Admin Public File Library handoff (Local production candidate, 2026-10-12)
 
 - Multipart UTF-8 filenames are normalized for new and legacy rows. Anonymous Public links use optional `PUBLIC_API_URL` or the request API origin, never the frontend-only `PUBLIC_APP_URL`; authenticated application links still use the frontend origin.

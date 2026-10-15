@@ -1,5 +1,19 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Promotion Remediation + Full Production DB Local Mirror (2026-10-15)
+
+- Promotion Publish now survives the confirmation callback, saved private images reappear in edit preview, priority is allocated automatically and preserved on update, and expired eligible promotions appear under `ป้ายกิจกรรมที่ผ่านมา` with campaign navigation. Campaign/promotion records are retained rather than automatically deleted.
+- Promotion StartAt/EndAt is independent of the campaign voting window. Eligible users see Published active banners and campaign detail before OpenAt, while UI and Node/PHP reject early voting; Admin has read-only preview even outside the frozen voter snapshot. Node/PHP API UAT and dedicated Chromium Admin/User workflows pass Draft upload/reopen, Publish, automatic order, pre-open visibility/blocking and history at 390×844 and 1366×768 with zero fixture residue.
+- With explicit approval for sensitive rows, the full Production database was exported in a read-only snapshot, double-download SHA-256 verified, tested in a disposable database and restored to loopback Local at 256 tables/28,521 rows. Seven Active Safety Vote private files were separately authorized, downloaded read-only and matched stored size/SHA-256 metadata. The Live Results migration was reapplied locally with its feature OFF.
+- Production `.htaccess` was restored byte-exact and remote helper/export residue is zero. Production runtime/schema were not deployed or mutated. Decision: `PASS_LOCAL_COMBINED_PRODUCTION_CANDIDATE_READY_NOT_DEPLOYED`.
+
+## Safety Vote Live Results / Live Leaderboard (Local only, 2026-10-15)
+
+- Version-scoped, default-OFF Live Leaderboard is implemented for `popular_vote` campaigns with single-choice questions. Admin can configure Top 5/10, count/percentage display, `after_submit`/`always`/`admin_only` visibility, 10–60 second polling and a threshold that cannot be lower than the campaign or server minimum of 5.
+- Node/PHP endpoints aggregate only Accepted ballots from the current campaign version. Competition ranking is deterministic (`1,2,2,4`), Top N includes ties at the boundary, unanswered questions are excluded from each question denominator, and abstain counts when represented by an option. Below threshold, exact totals and all option results are suppressed.
+- User and Admin workspaces include responsive aggregate-only boards, manual refresh, pause/resume, visibility-aware polling, no-overlap requests, AbortController cleanup, bounded backoff and private option-image delivery. Live data is provisional and is not wired into certification or official result publication.
+- Additive/idempotent migration and data-preserving rollback passed on a disposable schema and the loopback Local database was migrated with the feature still OFF and protected business counts unchanged. Static/security and Node/PHP parity passed 26 assertions; guarded Node/PHP API UAT and Chromium User/Admin UAT passed at 390×844, 430×932 and 1366×768 with zero disposable residue. Phase 10.4, UX Phase 8/9A/9B/9C and disabled-mode regressions pass. No Production connection, deploy, commit or push occurred. Decision: `PASS_LOCAL_LIVE_RESULTS_READY_FOR_REVIEW`.
+
 ## Admin Public File Library Production Deployment (PASS, 2026-10-12)
 
 - UTF-8 upload names are normalized at the Node/PHP boundary and again on DTO/download delivery, repairing legacy mojibake presentation without rewriting stored rows. Public file URLs now use `PUBLIC_API_URL` when explicitly configured or the actual API request origin; `PUBLIC_APP_URL` remains reserved for frontend/authenticated share intent. This fixes split-port Local links (`5500` UI / `5000` API).

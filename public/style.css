@@ -6,6 +6,26 @@ body {
     -webkit-text-size-adjust: 100%;
 }
 
+/* Safety Vote Live Results */
+.svw-live-config,.svo-panel--live,.svp-live-workspace,.sv-live-board{border:1px solid #c7d2fe;border-radius:18px;background:linear-gradient(180deg,#fff,#f8faff);padding:18px;margin-top:18px}
+.svw-live-toggle{display:flex;align-items:center;gap:10px;min-height:44px;font-weight:800;color:#3730a3}
+.svw-live-toggle input{width:22px;height:22px}
+.svw-inline-note--warning{border-color:#f59e0b;background:#fffbeb;color:#92400e}
+.sv-live-board__heading,.sv-live-board__meta,.svp-live-actions,.svp-detail-tabs{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sv-live-board__heading>span,.sv-live-tie{border-radius:999px;background:#e0e7ff;color:#3730a3;padding:5px 10px;font-size:.75rem;font-weight:800}
+.sv-live-board__meta{margin:12px 0;color:#475569;font-size:.82rem}
+.sv-live-question{margin-top:16px}.sv-live-question>small{display:block;margin-top:10px;color:#64748b}
+.sv-live-list{display:grid;gap:10px;margin-top:10px}
+.sv-live-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:12px;border:1px solid #e2e8f0;border-radius:14px;background:#fff;padding:12px}
+.sv-live-row>div{min-width:0}.sv-live-row>div>strong,.sv-live-row>div>small{display:block}.sv-live-row>div>small{color:#64748b;margin-top:3px}
+.sv-live-rank{font-size:1.1rem;color:#4338ca}.sv-live-score{font-weight:900;color:#0f172a;white-space:nowrap}
+.sv-live-image{width:52px;height:52px;border:0;border-radius:12px;padding:0;overflow:hidden;background:#e2e8f0;cursor:pointer}.sv-live-image img{width:100%;height:100%;object-fit:cover}
+.sv-live-progress{height:7px;margin-top:8px;border-radius:999px;background:#e2e8f0;overflow:hidden}.sv-live-progress span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#4f46e5,#06b6d4)}
+.sv-live-disclaimer,.sv-live-state{margin-top:14px;border-radius:12px;background:#fff7ed;color:#9a3412;padding:12px}.sv-live-state strong,.sv-live-state span{display:block}.sv-live-state span{margin-top:4px}.sv-live-state.is-private{background:#f8fafc;color:#334155}
+.svp-detail-tabs{justify-content:flex-start;margin:14px 0;border-bottom:1px solid #e2e8f0}.svp-detail-tabs button{min-height:44px;border:0;border-bottom:3px solid transparent;background:transparent;padding:8px 16px;font-weight:800;color:#64748b}.svp-detail-tabs button[aria-current="page"]{border-color:#4f46e5;color:#3730a3}.svp-detail-tabs>span{font-size:.78rem;color:#92400e}
+.sv-live-board--preview{margin-top:16px}.sv-live-board--preview .sv-live-row{grid-template-columns:auto minmax(0,1fr) auto}
+@media(max-width:640px){.sv-live-row{grid-template-columns:auto 44px minmax(0,1fr)}.sv-live-score{grid-column:3;white-space:normal}.sv-live-image{width:44px;height:44px}.svw-live-config,.svo-panel--live,.svp-live-workspace,.sv-live-board{padding:14px}}
+
 /* Safety Vote UX Phase 9C — aggregate engagement analytics */
 .svan-dashboard { display: grid; gap: 1rem; }
 .svan-toolbar, .svan-panel { background: #fff; border: 1px solid #dbe5e1; border-radius: 18px; padding: 1rem; min-width: 0; }

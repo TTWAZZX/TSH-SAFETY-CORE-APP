@@ -5,12 +5,15 @@ import {
     juryProgress, metricView, notificationSummary, operationalWarnings, preferredSnapshot,
     safeTimeline, snapshotReadiness, stageRows, statusCounts, valueOf
 } from './safety-vote-operations-model.mjs?v=20261008-safety-vote-ux5-r1';
+import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261015-safety-vote-live-results-r1';
+import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 
 const state = {
     container: null, campaign: null, onClose: null, onNavigate: null, operations: null, analytics: null, analyticsPrivacy: false,
     juryRows: [], stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false,
     moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false,
-    notificationPreview: null, latestReport: null, actionError: '', actionNotice: ''
+    notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null,
+    livePaused: false, liveInFlight: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null
 };
 
 const ACTION_LABELS = {
@@ -92,15 +95,48 @@ function resultsMarkup() {
     return `<div class="svo-snapshot-list">${rows.map(row => `<article><div><span>Snapshot ${row.snapshotNo}</span><strong>${escHtml(row.status)}</strong><small>Stage ${row.stageId || '—'} · ${row.resultRows} result rows · ${escHtml(row.reconciliation)}</small></div><code aria-label="Result hash">${escHtml(row.resultHash ? `${row.resultHash.slice(0, 12)}…` : 'ไม่มี hash')}</code></article>`).join('')}</div><div class="svo-cert-note" role="note"><strong>การรับรองและประกาศผลเป็นหน้าที่แยก</strong><span>ต้องใช้สิทธิ์ <code>SAFETY_VOTE_CERTIFY</code>, assignment ผู้รับรอง และ exact result hash หน้านี้สร้างได้เฉพาะรายงานจาก snapshot ที่พร้อมเท่านั้น</span></div><div class="svo-export-actions"><button type="button" class="sv-button sv-button--secondary" data-svo-action="export-excel" ${!aggregate || state.busy || state.exportUnavailable ? 'disabled' : ''}>รายงานรวม Excel</button><button type="button" class="sv-button sv-button--secondary" data-svo-action="export-pdf" ${!aggregate || state.busy || state.exportUnavailable ? 'disabled' : ''}>รายงานรวม PDF</button><button type="button" class="sv-button sv-button--primary" data-svo-action="certified-report" ${!certified || state.busy || state.exportUnavailable ? 'disabled' : ''}>รายงานผลที่รับรองแล้ว</button></div>${state.latestReport ? `<div class="svo-report-receipt" role="status"><strong>สร้างรายงานสำเร็จ</strong><span>${escHtml(state.latestReport.reportId || '')} · SHA-256 ${escHtml(String(state.latestReport.contentSha256 || '').slice(0, 16))}…</span></div>` : ''}`;
 }
 
+function stopLivePolling() {
+    clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer); state.liveTimer = null; state.liveCountdownTimer = null;
+    state.liveAbort?.abort(); state.liveAbort = null; state.liveInFlight = false;
+    if (state.liveVisibilityHandler) document.removeEventListener('visibilitychange', state.liveVisibilityHandler);
+    state.liveVisibilityHandler = null;
+    if (state.container) clearLiveResultImages(state.container);
+}
+
+function updateLivePanel() {
+    const panel = state.container?.querySelector('[data-svo-live-results]'); if (!panel) return;
+    panel.innerHTML = liveResultsMarkup(state.liveResults, { admin: true, error: state.liveError, loading: state.liveInFlight && !state.liveResults, paused: state.livePaused });
+    bindSafetyVoteImageGallery(panel); hydrateLiveResultImages(panel);
+}
+
+function scheduleLivePolling() {
+    clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer);
+    if (state.livePaused || document.hidden || !Number(state.campaign?.LiveLeaderboardEnabled) || String(state.campaign?.Status) !== 'Open') return;
+    const base = Math.max(10, Math.min(60, Number(state.liveResults?.config?.refreshSeconds || state.campaign?.LiveLeaderboardRefreshSeconds || 15)));
+    const delay = Math.min(60, base * Math.max(1, 2 ** state.liveFailures)); let remaining = delay;
+    const node = state.container?.querySelector('[data-sv-live-countdown]'); if (node) node.textContent = String(remaining);
+    const tick = () => { remaining = Math.max(0, remaining - 1); const current = state.container?.querySelector('[data-sv-live-countdown]'); if (current) current.textContent = String(remaining); if (remaining > 0) state.liveCountdownTimer = setTimeout(tick, 1000); };
+    state.liveCountdownTimer = setTimeout(tick, 1000);
+    state.liveTimer = setTimeout(() => loadLiveResults(false), delay * 1000);
+}
+
+async function loadLiveResults(manual = true) {
+    if (state.liveInFlight || !Number(state.campaign?.LiveLeaderboardEnabled)) return;
+    state.liveInFlight = true; state.liveAbort = new AbortController(); updateLivePanel();
+    try { const response = await API.get(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/live-results`, { suppressErrorLog: true, signal: state.liveAbort.signal }); state.liveResults = response.data; state.liveError = null; state.liveFailures = 0; }
+    catch (error) { if (error?.name !== 'AbortError') { state.liveError = error; state.liveFailures = Math.min(2, state.liveFailures + 1); } }
+    finally { state.liveInFlight = false; state.liveAbort = null; updateLivePanel(); if (!manual || !state.livePaused) scheduleLivePolling(); }
+}
+
 function render() {
     if (!state.container) return;
     if (state.loading) { state.container.innerHTML = loadingMarkup(); return; }
     if (state.error || state.denied || state.moduleDisabled) { state.container.innerHTML = stateMarkup(); bind(); return; }
     const campaign = state.campaign || {}, operations = state.operations || {}, funnel = operations.funnel || {}, status = operations.campaign?.status || campaign.Status || 'Draft';
     const notificationCounts = statusCounts(operations.notifications || []), exportCounts = statusCounts(operations.exports || []);
-    state.container.innerHTML = `<div class="svo-shell" data-sv-operations="2026-10-08-safety-vote-ux5-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svo-hero"><button type="button" class="sv-icon-button" data-svo-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ศูนย์ปฏิบัติการ Safety Vote</p><h1>${escHtml(campaign.TitleTh || campaign.titleTh || 'แคมเปญ Safety Vote')}</h1><p>${escHtml(campaign.CampaignCode || campaign.campaignCode || '')} · ข้อมูลรวมสำหรับติดตามความพร้อม ไม่ใช่หน้ารับรองหรือคำนวณผล</p></div>${safetyVoteStatusBadge(status)}</header>${warningMarkup()}${state.actionError ? `<div class="svo-action-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.actionNotice ? `<div class="svo-action-message is-success" role="status">${escHtml(state.actionNotice)}</div>` : ''}<section class="svo-kpi-grid" aria-label="Funnel การเข้าร่วมที่ผ่านเกณฑ์ความเป็นส่วนตัว">${metricCard('ผู้มีสิทธิ์', funnel.eligible)}${metricCard('เริ่มแล้ว', funnel.started)}${metricCard('ส่งแล้ว', funnel.submitted)}${metricCard('บัตรที่รับ', funnel.accepted)}</section><div class="svo-privacy-banner" role="note"><strong>Privacy threshold ทำงานที่เซิร์ฟเวอร์</strong><span>ค่าที่ถูกปกปิดจะไม่ถูกคำนวณย้อนกลับ และหน้าจอนี้ไม่อ่านตัวเลือกลงคะแนน รายชื่อผู้ลงคะแนน หรือ blind identity</span></div><main class="svo-grid"><section class="svo-panel svo-panel--timeline" aria-labelledby="svo-timeline-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Lifecycle</p><h2 id="svo-timeline-title">กำหนดการและ Timeline</h2></div><span>${escHtml(operations.campaign?.timeZone || 'Asia/Bangkok')}</span></div><dl class="svo-schedule"><div><dt>เปิด</dt><dd>${dateTime(operations.campaign?.scheduledOpenAt)}</dd></div><div><dt>ปิด</dt><dd>${dateTime(operations.campaign?.scheduledCloseAt)}</dd></div></dl>${timelineMarkup()}</section><section class="svo-panel" aria-labelledby="svo-jury-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Stage health</p><h2 id="svo-jury-title">รอบและงานกรรมการ</h2></div></div>${stagesMarkup()}</section><section class="svo-panel" aria-labelledby="svo-analytics-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Privacy-safe analytics</p><h2 id="svo-analytics-title">การเข้าร่วมตามหน่วยงาน</h2></div></div>${analyticsMarkup()}</section><section class="svo-panel" aria-labelledby="svo-notification-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Delivery health</p><h2 id="svo-notification-title">สถานะการแจ้งเตือน</h2></div><span>${Number(notificationCounts.Failed || 0) ? 'ต้องตรวจสอบ' : 'ติดตามจากสถานะรวม'}</span></div>${notificationMarkup()}</section><section class="svo-panel svo-panel--results" aria-labelledby="svo-result-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Result readiness</p><h2 id="svo-result-title">Snapshot และรายงาน</h2></div><span>Export สำเร็จ ${Number(exportCounts.Completed || 0)}</span></div>${resultsMarkup()}</section></main><footer class="svo-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svo-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button><button type="button" class="sv-button sv-button--primary" data-svo-action="process-schedule" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ประมวลผลกำหนดการ</button></div></footer></div>`;
+    state.container.innerHTML = `<div class="svo-shell" data-sv-operations="2026-10-15-safety-vote-live-results-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svo-hero"><button type="button" class="sv-icon-button" data-svo-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ศูนย์ปฏิบัติการ Safety Vote</p><h1>${escHtml(campaign.TitleTh || campaign.titleTh || 'แคมเปญ Safety Vote')}</h1><p>${escHtml(campaign.CampaignCode || campaign.campaignCode || '')} · ข้อมูลรวมสำหรับติดตามความพร้อม ไม่ใช่หน้ารับรองหรือคำนวณผล</p></div>${safetyVoteStatusBadge(status)}</header>${warningMarkup()}${state.actionError ? `<div class="svo-action-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.actionNotice ? `<div class="svo-action-message is-success" role="status">${escHtml(state.actionNotice)}</div>` : ''}<section class="svo-kpi-grid" aria-label="Funnel การเข้าร่วมที่ผ่านเกณฑ์ความเป็นส่วนตัว">${metricCard('ผู้มีสิทธิ์', funnel.eligible)}${metricCard('เริ่มแล้ว', funnel.started)}${metricCard('ส่งแล้ว', funnel.submitted)}${metricCard('บัตรที่รับ', funnel.accepted)}</section><div class="svo-privacy-banner" role="note"><strong>Privacy threshold ทำงานที่เซิร์ฟเวอร์</strong><span>ค่าที่ถูกปกปิดจะไม่ถูกคำนวณย้อนกลับ และหน้าจอนี้ไม่อ่านตัวเลือกลงคะแนน รายชื่อผู้ลงคะแนน หรือ blind identity</span></div><section class="svo-panel svo-panel--live" aria-labelledby="svo-live-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Live Results</p><h2 id="svo-live-title">ผลโหวตสด</h2></div><div class="svo-inline-actions"><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div></div><div data-svo-live-results>${Number(campaign.LiveLeaderboardEnabled)?liveResultsMarkup(state.liveResults,{admin:true,error:state.liveError,loading:state.liveInFlight,paused:state.livePaused}):liveResultsMarkup(null,{error:{code:'LIVE_RESULTS_DISABLED'}})}</div></section><main class="svo-grid"><section class="svo-panel svo-panel--timeline" aria-labelledby="svo-timeline-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Lifecycle</p><h2 id="svo-timeline-title">กำหนดการและ Timeline</h2></div><span>${escHtml(operations.campaign?.timeZone || 'Asia/Bangkok')}</span></div><dl class="svo-schedule"><div><dt>เปิด</dt><dd>${dateTime(operations.campaign?.scheduledOpenAt)}</dd></div><div><dt>ปิด</dt><dd>${dateTime(operations.campaign?.scheduledCloseAt)}</dd></div></dl>${timelineMarkup()}</section><section class="svo-panel" aria-labelledby="svo-jury-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Stage health</p><h2 id="svo-jury-title">รอบและงานกรรมการ</h2></div></div>${stagesMarkup()}</section><section class="svo-panel" aria-labelledby="svo-analytics-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Privacy-safe analytics</p><h2 id="svo-analytics-title">การเข้าร่วมตามหน่วยงาน</h2></div></div>${analyticsMarkup()}</section><section class="svo-panel" aria-labelledby="svo-notification-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Delivery health</p><h2 id="svo-notification-title">สถานะการแจ้งเตือน</h2></div><span>${Number(notificationCounts.Failed || 0) ? 'ต้องตรวจสอบ' : 'ติดตามจากสถานะรวม'}</span></div>${notificationMarkup()}</section><section class="svo-panel svo-panel--results" aria-labelledby="svo-result-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Result readiness</p><h2 id="svo-result-title">Snapshot และรายงาน</h2></div><span>Export สำเร็จ ${Number(exportCounts.Completed || 0)}</span></div>${resultsMarkup()}</section></main><footer class="svo-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svo-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button><button type="button" class="sv-button sv-button--primary" data-svo-action="process-schedule" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ประมวลผลกำหนดการ</button></div></footer></div>`;
     state.container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'operations', campaign, onPage: typeof state.onNavigate !== 'function' }));
-    bind();
+    bind(); bindSafetyVoteImageGallery(state.container); hydrateLiveResultImages(state.container);
 }
 
 function issueFrom(result, label) {
@@ -212,8 +248,10 @@ function bind() {
     state.container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => state.onNavigate?.(button.dataset.svJourneyStep)));
     state.container?.querySelectorAll('[data-svo-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svoAction;
-        if (action === 'back') state.onClose?.();
+        if (action === 'back') { stopLivePolling(); state.onClose?.(); }
         else if (action === 'retry' || action === 'refresh') loadData();
+        else if (action === 'live-refresh') loadLiveResults(true);
+        else if (action === 'live-toggle') { state.livePaused = !state.livePaused; render(); if (!state.livePaused) loadLiveResults(true); else scheduleLivePolling(); }
         else if (action === 'preview-notifications') previewNotifications();
         else confirmAction(action);
     }));
@@ -221,7 +259,13 @@ function bind() {
 
 export async function renderSafetyVoteOperationsWorkspace(container, { campaign = null, onClose = null, onNavigate = null } = {}) {
     if (!isSafetyVoteUxV1Enabled() || !container || !campaign?.id) return false;
-    Object.assign(state, { container, campaign, onClose, onNavigate, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '' });
+    stopLivePolling();
+    Object.assign(state, { container, campaign, onClose, onNavigate, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null, livePaused: false, liveInFlight: false, liveFailures: 0 });
     await loadData();
+    if (Number(campaign.LiveLeaderboardEnabled) && String(campaign.Status) === 'Open') {
+        state.liveVisibilityHandler = () => { if (document.hidden) { clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer); state.liveAbort?.abort(); } else if (!state.livePaused) loadLiveResults(false); };
+        document.addEventListener('visibilitychange', state.liveVisibilityHandler);
+        await loadLiveResults(false);
+    }
     return true;
 }

@@ -33,8 +33,11 @@ export function privacyMode(campaign = {}) {
 export function participationState(campaign = {}) {
     const status = String(valueOf(campaign, 'Status', 'status'));
     const participation = String(valueOf(campaign, 'ParticipationState', 'participationState')).toLowerCase();
+    const votingWindowValue = valueOf(campaign, 'VotingWindowOpen', 'votingWindowOpen');
+    const votingWindowOpen = votingWindowValue === '' || Number(votingWindowValue) === 1;
     if (participation === 'submitted') return 'submitted';
-    if (status === 'Open') return 'open';
+    if (status === 'Scheduled' || (status === 'Open' && !votingWindowOpen)) return 'upcoming';
+    if (status === 'Open' && votingWindowOpen) return 'open';
     return 'closed';
 }
 

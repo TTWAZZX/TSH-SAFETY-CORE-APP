@@ -1,0 +1,130 @@
+<?php
+declare(strict_types=1);
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, max-age=0');
+header('X-Content-Type-Options: nosniff');
+@set_time_limit(0);
+
+const RUN_TOKEN_SHA256 = '__RUN_TOKEN_SHA256__';
+const CLEANUP_TOKEN_SHA256 = '__CLEANUP_TOKEN_SHA256__';
+const BACKUP_ID = '__BACKUP_ID__';
+const GUARD_NAME = '__GUARD_NAME__';
+const EXPORT_NAME = 'production-full-database.sql.gz';
+
+function reply(array $payload, int $status = 200): void {
+    http_response_code($status);
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+function token_ok(string $expected): bool {
+    $token = (string)($_SERVER['HTTP_X_TSH_EXPORT_TOKEN'] ?? '');
+    return $token !== '' && hash_equals($expected, hash('sha256', $token));
+}
+function integrity_ok(): bool {
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (!is_file($guard)) return false;
+    $expected = strtolower(trim((string)file_get_contents($guard)));
+    return preg_match('/^[a-f0-9]{64}$/', $expected) === 1 && hash_equals($expected, hash_file('sha256', __FILE__));
+}
+function remove_backup(string $directory): array {
+    $removed = [];
+    foreach ([EXPORT_NAME, '.htaccess', '.used'] as $name) {
+        $target = $directory . DIRECTORY_SEPARATOR . $name;
+        if (is_file($target) && @unlink($target)) $removed[] = $name;
+    }
+    if (is_dir($directory) && @rmdir($directory)) $removed[] = 'backup-directory';
+    return $removed;
+}
+function ident(string $name): string { return '`' . str_replace('`', '``', $name) . '`'; }
+function sql_value(PDO $pdo, $value, bool $binary): string {
+    if ($value === null) return 'NULL';
+    if ($binary) return '0x' . bin2hex((string)$value);
+    return $pdo->quote((string)$value);
+}
+
+if (!integrity_ok()) reply(['success' => false, 'code' => 'HELPER_INTEGRITY_FAILED'], 409);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') reply(['success' => false, 'code' => 'METHOD_NOT_ALLOWED'], 405);
+$backupDir = __DIR__ . DIRECTORY_SEPARATOR . 'private' . DIRECTORY_SEPARATOR . BACKUP_ID;
+$action = strtolower(trim((string)($_SERVER['HTTP_X_TSH_EXPORT_ACTION'] ?? 'backup')));
+if ($action === 'cleanup') {
+    if (!token_ok(CLEANUP_TOKEN_SHA256)) reply(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
+    $removed = remove_backup($backupDir);
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (is_file($guard) && @unlink($guard)) $removed[] = 'guard';
+    $self = __FILE__;
+    register_shutdown_function(static function () use ($self): void { @unlink($self); });
+    reply(['success' => true, 'removed' => $removed, 'selfRemovalScheduled' => true]);
+}
+if ($action !== 'backup' || !token_ok(RUN_TOKEN_SHA256)) reply(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
+
+try {
+    if (!is_dir($backupDir) && !mkdir($backupDir, 0700, true) && !is_dir($backupDir)) throw new RuntimeException('BACKUP_DIRECTORY_CREATE_FAILED');
+    file_put_contents($backupDir . DIRECTORY_SEPARATOR . '.htaccess', "Require all denied\nDeny from all\n", LOCK_EX);
+    $used = @fopen($backupDir . DIRECTORY_SEPARATOR . '.used', 'x');
+    if ($used === false) reply(['success' => false, 'code' => 'TOKEN_ALREADY_USED'], 409);
+    fwrite($used, gmdate('c')); fclose($used);
+    $config = require __DIR__ . '/config.php';
+    if (!is_array($config)) throw new RuntimeException('CONFIG_NOT_ARRAY');
+    $dsn = 'mysql:host=' . (string)$config['db_host'] . ';port=' . (int)$config['db_port'] . ';dbname=' . (string)$config['db_name'] . ';charset=utf8mb4';
+    $pdo = new PDO($dsn, (string)$config['db_user'], (string)$config['db_pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]);
+    $schema = (string)$config['db_name'];
+    $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    $pdo->exec('SET TRANSACTION READ ONLY');
+    $pdo->beginTransaction();
+    $tableStmt = $pdo->prepare("SELECT TABLE_NAME,TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=? ORDER BY TABLE_TYPE,TABLE_NAME");
+    $tableStmt->execute([$schema]);
+    $inventory = $tableStmt->fetchAll();
+    $tables = array_values(array_map(static function ($row): string { return (string)$row['TABLE_NAME']; }, array_filter($inventory, static function ($row): bool { return $row['TABLE_TYPE'] === 'BASE TABLE'; })));
+    $views = array_values(array_map(static function ($row): string { return (string)$row['TABLE_NAME']; }, array_filter($inventory, static function ($row): bool { return $row['TABLE_TYPE'] === 'VIEW'; })));
+    $metadata = [];
+    $rowCounts = [];
+    foreach ($tables as $table) {
+        $create = $pdo->query('SHOW CREATE TABLE ' . ident($table))->fetch(PDO::FETCH_NUM);
+        $columnsStmt = $pdo->prepare("SELECT COLUMN_NAME,DATA_TYPE,EXTRA FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION");
+        $columnsStmt->execute([$schema, $table]);
+        $columns = array_values(array_filter($columnsStmt->fetchAll(), static function ($column): bool { return stripos((string)$column['EXTRA'], 'GENERATED') === false; }));
+        $metadata[$table] = ['create' => (string)$create[1], 'columns' => $columns];
+        $rowCounts[$table] = (int)$pdo->query('SELECT COUNT(*) FROM ' . ident($table))->fetchColumn();
+    }
+    $viewCreates = [];
+    foreach ($views as $view) {
+        $create = $pdo->query('SHOW CREATE VIEW ' . ident($view))->fetch();
+        $sql = (string)($create['Create View'] ?? '');
+        $viewCreates[$view] = preg_replace('/^CREATE\s+(?:ALGORITHM=[^ ]+\s+)?DEFINER=`[^`]+`@`[^`]+`\s+SQL SECURITY DEFINER\s+/i', 'CREATE ', $sql);
+    }
+    $export = $backupDir . DIRECTORY_SEPARATOR . EXPORT_NAME;
+    $temporary = $export . '.tmp';
+    $handle = gzopen($temporary, 'wb9');
+    if ($handle === false) throw new RuntimeException('EXPORT_OPEN_FAILED');
+    gzwrite($handle, "-- TSH Safety Core full Production database snapshot\n-- GeneratedAt=" . gmdate('c') . "\nSET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\nSET UNIQUE_CHECKS=0;\n\n");
+    foreach ($views as $view) gzwrite($handle, 'DROP VIEW IF EXISTS ' . ident($view) . ";\n");
+    foreach (array_reverse($tables) as $table) gzwrite($handle, 'DROP TABLE IF EXISTS ' . ident($table) . ";\n");
+    gzwrite($handle, "\n");
+    foreach ($tables as $table) gzwrite($handle, $metadata[$table]['create'] . ";\n\n");
+    foreach ($tables as $table) {
+        $columns = $metadata[$table]['columns'];
+        if (!$columns || $rowCounts[$table] === 0) continue;
+        $names = array_map(static function ($column): string { return (string)$column['COLUMN_NAME']; }, $columns);
+        $binary = [];
+        foreach ($columns as $column) $binary[(string)$column['COLUMN_NAME']] = in_array(strtolower((string)$column['DATA_TYPE']), ['binary','varbinary','tinyblob','blob','mediumblob','longblob','bit'], true);
+        $select = $pdo->query('SELECT ' . implode(',', array_map('ident', $names)) . ' FROM ' . ident($table), PDO::FETCH_ASSOC);
+        while ($row = $select->fetch()) {
+            $values = [];
+            foreach ($names as $name) $values[] = sql_value($pdo, $row[$name], $binary[$name]);
+            gzwrite($handle, 'INSERT INTO ' . ident($table) . ' (' . implode(',', array_map('ident', $names)) . ') VALUES (' . implode(',', $values) . ");\n");
+        }
+        $select->closeCursor();
+        gzwrite($handle, "\n");
+    }
+    foreach ($viewCreates as $sql) if ($sql !== '') gzwrite($handle, $sql . ";\n\n");
+    gzwrite($handle, "SET UNIQUE_CHECKS=1;\nSET FOREIGN_KEY_CHECKS=1;\n");
+    gzclose($handle);
+    $pdo->rollBack();
+    if (!rename($temporary, $export)) throw new RuntimeException('EXPORT_FINALIZE_FAILED');
+    @chmod($export, 0600);
+    reply(['success' => true, 'valuesSuppressed' => true, 'readOnlyTransaction' => true, 'databaseNameHash' => hash('sha256', $schema), 'tables' => count($tables), 'views' => count($views), 'rows' => array_sum($rowCounts), 'relativePath' => 'api/private/' . BACKUP_ID . '/' . EXPORT_NAME, 'bytes' => filesize($export), 'sha256' => hash_file('sha256', $export)]);
+} catch (Throwable $error) {
+    error_log('Production full database export failed: ' . $error->getMessage());
+    reply(['success' => false, 'code' => 'EXPORT_FAILED', 'valuesSuppressed' => true], 500);
+}

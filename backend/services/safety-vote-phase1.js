@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const liveResults = require('./safety-vote-live-results');
 
 const CONTRACT_VERSION = '2026-10-08-safety-vote-phase0-r1';
 const CAMPAIGN_TYPES = Object.freeze(['popular_vote','secret_election','survey','poll','feedback','nomination','award','submission_challenge','jury_scoring','hybrid_scoring','ranking','prioritization','allocation','resolution','petition','event_choice','risk_perception','knowledge_check','multi_stage']);
@@ -43,6 +44,10 @@ function normalizeCampaign(input = {}, options = {}) {
     if (!PRIVACY_MODES.includes(privacyMode)) errors.push({ field: 'privacyMode', code: 'INVALID_ENUM' });
     if (!RESULT_VISIBILITY.includes(resultVisibility)) errors.push({ field: 'resultVisibility', code: 'INVALID_ENUM' });
     if (privacyMode === 'secret_ballot' && resultVisibility === 'live') errors.push({ field: 'resultVisibility', code: 'SECRET_LIVE_RESULT_FORBIDDEN' });
+    const live = liveResults.normalizeConfig(input, Math.max(2, Math.min(100, Number(input.privacyThreshold || input.PrivacyThreshold || 5))));
+    errors.push(...live.errors);
+    if (live.value.enabled && campaignType !== 'popular_vote') errors.push({ field: 'liveLeaderboardEnabled', code: 'UNSUPPORTED_CAMPAIGN_TYPE' });
+    if (live.value.enabled && privacyMode === 'secret_ballot') errors.push({ field: 'liveLeaderboardEnabled', code: 'SECRET_LIVE_RESULT_FORBIDDEN' });
     return {
         ok: errors.length === 0,
         errors,
@@ -61,6 +66,12 @@ function normalizeCampaign(input = {}, options = {}) {
             openAt: clean(input.openAt || input.OpenAt, 32) || null,
             closeAt: clean(input.closeAt || input.CloseAt, 32) || null,
             privacyThreshold: Math.max(2, Math.min(100, Number(input.privacyThreshold || input.PrivacyThreshold || 5))),
+            liveLeaderboardEnabled: live.value.enabled,
+            liveLeaderboardTopN: live.value.topN,
+            liveLeaderboardScoreMode: live.value.scoreMode,
+            liveLeaderboardVisibility: live.value.visibility,
+            liveLeaderboardRefreshSeconds: live.value.refreshSeconds,
+            liveLeaderboardPrivacyThreshold: live.value.privacyThreshold,
         },
     };
 }

@@ -22,11 +22,19 @@ ok(!/DROP\s+TABLE|DELETE\s+FROM/i.test(rollback) && rollback.includes("'engageme
 const nodeRoute = read('backend/routes/safety-vote-engagement.js'), phpRoute = read('api/handlers/safety_vote_engagement.php');
 for (const marker of ['/admin/engagement/action-center', '/admin/promotions', '/me/promotions', '/notification-center']) { ok(nodeRoute.includes(marker), `Node ${marker}`); ok(phpRoute.includes(marker), `PHP ${marker}`); }
 for (const text of [nodeRoute, phpRoute]) { ok(text.includes('SafetyVote_EligibleVoters'), 'promotion visibility remains eligibility-filtered'); ok(text.includes('SAFETY_VOTE_MANAGE') && text.includes('SAFETY_VOTE_VIEW'), 'existing capability contract reused'); ok(!text.includes('SafetyVote_BallotAnswers SET') && !text.includes('SafetyVote_Ballots SET'), 'no ballot mutation'); }
+for (const text of [nodeRoute, phpRoute]) { ok(text.includes('MAX(Priority)') && text.includes('automaticPriority'), 'promotion order is allocated automatically'); ok(text.includes('EndAt<=NOW()') && text.includes('history'), 'expired published promotions remain available as history'); }
+for (const text of [nodeRoute, phpRoute]) { ok(text.includes('adminPreview') && text.includes('ADMIN'), 'Admin can preview active promotions without joining voter eligibility'); }
+const nodePhase2 = read('backend/routes/safety-vote-phase2.js'), phpPhase2 = read('api/handlers/safety_vote_phase2.php');
+for (const text of [nodePhase2, phpPhase2]) { ok(text.includes('PreviewOnly') && text.includes('previewOnly') && text.includes("'Certified'"), 'Admin read-only campaign preview retains completed campaign access'); }
 
 const index = read('index.html'), admin = read('public/js/pages/admin-safety-vote-ux1.js'), user = read('public/js/pages/safety-vote-page-ux1.js'), css = read('public/style.css');
 ok(/safetyVoteEngagementV1:\s*(true|false)/.test(index), 'explicit client feature flag');
 ok(admin.includes('งานของฉันวันนี้') && admin.includes('data-sv-promotion-form'), 'admin productivity and dedicated promotion manager');
+ok(admin.includes('const form = event.currentTarget') && admin.includes('savePromotion(form, intent)'), 'publish confirmation retains a stable form reference');
+ok(admin.includes('state.promotionAssetUrls.get(existingFileId)'), 'saved promotion images are restored in the editor preview');
 ok(user.includes('สิ่งที่คุณต้องทำ') && user.includes('data-svp-promotion-next') && user.includes('การแจ้งเตือน Safety Vote'), 'user discovery and notification center');
+ok(user.includes('promotionHistoryMarkup') && user.includes('promotions.data?.history'), 'expired promotion history is rendered for eligible users');
+ok(user.includes('โหมดตรวจสอบของผู้ดูแลระบบ') && user.includes('previewOnly'), 'Admin preview is visibly read-only');
 ok(!user.includes('setInterval('), 'carousel never auto-rotates');
 ok(css.includes('.svp-promotion') && css.includes('@media (prefers-reduced-motion: reduce)'), 'responsive reduced-motion presentation');
 ok(css.includes('min-height: 44px'), 'minimum touch target contract');

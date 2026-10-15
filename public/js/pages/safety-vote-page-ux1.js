@@ -4,19 +4,21 @@ import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261009-safety-vote-ux8-r1';
+import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261015-safety-vote-live-results-r1';
 import {
     CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignType, filterCampaigns,
     isBallotCampaign, isChoiceQuestion, isQuestionVisible, participationState, privacyMode,
     privacyNotice, safeReceipt, validateParticipation, valueOf
-} from './safety-vote-participation-model.mjs?v=20261008-safety-vote-ux3-r1';
+} from './safety-vote-participation-model.mjs?v=20261015-safety-vote-live-promotion-r1';
 
-const VIEW_LABELS = { open: 'เข้าร่วมได้', submitted: 'ส่งแล้ว', closed: 'สิ้นสุดแล้ว' };
-const STATUS_LABELS = { Open: 'เปิดรับการเข้าร่วม', Closed: 'ปิดรับแล้ว', Published: 'ประกาศผลแล้ว' };
+const VIEW_LABELS = { open: 'เข้าร่วมได้', upcoming: 'เร็ว ๆ นี้', submitted: 'ส่งแล้ว', closed: 'สิ้นสุดแล้ว' };
+const STATUS_LABELS = { Scheduled: 'เผยแพร่แล้ว · ยังไม่เปิดลงคะแนน', Open: 'เปิดรับการเข้าร่วม', Closed: 'ปิดรับแล้ว', Published: 'ประกาศผลแล้ว' };
 const state = {
-    page: null, campaigns: [], detail: null, assignments: [], nominations: [], notifications: [], notificationCenter: [], promotions: [], promotionIndex: 0, submissions: [],
+    page: null, campaigns: [], detail: null, assignments: [], nominations: [], notifications: [], notificationCenter: [], promotions: [], promotionHistory: [], promotionIndex: 0, submissions: [],
     view: 'open', query: '', screen: 'list', mode: 'edit', answers: {}, errors: [], receipt: null,
     loading: true, error: null, denied: false, moduleDisabled: false, inFlight: false, requestKey: '',
-    workflowDraftId: null, workflowReference: '', submitError: null, objectUrls: new Set(), trackedPromotionEvents: new Set()
+    workflowDraftId: null, workflowReference: '', submitError: null, objectUrls: new Set(), trackedPromotionEvents: new Set(),
+    liveView: false, liveResults: null, liveError: null, liveInFlight: false, livePaused: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null
 };
 
 function trackPromotionEvent(promotionId, eventType) {
@@ -43,6 +45,11 @@ function promotionBannerMarkup() {
     return `<section class="svp-promotion" aria-roledescription="carousel" aria-label="กิจกรรมประชาสัมพันธ์"><article aria-label="${index + 1} จาก ${state.promotions.length}">${fileId ? `<img data-svp-promotion-file="${Number(fileId)}" data-desktop-file="${Number(item.desktopFileId || fileId)}" alt="${escHtml(item.altText || '')}">` : '<div class="svp-promotion__fallback" aria-hidden="true">Safety Vote</div>'}<div class="svp-promotion__shade"><p class="sv-eyebrow">กิจกรรมแนะนำ</p><h2>${escHtml(item.titleTh)}</h2><p>${escHtml(item.subtitleTh || item.campaignTitle || '')}</p><button type="button" class="sv-button sv-button--primary" data-svp-campaign="${Number(item.campaignId)}" data-svp-promotion-cta="${Number(item.id)}">${escHtml(item.ctaLabel || 'ดูรายละเอียด')}</button></div></article>${state.promotions.length > 1 ? `<div class="svp-promotion__controls"><button type="button" class="sv-icon-button" data-svp-promotion-prev aria-label="ป้ายก่อนหน้า">←</button><span>${index + 1}/${state.promotions.length}</span><button type="button" class="sv-icon-button" data-svp-promotion-next aria-label="ป้ายถัดไป">→</button></div>` : ''}</section>`;
 }
 
+function promotionHistoryMarkup() {
+    if (!isSafetyVoteEngagementV1Enabled() || !state.promotionHistory.length) return '';
+    return `<section class="svp-aux svp-promotion-history" aria-labelledby="svp-promotion-history-title"><div><p class="sv-eyebrow">ประวัติกิจกรรม</p><h2 id="svp-promotion-history-title">ป้ายกิจกรรมที่ผ่านมา</h2><p>ป้ายที่หมดเวลาแล้วยังคงเปิดดูรายละเอียดกิจกรรมเดิมได้ตามสิทธิ์ของคุณ</p></div><div class="svp-card-grid">${state.promotionHistory.map(item => { const fileId = item.mobileFileId || item.desktopFileId; return `<button type="button" class="svp-campaign-card" data-svp-campaign="${Number(item.campaignId)}"><span class="svp-campaign-card__cover">${fileId ? `<img data-svp-promotion-file="${Number(fileId)}" data-desktop-file="${Number(item.desktopFileId || fileId)}" alt="${escHtml(item.altText || '')}">` : '<span class="svp-campaign-card__cover--fallback" aria-hidden="true">SV</span>'}</span><span class="svp-campaign-card__top"><span class="sv-status-badge sv-status-badge--closed"><span class="sv-status-dot"></span>สิ้นสุดแล้ว</span><span>${dateTime(item.endAt)}</span></span><strong>${escHtml(item.titleTh || item.campaignTitle || 'กิจกรรมที่ผ่านมา')}</strong><p>${escHtml(item.subtitleTh || item.campaignTitle || '')}</p><small>${escHtml(item.campaignCode || '')} · เปิดดูรายละเอียด</small></button>`; }).join('')}</div></section>`;
+}
+
 function taskStripMarkup() {
     if (!isSafetyVoteEngagementV1Enabled()) return '';
     const open = state.campaigns.filter(item => participationState(item) === 'open'), pending = state.nominations.filter(item => String(valueOf(item, 'ConsentState', 'consentState')) === 'pending'), jury = state.assignments.filter(item => !['submitted', 'recused'].includes(String(valueOf(item, 'Status', 'status')).toLowerCase()));
@@ -59,6 +66,46 @@ function notificationCenterMarkup() {
 function clearObjectUrls() {
     state.objectUrls.forEach(url => URL.revokeObjectURL(url));
     state.objectUrls.clear();
+}
+
+function stopLivePolling() {
+    clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer); state.liveTimer = null; state.liveCountdownTimer = null;
+    state.liveAbort?.abort(); state.liveAbort = null; state.liveInFlight = false;
+    if (state.liveVisibilityHandler) document.removeEventListener('visibilitychange', state.liveVisibilityHandler);
+    state.liveVisibilityHandler = null;
+    if (state.page) clearLiveResultImages(state.page);
+}
+
+function scheduleLivePolling() {
+    clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer);
+    if (!state.liveView || state.livePaused || document.hidden || !state.detail) return;
+    const base = Math.max(10, Math.min(60, Number(state.liveResults?.config?.refreshSeconds || state.detail.campaign?.LiveLeaderboardRefreshSeconds || 15)));
+    const delay = Math.min(60, base * Math.max(1, 2 ** state.liveFailures)); let remaining = delay;
+    const tick = () => { remaining = Math.max(0, remaining - 1); const node = state.page?.querySelector('[data-sv-live-countdown]'); if (node) node.textContent = String(remaining); if (remaining > 0) state.liveCountdownTimer = setTimeout(tick, 1000); };
+    state.liveCountdownTimer = setTimeout(tick, 1000);
+    state.liveTimer = setTimeout(() => loadLiveResults(false), delay * 1000);
+}
+
+async function loadLiveResults(manual = true) {
+    if (state.liveInFlight || !state.detail) return;
+    state.liveInFlight = true; state.liveAbort = new AbortController(); updateUserLivePanel();
+    try { const response = await API.get(`/safety-vote/campaigns/${Number(state.detail.campaign.id)}/live-results`, { suppressErrorLog: true, signal: state.liveAbort.signal }); state.liveResults = response.data; state.liveError = null; state.liveFailures = 0; }
+    catch (error) { if (error?.name !== 'AbortError') { state.liveError = error; state.liveFailures = Math.min(2, state.liveFailures + 1); } }
+    finally { state.liveInFlight = false; state.liveAbort = null; updateUserLivePanel(); if (!manual || !state.livePaused) scheduleLivePolling(); }
+}
+
+function updateUserLivePanel() {
+    const panel = state.page?.querySelector('[data-svp-live-panel]'); if (!panel) return;
+    panel.innerHTML = liveResultsMarkup(state.liveResults, { error: state.liveError, loading: state.liveInFlight && !state.liveResults, paused: state.livePaused });
+    bindSafetyVoteImageGallery(panel); hydrateLiveResultImages(panel);
+}
+
+function startUserLivePolling() {
+    if (!state.liveVisibilityHandler) {
+        state.liveVisibilityHandler = () => { if (document.hidden) { clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer); state.liveAbort?.abort(); } else if (state.liveView && !state.livePaused) loadLiveResults(false); };
+        document.addEventListener('visibilitychange', state.liveVisibilityHandler);
+    }
+    loadLiveResults(false);
 }
 
 function dateTime(value) {
@@ -110,7 +157,7 @@ function renderList() {
     state.page.querySelector('.svp-shell')?.setAttribute('data-sv-engagement-version', '2026-10-10-safety-vote-ux-phase9a-r1');
     state.page.querySelector('.svp-hero')?.insertAdjacentHTML('beforebegin', promotionBannerMarkup());
     state.page.querySelector('.svp-hero')?.insertAdjacentHTML('afterend', taskStripMarkup());
-    state.page.querySelector('main')?.insertAdjacentHTML('beforeend', notificationCenterMarkup());
+    state.page.querySelector('main')?.insertAdjacentHTML('beforeend', promotionHistoryMarkup() + notificationCenterMarkup());
     if (state.promotions[state.promotionIndex]) trackPromotionEvent(state.promotions[state.promotionIndex].id, 'impression');
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'user', current: 'participation', campaign: {}, onPage: true }));
     bindList();
@@ -202,11 +249,16 @@ function stickyActionMarkup() {
 function renderDetail() {
     clearObjectUrls();
     const detail = state.detail, campaign = detail.campaign, privacy = privacyNotice(campaign), submitted = String(valueOf(detail.participation, 'State', 'state')).toLowerCase() === 'submitted';
-    const body = state.mode === 'receipt' ? receiptMarkup() : state.mode === 'review' ? reviewMarkup() : submitted ? `<section class="svp-receipt"><span class="svp-receipt__icon" aria-hidden="true">✓</span><h2>ระบบรับรายการของคุณแล้ว</h2><p>รายการที่ส่งแล้วไม่สามารถแก้ไขได้ ระบบไม่แสดงคำตอบย้อนหลังในหน้านี้</p><dl><div><dt>เวลาที่รับ</dt><dd>${dateTime(valueOf(detail.participation, 'SubmittedAt', 'submittedAt'))}</dd></div></dl></section>` : detail.canSubmit ? (isBallotCampaign(campaign) ? ballotForm(detail) : workflowForm(campaign)) : `<section class="svp-state svp-state--warning" role="status"><h2>กิจกรรมนี้ไม่เปิดรับรายการแล้ว</h2><p>คุณยังดูรายละเอียดและข้อกำหนดความเป็นส่วนตัวได้ แต่ไม่สามารถส่งรายการใหม่</p></section>`;
-    state.page.innerHTML = `<div class="svp-shell svp-shell--detail" data-sv-participation="2026-10-08-safety-vote-ux3-r1">${safetyVoteRoleNav({ active: 'user', showJury: state.assignments.length > 0, juryCount: state.assignments.length })}<header class="svp-detail-header"><button type="button" class="sv-icon-button" data-svp-action="back-list" aria-label="กลับกิจกรรมของฉัน">←</button><div><p class="sv-eyebrow">${escHtml(campaign.CampaignCode)}</p><h1>${escHtml(campaign.TitleTh)}</h1><p>${escHtml(campaign.Summary || campaign.Description || '')}</p></div><span class="sv-status-badge sv-status-badge--${campaign.Status === 'Open' ? 'open' : 'closed'}"><span class="sv-status-dot"></span>${escHtml(STATUS_LABELS[campaign.Status] || campaign.Status)}</span></header><section class="svp-meta"><div><strong>${escHtml(CAMPAIGN_TYPE_LABELS[campaignType(campaign)] || campaignType(campaign))}</strong><span>${campaign.CloseAt ? `ปิด ${dateTime(campaign.CloseAt)}` : 'ไม่ระบุเวลาปิด'}</span></div><div class="svp-privacy-notice" role="note"><strong>${escHtml(privacy.title)}</strong><span>${escHtml(privacy.description)}</span></div></section><main class="svp-detail-main" aria-live="polite">${body}</main>${stickyActionMarkup()}</div>`;
-    if (isSafetyVoteEngagementV1Enabled() && state.mode === 'edit' && !submitted) state.page.querySelector('.svp-detail-main')?.insertAdjacentHTML('afterbegin', `<section class="svp-campaign-intro" aria-labelledby="svp-campaign-intro-title"><div><p class="sv-eyebrow">ก่อนเข้าร่วม</p><h2 id="svp-campaign-intro-title">รายละเอียดกิจกรรม</h2><p>${escHtml(campaign.Description || campaign.Summary || 'ตรวจสอบข้อมูลและเงื่อนไขก่อนส่งรายการ')}</p></div><dl><div><dt>ผู้จัดกิจกรรม</dt><dd>${escHtml(campaign.OwnerEmployeeID || 'Safety / Admin')}</dd></div><div><dt>ระยะเวลาโดยประมาณ</dt><dd>3–5 นาที</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${dateTime(campaign.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${dateTime(campaign.CloseAt)}</dd></div></dl>${campaign.RulesText ? `<details><summary>กติกาและข้อกำหนด</summary><p>${escHtml(campaign.RulesText)}</p></details>` : ''}</section>`);
+    const liveEnabled = Number(campaign.LiveLeaderboardEnabled) === 1 && campaign.LiveLeaderboardVisibility !== 'admin_only', liveAllowed = campaign.LiveLeaderboardVisibility === 'always' || submitted;
+    const previewOnly = Boolean(detail.eligibility?.previewOnly);
+    const waitingForWindow = ['Scheduled', 'Open'].includes(campaign.Status) && Number(campaign.VotingWindowOpen) !== 1;
+    const normalBody = state.mode === 'receipt' ? receiptMarkup() : state.mode === 'review' ? reviewMarkup() : submitted ? `<section class="svp-receipt"><span class="svp-receipt__icon" aria-hidden="true">✓</span><h2>ระบบรับรายการของคุณแล้ว</h2><p>รายการที่ส่งแล้วไม่สามารถแก้ไขได้ ระบบไม่แสดงคำตอบย้อนหลังในหน้านี้</p><dl><div><dt>เวลาที่รับ</dt><dd>${dateTime(valueOf(detail.participation, 'SubmittedAt', 'submittedAt'))}</dd></div></dl></section>` : previewOnly ? `<section class="svp-state svp-state--warning" role="status"><h2>โหมดตรวจสอบของผู้ดูแลระบบ</h2><p>คุณกำลังดูตัวอย่างป้ายและรายละเอียดกิจกรรม บัญชีนี้ไม่ได้อยู่ในรายชื่อผู้มีสิทธิ์ จึงไม่สามารถลงคะแนนหรือส่งรายการแทนผู้ใช้ได้</p></section>` : detail.canSubmit ? (isBallotCampaign(campaign) ? ballotForm(detail) : workflowForm(campaign)) : waitingForWindow ? `<section class="svp-state svp-state--warning" role="status"><h2>เผยแพร่แล้ว · ยังไม่ถึงเวลาเปิดลงคะแนน</h2><p>คุณดูรายละเอียดกิจกรรมนี้ล่วงหน้าได้ และจะเข้าร่วมได้ตั้งแต่ ${dateTime(campaign.OpenAt)}</p></section>` : `<section class="svp-state svp-state--warning" role="status"><h2>กิจกรรมนี้ไม่เปิดรับรายการแล้ว</h2><p>คุณยังดูรายละเอียดและข้อกำหนดความเป็นส่วนตัวได้ แต่ไม่สามารถส่งรายการใหม่</p></section>`;
+    const body = state.liveView ? `<section class="svp-live-workspace"><div class="svp-live-actions"><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div><div data-svp-live-panel>${liveResultsMarkup(state.liveResults,{error:state.liveError,loading:state.liveInFlight,paused:state.livePaused})}</div></section>` : normalBody;
+    const tabs = liveEnabled ? `<nav class="svp-detail-tabs" aria-label="กิจกรรม"><button type="button" data-svp-action="participation" aria-current="${!state.liveView?'page':'false'}">ลงคะแนน</button><button type="button" data-svp-action="live" aria-current="${state.liveView?'page':'false'}" ${!liveAllowed?'disabled':''}>ผลโหวตสด</button>${!liveAllowed?'<span>ส่งคะแนนก่อนจึงดูได้</span>':''}</nav>` : '';
+    state.page.innerHTML = `<div class="svp-shell svp-shell--detail" data-sv-participation="2026-10-15-safety-vote-live-results-r1">${safetyVoteRoleNav({ active: 'user', showJury: state.assignments.length > 0, juryCount: state.assignments.length })}<header class="svp-detail-header"><button type="button" class="sv-icon-button" data-svp-action="back-list" aria-label="กลับกิจกรรมของฉัน">←</button><div><p class="sv-eyebrow">${escHtml(campaign.CampaignCode)}</p><h1>${escHtml(campaign.TitleTh)}</h1><p>${escHtml(campaign.Summary || campaign.Description || '')}</p></div><span class="sv-status-badge sv-status-badge--${campaign.Status === 'Open' ? 'open' : 'closed'}"><span class="sv-status-dot"></span>${escHtml(STATUS_LABELS[campaign.Status] || campaign.Status)}</span></header><section class="svp-meta"><div><strong>${escHtml(CAMPAIGN_TYPE_LABELS[campaignType(campaign)] || campaignType(campaign))}</strong><span>${campaign.CloseAt ? `ปิด ${dateTime(campaign.CloseAt)}` : 'ไม่ระบุเวลาปิด'}</span></div><div class="svp-privacy-notice" role="note"><strong>${escHtml(privacy.title)}</strong><span>${escHtml(privacy.description)}</span></div></section>${tabs}<main class="svp-detail-main" aria-live="polite">${body}</main>${state.liveView?'':stickyActionMarkup()}</div>`;
+    if (isSafetyVoteEngagementV1Enabled() && state.mode === 'edit' && !submitted && !state.liveView) state.page.querySelector('.svp-detail-main')?.insertAdjacentHTML('afterbegin', `<section class="svp-campaign-intro" aria-labelledby="svp-campaign-intro-title"><div><p class="sv-eyebrow">ก่อนเข้าร่วม</p><h2 id="svp-campaign-intro-title">รายละเอียดกิจกรรม</h2><p>${escHtml(campaign.Description || campaign.Summary || 'ตรวจสอบข้อมูลและเงื่อนไขก่อนส่งรายการ')}</p></div><dl><div><dt>ผู้จัดกิจกรรม</dt><dd>${escHtml(campaign.OwnerEmployeeID || 'Safety / Admin')}</dd></div><div><dt>ระยะเวลาโดยประมาณ</dt><dd>3–5 นาที</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${dateTime(campaign.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${dateTime(campaign.CloseAt)}</dd></div></dl>${campaign.RulesText ? `<details><summary>กติกาและข้อกำหนด</summary><p>${escHtml(campaign.RulesText)}</p></details>` : ''}</section>`);
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'user', current: 'participation', campaign, onPage: true }));
-    bindDetail(); bindSafetyVoteImageGallery(state.page); hydratePrivateImages();
+    bindDetail(); bindSafetyVoteImageGallery(state.page); hydratePrivateImages(); if (state.liveView) hydrateLiveResultImages(state.page);
     if (state.errors.length) state.page.querySelector('.svp-validation')?.focus();
 }
 
@@ -254,6 +306,7 @@ async function submitParticipation() {
             const response = await API.post(`/safety-vote/campaigns/${id}/nominations`, { nomineeEmployeeId: state.answers.nomineeEmployeeId, statement: state.answers.statement });
             state.receipt = safeReceipt({ campaign, receiptCode: `NOMINATION-${Number(response.data.id)}` });
         }
+        state.detail.participation = { State: 'submitted', SubmittedAt: state.receipt?.submittedAt || new Date().toISOString() };
         state.mode = 'receipt'; state.inFlight = false; state.submitError = null;
         showToast('ระบบรับรายการของคุณแล้ว', 'success'); renderDetail();
     } catch (error) {
@@ -289,10 +342,14 @@ function bindDetail() {
     bindRoleNavigation();
     state.page.querySelectorAll('[data-svp-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svpAction;
-        if (action === 'back-list') { if (/^#safety-vote=/.test(location.hash)) history.replaceState(null, '', `${location.pathname}${location.search}#safety-vote`); state.screen = 'list'; state.detail = null; state.answers = {}; state.receipt = null; state.requestKey = ''; renderList(); }
+        if (action === 'back-list') { stopLivePolling(); if (/^#safety-vote=/.test(location.hash)) history.replaceState(null, '', `${location.pathname}${location.search}#safety-vote`); state.screen = 'list'; state.detail = null; state.answers = {}; state.receipt = null; state.requestKey = ''; renderList(); }
         else if (action === 'review') requestReview();
         else if (action === 'edit') { state.mode = 'edit'; state.submitError = null; if (isBallotCampaign(state.detail.campaign)) state.requestKey = ''; renderDetail(); }
         else if (action === 'confirm') confirmSubmit();
+        else if (action === 'participation') { stopLivePolling(); state.liveView = false; renderDetail(); }
+        else if (action === 'live') { state.liveView = true; renderDetail(); startUserLivePolling(); }
+        else if (action === 'live-refresh') loadLiveResults(true);
+        else if (action === 'live-toggle') { state.livePaused = !state.livePaused; renderDetail(); if (!state.livePaused) loadLiveResults(true); else scheduleLivePolling(); }
     }));
     state.page.querySelectorAll('[data-svp-answer],[data-svp-rank],[data-svp-allocation],[data-svp-matrix],[data-svp-workflow]').forEach(input => input.addEventListener('change', () => { collectAnswers(); state.page.querySelectorAll('[data-svp-question]').forEach(fieldset => { const question = state.detail.questions.find(item => Number(item.id) === Number(fieldset.dataset.svpQuestion)); fieldset.classList.toggle('is-hidden', !isQuestionVisible(question, state.detail.questions, state.answers)); }); }));
     state.page.querySelectorAll('[data-svp-answer-file]').forEach(input => input.addEventListener('change', async () => {
@@ -304,11 +361,12 @@ function bindDetail() {
 }
 
 async function openCampaign(id) {
+    stopLivePolling();
     state.screen = 'detail'; state.loading = true; state.error = null; state.denied = false; state.moduleDisabled = false; state.errors = []; state.answers = {}; state.receipt = null; state.requestKey = ''; state.workflowDraftId = null; state.workflowReference = ''; state.submitError = null;
     state.page.innerHTML = loadingMarkup();
     try {
         const response = await API.get(`/safety-vote/campaigns/${id}`);
-        state.detail = response.data; state.mode = 'edit'; state.loading = false;
+        state.detail = response.data; state.mode = 'edit'; state.loading = false; state.liveView = false; state.liveResults = null; state.liveError = null; state.livePaused = false; state.liveFailures = 0;
         if (campaignType(state.detail.campaign) === 'submission_challenge') { const submissions = await API.get(`/safety-vote/campaigns/${id}/my-submissions`, { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } })); state.submissions = submissions.data.rows || []; }
         renderDetail();
     } catch (error) {
@@ -323,6 +381,7 @@ function render() {
 }
 
 async function load() {
+    stopLivePolling();
     state.loading = true; state.error = null; state.denied = false; state.moduleDisabled = false; state.screen = 'list'; render();
     try {
         const [campaigns, nominations, assignments, notifications] = await Promise.all([
@@ -332,13 +391,14 @@ async function load() {
             API.get('/safety-vote/notifications', { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } }))
         ]);
         state.campaigns = campaigns.data.rows || []; state.nominations = nominations.data.rows || []; state.assignments = assignments.data.rows || []; state.notifications = notifications.data.rows || [];
-        state.promotions = []; state.notificationCenter = []; state.promotionIndex = 0;
+        state.promotions = []; state.promotionHistory = []; state.notificationCenter = []; state.promotionIndex = 0;
         if (isSafetyVoteEngagementV1Enabled()) {
             const [promotions, center] = await Promise.all([
                 API.get('/safety-vote/me/promotions', { suppressErrorLog: true }).catch(error => ['SAFETY_VOTE_ENGAGEMENT_DISABLED', 'SAFETY_VOTE_ENGAGEMENT_SETUP_REQUIRED'].includes(error?.code) ? ({ data: { rows: [] } }) : Promise.reject(error)),
                 API.get('/safety-vote/notification-center', { suppressErrorLog: true }).catch(error => ['SAFETY_VOTE_ENGAGEMENT_DISABLED', 'SAFETY_VOTE_ENGAGEMENT_SETUP_REQUIRED'].includes(error?.code) ? ({ data: { rows: [] } }) : Promise.reject(error))
             ]);
             state.promotions = promotions.data?.rows || [];
+            state.promotionHistory = promotions.data?.history || [];
             state.notificationCenter = center.data?.rows || [];
         }
     } catch (error) {

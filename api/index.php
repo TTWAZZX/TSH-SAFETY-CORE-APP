@@ -32,6 +32,7 @@ require __DIR__ . '/handlers/safety_vote_phase10_4.php';
 require __DIR__ . '/handlers/safety_vote_engagement.php';
 require __DIR__ . '/handlers/safety_vote_planning.php';
 require __DIR__ . '/handlers/safety_vote_analytics.php';
+require __DIR__ . '/handlers/safety_vote_live_results.php';
 require __DIR__ . '/handlers/bbs_smart_card.php';
 require __DIR__ . '/handlers/bbs_checklists.php';
 require __DIR__ . '/handlers/bbs_observations.php';
@@ -735,6 +736,7 @@ try {
     handle_safety_vote_engagement_routes($method, $path);
     handle_safety_vote_planning_routes($method, $path);
     handle_safety_vote_analytics_routes($method, $path);
+    handle_safety_vote_live_results_routes($method, $path);
     handle_safety_vote_phase10_4_routes($method, $path);
     handle_safety_vote_phase7_routes($method, $path);
     handle_safety_vote_phase6_routes($method, $path);

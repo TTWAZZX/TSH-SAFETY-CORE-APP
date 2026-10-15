@@ -1,5 +1,9 @@
 # TSH Safety Core Activity - Roadmap
 
+## Safety Vote Live Results + Promotion Remediation (Production candidate, not deployed, 2026-10-15)
+
+Core implementation, promotion fixes and Local verification are complete against a current full Production database mirror and verified Safety Vote private files. The next gate is business/privacy review of default-OFF Live Results configuration and the provisional-result wording, followed by an immutable commit and protected Production preflight/rollback package. Any Production migration/runtime deployment, feature activation or rollout requires separate explicit authorization. Official result calculation, certification and publication remain unchanged and are not replaced by Live Results.
+
 ## Admin Public File Library (2026-10-12)
 
 The minimal sharing policy is complete locally: Public defaults to 30 days with disclosure confirmation, Authenticated defaults to no expiry, and Admin can manually purge a revoked file through an exact-title two-step flow. No approval workflow or automatic deletion scheduler is planned for this release.

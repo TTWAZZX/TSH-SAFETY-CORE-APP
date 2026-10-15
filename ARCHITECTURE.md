@@ -1,5 +1,15 @@
 # TSH Safety Core Activity - Architecture
 
+## Safety Vote Live Results / Live Leaderboard (2026-10-15)
+
+Live configuration belongs to `SafetyVote_CampaignVersions`, so revisions preserve an auditable configuration without changing the active version. The runtime supports `popular_vote` campaigns only when every active question is single-choice (`MaxSelections=1`). Unsupported campaign/question configurations fail closed in both normalization and read endpoints.
+
+`GET /api/safety-vote/campaigns/:id/live-results` requires `SAFETY_VOTE_VIEW`, frozen eligibility and the configured User visibility policy. `GET /api/safety-vote/admin/campaigns/:id/live-results` requires `SAFETY_VOTE_RESULT_VIEW`. Both operate only while the campaign is Open and count only Accepted ballots on the current version. User responses expose Top N aggregate rows; Admin responses include all option rows. Neither response contains voter identity, ballot identity or receipt fields.
+
+The threshold is the maximum of 5, campaign `PrivacyThreshold` and the versioned Live threshold. Before it is met, exact Accepted totals and question results are suppressed. Available results use competition ranks (`1,2,2,4`), retain ties crossing the Top N boundary and calculate percentages from valid option answers for each question, including an abstain option when present and excluding unanswered questions. Results are explicitly provisional and never replace the established snapshot/freeze/certify/publish workflow.
+
+Clients poll rather than holding a socket. One request may be in flight per board; timers stop while hidden or paused, navigation aborts outstanding work, failures back off to 60 seconds and a manual refresh remains available. Private option images reuse the authenticated Safety Vote file route and blob URL lifecycle.
+
 ## Admin Public File Library (2026-10-12)
 
 Public-sharing safeguards are presentation defaults rather than a new approval state: a new Public upload defaults to 30 days and requires an explicit disclosure confirmation, while Authenticated defaults to no expiry; Admin can still deliberately select another preset, custom expiry or no expiry. Revoke remains immediate and data-preserving. Permanent purge is a separate Admin-only, revoke-first action requiring exact title plus `RowVersion`; it removes the private object and metadata while retaining `FILE_LIBRARY_PURGE` audit evidence. There is no scheduled deletion.
