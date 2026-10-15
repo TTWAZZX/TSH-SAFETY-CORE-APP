@@ -65,8 +65,21 @@ async function seedCampaign() {
     assert.strictEqual((await api(`/admin/campaigns/${campaignId}/builder`, { method: 'PUT', body: { questions: [{ questionCode: 'Q1', questionType: 'single_choice', title: 'ตัวเลือก', isRequired: true, minSelections: 1, maxSelections: 1, options: [{ optionCode: 'O1', label: 'หนึ่ง' }, { optionCode: 'O2', label: 'สอง' }] }] } })).status, 200);
     assert.strictEqual((await api(`/admin/campaigns/${campaignId}/eligibility/freeze`, { method: 'POST', body: { reason: 'Promotion remediation browser UAT' } })).status, 201);
     await db.query("DELETE ev FROM SafetyVote_EligibleVoters ev JOIN SafetyVote_EligibilitySnapshots es ON es.id=ev.SnapshotID WHERE es.CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) AND es.Status='frozen' AND ev.EmployeeID='SV-ADMIN'", [campaignId]);
-    assert.strictEqual((await api(`/admin/campaigns/${campaignId}/lifecycle/open`, { method: 'POST', body: {} })).status, 200);
     return campaignId;
+}
+
+async function draftCampaignPromotionVisibility() {
+    const promotions = await api('/me/promotions', { token: 'sv-user' });
+    const campaigns = await api('/me/campaigns', { token: 'sv-user' });
+    assert.strictEqual(promotions.status, 200, JSON.stringify(promotions.data));
+    assert.strictEqual(promotions.data?.data?.rows?.length, 1, 'Published banner must be independent from Draft campaign status.');
+    assert.strictEqual(campaigns.data?.data?.rows?.length, 0, 'Draft campaign must remain hidden.');
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.goto(`http://127.0.0.1:${port}/__ux1-user`, { waitUntil: 'networkidle' });
+    await page.locator('.svp-promotion').waitFor();
+    assert.strictEqual(await page.locator('[data-svp-promotion-unavailable][disabled]').count(), 1);
+    assert.strictEqual(await page.locator('[data-svp-promotion-cta]').count(), 0);
+    await page.close();
 }
 
 async function adminWorkflow(campaignId) {
@@ -216,11 +229,13 @@ async function cleanup() {
     const campaignId = await seedCampaign();
     browser = await chromium.launch({ headless: true });
     const promotionId = await adminWorkflow(campaignId);
+    await draftCampaignPromotionVisibility();
+    assert.strictEqual((await api(`/admin/campaigns/${campaignId}/lifecycle/open`, { method: 'POST', body: {} })).status, 200);
     await db.query("UPDATE SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID SET v.OpenAt=DATE_ADD(NOW(),INTERVAL 1 DAY),v.CloseAt=DATE_ADD(NOW(),INTERVAL 2 DAY),c.ScheduledOpenAt=v.OpenAt,c.ScheduledCloseAt=v.CloseAt WHERE c.id=?", [campaignId]);
     await adminUserPreview();
     await eligibleUserPreOpen();
     await userHistory(promotionId);
-    fs.writeFileSync(path.join(evidence, 'result.json'), `${JSON.stringify({ decision: 'PASS_LOCAL_PROMOTION_REMEDIATION_BROWSER_UAT', campaignId, promotionId, publishConfirmation: true, savedImageRestored: true, automaticOrder: true, independentPromotionSchedule: true, scheduledCampaignVisible: true, preOpenVotingBlocked: true, adminPreviewWithoutEligibility: true, adminPreviewCannotSubmit: true, expiredHistoryVisible: true, productionConnected: false, disposableDatabaseResidue: 0 }, null, 2)}\n`);
+    fs.writeFileSync(path.join(evidence, 'result.json'), `${JSON.stringify({ decision: 'PASS_LOCAL_PROMOTION_REMEDIATION_BROWSER_UAT', campaignId, promotionId, publishConfirmation: true, savedImageRestored: true, automaticOrder: true, independentPromotionSchedule: true, independentCampaignLifecycle: true, draftCampaignHiddenWhileBannerVisible: true, scheduledCampaignVisible: true, preOpenVotingBlocked: true, adminPreviewWithoutEligibility: true, adminPreviewCannotSubmit: true, expiredHistoryVisible: true, productionConnected: false, disposableDatabaseResidue: 0 }, null, 2)}\n`);
     console.log(`Safety Vote promotion remediation Browser UAT: PASS (${evidence})`);
 })().catch(error => { console.error(error.stack || error); process.exitCode = 1; }).finally(async () => {
     if (browser) await browser.close().catch(() => {});
