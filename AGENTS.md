@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Thai Time and 24-hour Admin Scheduling (PASS, 2026-10-15)
+
+- Admin promotion schedules, campaign open/close schedules and notification queues now use a separate date field plus explicit `00–23` hour and `00–59` minute selectors. Displayed timestamps use `Asia/Bangkok`, Thai Buddhist dates and 24-hour time. The shared conversion contract preserves UTC instants across client machine time zones.
+- Local checks passed: Thai time conversion in UTC, America/Los_Angeles and Asia/Bangkok; Safety Vote UX Phase 8 (48), UX Phase 9B (44), UX Phase 9C (43), Admin guided Drafts (32) and Live Results (26) assertions; promotion remediation Browser UAT; and Admin guided Drafts Browser UAT at five viewports. Disposable test databases were cleaned up.
+- Immutable candidate `df208ceff25e99c47874aa87f25871f019bd87bc` deployed 15 allowlisted frontend paths against baseline `f48c8045b2ef793c43d9d26df0b5cc449117893d`. FTPS double-download matched `15/15`, public HTTPS matched `15/15`, authenticated Production health/campaign/promotion GETs returned `200`, anonymous health returned `401`, and the rollback package verified 14 restore files plus removal of one new path. No schema, permission or business-row changes occurred.
+- Evidence: `backups/production/safety-vote-thai-time-deploy-20261015143754/`, result SHA-256 `28892d47f025fab914a5012ce9c8903733d78c32c4f2a65e50c747cdd4445d82`; rollback manifest SHA-256 `c59caf12c45a6d4a5c44e890afbefd95149d1229ebb07b81f0b86e626fd64c35`. Decision: `PASS_SAFETY_VOTE_THAI_TIME_24H_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Independent Banner Lifecycle Production Hotfix (PASS, 2026-10-15)
 
 - Root cause of the missing Local banner was confirmed against the restored current dataset: promotion `1` was Published and active with both images, but its linked campaign remained Draft. The member promotion query incorrectly required the campaign to be Scheduled/Open/Closed/Certified/Published, coupling two independently published objects.
