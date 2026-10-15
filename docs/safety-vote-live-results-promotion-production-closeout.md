@@ -61,3 +61,24 @@ The zero user-visible rows mean the deployed behavior is ready, but Production w
 
 Primary evidence: `backups/production/safety-vote-live-promotion-deploy-20261015134645/`  
 Result SHA-256: `108a50fa69d23d9c30ae8f8ec51d12dcc3709021800bdb269c6cec89c33b4286`
+
+## Independent banner lifecycle hotfix
+
+Follow-up verification against the current Local dataset found one Published, in-window promotion with both images linked to a Draft campaign. The promotion delivery query still required a non-Draft campaign status, which contradicted the independent publication contract.
+
+Node/PHP now deliver Published promotions by their own time window and audience snapshot while excluding only Voided linked campaigns. A Draft campaign remains absent from campaign discovery; its visible banner shows a disabled CTA and explains that campaign details will become available after campaign publication.
+
+- Local current-data check: one active promotion, both responsive images present, zero visible Draft campaigns
+- Static checks: UX Phase 8 `48/48`; UX Phase 9A `41/41`
+- Node/PHP engagement lifecycle UAT: pass with zero protected-data/file/database residue
+- Chromium remediation UAT: pass, including Draft campaign hidden while Published banner is visible
+- Production candidate: `f48c8045b2ef793c43d9d26df0b5cc449117893d`
+- Production runtime paths: 4
+- Double-download verification: 4 / 4
+- Public HTTPS verification: 3 / 3
+- Authenticated health/campaign/promotion smoke: 200 / 200 / 200
+- Schema or business-data mutation: none
+- Rollback manifest SHA-256: `649b12d270b021e128df897d6e92e0943e89a8dba6934db130eea75153d97c77`
+- Evidence: `backups/production/safety-vote-independent-banner-deploy-20261015140218/`
+- Result SHA-256: `66ea3db9b266782c45a3be3b115f6ad7d9b4c95fbb8251f04fa5e4f83266c2c1`
+- Decision: `PASS_SAFETY_VOTE_INDEPENDENT_BANNER_PRODUCTION_HOTFIX`

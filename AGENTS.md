@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Independent Banner Lifecycle Production Hotfix (PASS, 2026-10-15)
+
+- Root cause of the missing Local banner was confirmed against the restored current dataset: promotion `1` was Published and active with both images, but its linked campaign remained Draft. The member promotion query incorrectly required the campaign to be Scheduled/Open/Closed/Certified/Published, coupling two independently published objects.
+- Node/PHP now return an active or expired Published promotion independently of campaign lifecycle while still excluding Voided campaigns and retaining frozen-snapshot audience enforcement for non-Admins. The UI displays the banner but disables its campaign CTA with a clear disclosure until the linked campaign itself is published; Draft campaign content remains hidden and voting remains unavailable.
+- Local real-database API verification returns one active banner with both images while campaign discovery remains zero. Static contracts, Node/PHP API lifecycle and dedicated Chromium UAT pass, including the exact Draft-campaign/Published-banner case and later pre-open campaign visibility; fixture residue is zero.
+- Immutable candidate `f48c8045b2ef793c43d9d26df0b5cc449117893d` deployed four allowlisted Production runtime paths. FTPS double-download matched `4/4`, public HTTPS matched `3/3`, authenticated health/campaign/promotion GETs returned `200`, and no schema, permission or business-row mutation occurred. Rollback manifest SHA-256 is `649b12d270b021e128df897d6e92e0943e89a8dba6934db130eea75153d97c77`. Evidence: `backups/production/safety-vote-independent-banner-deploy-20261015140218/`, result SHA-256 `66ea3db9b266782c45a3be3b115f6ad7d9b4c95fbb8251f04fa5e4f83266c2c1`. Decision: `PASS_SAFETY_VOTE_INDEPENDENT_BANNER_PRODUCTION_HOTFIX`.
+
 ## Safety Vote Promotion and Live Results Production Deployment (PASS, 2026-10-15)
 
 - Immutable recovery candidate `1e13e68f37e0364dc20872ea827187e75dbdbefb` deployed 20 allowlisted Safety Vote runtime paths after a guarded first attempt stopped before runtime upload. The first attempt had already applied the additive six-column Live Results schema, but its postcheck incorrectly counted `SafetyVote_Settings` metadata rows as business-row drift.
