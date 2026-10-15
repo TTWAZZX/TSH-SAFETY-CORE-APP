@@ -1,7 +1,8 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js?v=20261008-safety-vote-phase4-r1';
-import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9c-r1';
+import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
+import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261009-safety-vote-ux8-r1';
 import {
     CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignType, filterCampaigns,
@@ -127,7 +128,7 @@ function questionControl(question) {
     const id = Number(question.id), raw = state.answers[String(id)], options = question.options || [];
     if (isChoiceQuestion(question)) {
         const inputType = question.questionType === 'single_choice' || question.questionType === 'yes_no_abstain' || Number(question.maxSelections) === 1 ? 'radio' : 'checkbox';
-        return `<div class="svp-options">${options.map(option => `<article class="svp-option">${option.fileId ? `<button type="button" class="svp-gallery-trigger" data-svp-file="${Number(option.fileId)}" data-svp-alt="${escHtml(option.label)}" aria-label="ขยายภาพ ${escHtml(option.label)}"><img data-svp-private-file="${Number(option.fileId)}" alt="${escHtml(option.label)}"></button>` : ''}<label><input type="${inputType}" name="svp-q-${id}" value="${Number(option.id)}" data-svp-answer="${id}" ${(Array.isArray(raw) && raw.map(Number).includes(Number(option.id))) ? 'checked' : ''}><span><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${optionMedia(option)}</span></label></article>`).join('')}</div>`;
+        return `<div class="svp-options">${options.map(option => `<article class="svp-option">${option.fileId ? `<button type="button" class="svp-gallery-trigger" data-sv-image-gallery data-sv-gallery-group="question-${id}" data-sv-gallery-label="${escHtml(option.label)}" data-svp-file="${Number(option.fileId)}" aria-label="ขยายภาพ ${escHtml(option.label)}"><img data-svp-private-file="${Number(option.fileId)}" alt="${escHtml(option.label)}"></button>` : ''}<label><input type="${inputType}" name="svp-q-${id}" value="${Number(option.id)}" data-svp-answer="${id}" ${(Array.isArray(raw) && raw.map(Number).includes(Number(option.id))) ? 'checked' : ''}><span><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${optionMedia(option)}</span></label></article>`).join('')}</div>`;
     }
     if (question.questionType === 'rating') return `<label class="svp-inline-input"><span>คะแนน ${Number(question.validation?.minNumber ?? 0)}–${Number(question.validation?.maxNumber ?? 10)}</span><input type="number" data-svp-answer="${id}" value="${escHtml(raw ?? '')}" min="${Number(question.validation?.minNumber ?? 0)}" max="${Number(question.validation?.maxNumber ?? 10)}"></label>`;
     if (question.questionType === 'long_text') return `<textarea data-svp-answer="${id}" rows="5" maxlength="${Number(question.validation?.maxLength || 10000)}" placeholder="กรอกคำตอบ">${escHtml(raw || '')}</textarea>`;
@@ -205,7 +206,7 @@ function renderDetail() {
     state.page.innerHTML = `<div class="svp-shell svp-shell--detail" data-sv-participation="2026-10-08-safety-vote-ux3-r1">${safetyVoteRoleNav({ active: 'user', showJury: state.assignments.length > 0, juryCount: state.assignments.length })}<header class="svp-detail-header"><button type="button" class="sv-icon-button" data-svp-action="back-list" aria-label="กลับกิจกรรมของฉัน">←</button><div><p class="sv-eyebrow">${escHtml(campaign.CampaignCode)}</p><h1>${escHtml(campaign.TitleTh)}</h1><p>${escHtml(campaign.Summary || campaign.Description || '')}</p></div><span class="sv-status-badge sv-status-badge--${campaign.Status === 'Open' ? 'open' : 'closed'}"><span class="sv-status-dot"></span>${escHtml(STATUS_LABELS[campaign.Status] || campaign.Status)}</span></header><section class="svp-meta"><div><strong>${escHtml(CAMPAIGN_TYPE_LABELS[campaignType(campaign)] || campaignType(campaign))}</strong><span>${campaign.CloseAt ? `ปิด ${dateTime(campaign.CloseAt)}` : 'ไม่ระบุเวลาปิด'}</span></div><div class="svp-privacy-notice" role="note"><strong>${escHtml(privacy.title)}</strong><span>${escHtml(privacy.description)}</span></div></section><main class="svp-detail-main" aria-live="polite">${body}</main>${stickyActionMarkup()}</div>`;
     if (isSafetyVoteEngagementV1Enabled() && state.mode === 'edit' && !submitted) state.page.querySelector('.svp-detail-main')?.insertAdjacentHTML('afterbegin', `<section class="svp-campaign-intro" aria-labelledby="svp-campaign-intro-title"><div><p class="sv-eyebrow">ก่อนเข้าร่วม</p><h2 id="svp-campaign-intro-title">รายละเอียดกิจกรรม</h2><p>${escHtml(campaign.Description || campaign.Summary || 'ตรวจสอบข้อมูลและเงื่อนไขก่อนส่งรายการ')}</p></div><dl><div><dt>ผู้จัดกิจกรรม</dt><dd>${escHtml(campaign.OwnerEmployeeID || 'Safety / Admin')}</dd></div><div><dt>ระยะเวลาโดยประมาณ</dt><dd>3–5 นาที</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${dateTime(campaign.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${dateTime(campaign.CloseAt)}</dd></div></dl>${campaign.RulesText ? `<details><summary>กติกาและข้อกำหนด</summary><p>${escHtml(campaign.RulesText)}</p></details>` : ''}</section>`);
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'user', current: 'participation', campaign, onPage: true }));
-    bindDetail(); hydratePrivateImages();
+    bindDetail(); bindSafetyVoteImageGallery(state.page); hydratePrivateImages();
     if (state.errors.length) state.page.querySelector('.svp-validation')?.focus();
 }
 
@@ -214,18 +215,6 @@ async function hydratePrivateImages() {
         try { const response = await API.get(`/safety-vote/files/${Number(image.dataset.svpPrivateFile)}`), url = URL.createObjectURL(await response.blob()); state.objectUrls.add(url); image.src = url; }
         catch (_) { image.closest('.svp-gallery-trigger')?.remove(); }
     }));
-}
-
-function openGallery(button) {
-    const source = button.querySelector('img'); if (!source?.src) return;
-    const restore = document.activeElement, host = document.createElement('div');
-    host.className = 'svp-gallery'; host.dataset.svpGallery = '';
-    host.innerHTML = `<div class="svp-gallery__backdrop" data-svp-gallery-close></div><section role="dialog" aria-modal="true" aria-labelledby="svp-gallery-title"><div><h2 id="svp-gallery-title">${escHtml(button.dataset.svpAlt || 'ภาพตัวเลือก')}</h2><button type="button" class="sv-icon-button" data-svp-gallery-close aria-label="ปิดภาพ">×</button></div><img src="${escHtml(source.src)}" alt="${escHtml(button.dataset.svpAlt || '')}"></section>`;
-    document.body.appendChild(host);
-    const close = () => { host.remove(); if (restore?.isConnected) restore.focus(); };
-    host.querySelectorAll('[data-svp-gallery-close]').forEach(node => node.addEventListener('click', close));
-    host.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); close(); } if (event.key === 'Tab') { event.preventDefault(); host.querySelector('button')?.focus(); } });
-    host.querySelector('button')?.focus();
 }
 
 function validateWorkflow() {
@@ -312,7 +301,6 @@ function bindDetail() {
         catch (_) { state.errors = [{ questionId: Number(input.dataset.svpAnswerFile), message: 'แนบไฟล์ไม่สำเร็จ กรุณาตรวจสอบชนิดและขนาดไฟล์' }]; renderDetail(); }
         finally { input.disabled = false; }
     }));
-    state.page.querySelectorAll('[data-svp-file]').forEach(button => button.addEventListener('click', () => openGallery(button)));
 }
 
 async function openCampaign(id) {

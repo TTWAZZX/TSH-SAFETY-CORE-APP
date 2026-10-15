@@ -11,6 +11,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
 (async () => {
     const page = read('public/js/pages/safety-vote-page-ux1.js');
     const components = read('public/js/pages/safety-vote-ux-components.js');
+    const gallery = read('public/js/pages/safety-vote-image-gallery.js');
     const css = read('public/style.css');
     const main = read('public/js/main.js');
     const html = read('index.html');
@@ -34,12 +35,14 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('data-svp-search') && page.includes('data-svp-view'), 'My Activities search/status views are incomplete');
     check(page.includes('role="tablist"') && page.includes('aria-selected='), 'status tabs lack accessible semantics');
     check(page.includes('role="alert" tabindex="-1"'), 'validation summary must be focusable and announced');
-    check(page.includes('data-svp-gallery') && page.includes("event.key === 'Escape'"), 'private image gallery keyboard behavior is missing');
+    check(page.includes('bindSafetyVoteImageGallery') && page.includes('data-sv-gallery-group'), 'shared private image gallery binding is missing');
+    check(gallery.includes("event.key === 'Escape'") && gallery.includes("event.key === 'ArrowLeft'") && gallery.includes("event.key === 'ArrowRight'"), 'private image gallery keyboard behavior is missing');
+    check(gallery.includes("addEventListener('touchstart'") && gallery.includes("addEventListener('touchend'"), 'private image gallery swipe behavior is missing');
     check(page.includes('submission_challenge') && page.includes('nomineeEmployeeId'), 'campaign-adaptive participation forms are incomplete');
     check(page.includes('loadLegacySafetyVotePage') && page.includes('data-svp-jury'), 'existing Juror workspace handoff is missing');
     check(page.includes('state.moduleDisabled') && page.includes('MODULE_DISABLED'), 'module_enabled fail-closed state is missing');
     check(page.includes('state.denied') && page.includes('PERMISSION_DENIED'), 'permission denied state is missing');
-    const currentCacheKey = /safety-vote-(?:(?:ux(?:[3-8]|9c)|phase9abc-enabled)-r1|density-r[1-9]\d*)/;
+    const currentCacheKey = /safety-vote-(?:(?:ux(?:[3-8]|9c)|phase9abc-enabled|preview-gallery)-r1|density-r[1-9]\d*)/;
     check(currentCacheKey.test(main) && currentCacheKey.test(html), 'Phase 3-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 3'), 'Phase 3 scoped CSS marker is missing');
     check(css.includes('.svp-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');

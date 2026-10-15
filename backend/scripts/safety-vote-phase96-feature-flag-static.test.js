@@ -14,7 +14,7 @@ const mainModule = mainModuleMatch ? index.indexOf(mainModuleMatch[0]) : -1;
 
 assert(flagAssignment >= 0, 'Production shell must enable safetyVoteUxV1 explicitly');
 assert(mainModule > flagAssignment, 'Feature flag must be assigned before main.js evaluates');
-assert(index.includes('public/style.css?v=20261009-safety-vote-phase10-4-r1'), 'Accepted Phase 10.4 CSS cache key changed unexpectedly');
+assert(index.includes('public/style.css?v=20261015-safety-vote-preview-gallery-r1'), 'Current Safety Vote CSS cache key is missing');
 assert(component.includes('safetyVoteUxV1 === true'), 'Safety Vote UX must remain strict opt-in');
 assert(!index.includes('phase7_integrations_enabled'), 'Client shell must not alter the server integration gate');
 assert(!index.includes('module_enabled'), 'Client shell must not alter the server module gate');
