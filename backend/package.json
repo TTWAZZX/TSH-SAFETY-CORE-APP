@@ -95,6 +95,7 @@
     "uat:safety-vote-ux-phase9a-browser": "node scripts/safety-vote-ux-phase9a-browser-uat.js",
     "uat:safety-vote-promotion-remediation-browser": "node scripts/safety-vote-promotion-remediation-browser-uat.js",
     "test:safety-vote-promotion-image-ux-browser": "node scripts/safety-vote-promotion-image-ux-browser.test.js",
+    "test:safety-vote-wizard-layout-browser": "node scripts/safety-vote-wizard-layout-browser.test.js",
     "pull:production-full-db": "node scripts/production-full-db-pull.js",
     "restore:production-full-db-local": "node scripts/production-full-db-restore-local.js",
     "pull:production-safety-vote-files": "node scripts/production-safety-vote-files-pull.js",

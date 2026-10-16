@@ -5275,3 +5275,64 @@ body[data-active-page="admin"] #admin-page:not(.hidden) {
     display: flex;
     align-items: center;
 }
+
+/* Safety Vote campaign wizard: keep every major surface on one layout grid. */
+.svw-shell {
+    --svw-layout-gap: clamp(.75rem, 1.2vw, 1rem);
+}
+.svw-header,
+.svw-progress,
+.svw-recovery,
+.svw-readiness-summary,
+.svw-layout,
+.svw-action-bar {
+    width: 100%;
+    margin-right: 0;
+    margin-left: 0;
+}
+.svw-readiness-summary {
+    grid-template-columns: minmax(174px, 224px) minmax(0, 1fr);
+    gap: var(--svw-layout-gap);
+    margin-top: .75rem;
+    margin-bottom: 1rem;
+}
+.svw-layout {
+    gap: var(--svw-layout-gap);
+    align-items: stretch;
+}
+.svw-step-nav {
+    height: 100%;
+    align-content: start;
+}
+.svw-main {
+    display: grid;
+    align-self: stretch;
+}
+.svw-card {
+    width: 100%;
+    height: 100%;
+}
+.svw-template-grid,
+.svw-choice-grid {
+    align-items: stretch;
+    grid-auto-rows: 1fr;
+}
+.svw-template,
+.svw-choice {
+    height: 100%;
+}
+.svw-save-status {
+    margin-top: .75rem;
+}
+.svw-action-bar {
+    margin-top: .5rem;
+}
+@media (max-width: 1023px) {
+    .svw-readiness-summary {
+        grid-template-columns: 1fr;
+    }
+    .svw-main,
+    .svw-card {
+        height: auto;
+    }
+}
