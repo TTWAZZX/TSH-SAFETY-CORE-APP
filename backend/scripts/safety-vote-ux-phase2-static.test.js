@@ -30,6 +30,10 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     assert(!/\bwindow\.(?:confirm|prompt|alert)\s*\(/.test(wizard), 'native modal APIs are not allowed in the wizard');
     assert(wizard.includes('openSafetyVoteConfirmDialog'), 'accessible confirm dialog must be used');
     assert(components.includes('safetyVoteCampaignPreview'), 'shared real-role preview component is missing');
+    assert(components.includes('data-svw-user-view="participation"') && components.includes('data-svw-user-view="live"'), 'participant preview must use the same ballot/live tab model as the real page');
+    assert(wizard.includes('data-svw-preview-submitted="false"') && wizard.includes('data-svw-preview-submitted="true"'), 'review preview must simulate before-submit and after-submit visibility');
+    assert(wizard.includes("state.previewUserView=button.dataset.svwUserView") && wizard.includes("state.previewSubmitted=button.dataset.svwPreviewSubmitted==='true'"), 'preview tabs and submission scenarios must be interactive');
+    assert(!/safetyVoteCampaignPreview\([^)]*\)\}\$\{liveLeaderboardPreview/.test(wizard), 'live results must not be appended below the participant ballot');
     assert(components.includes('role="alertdialog"') && components.includes('aria-modal="true"'), 'confirm dialog semantics are missing');
     assert(css.includes('min-height: 44px'), '44 px touch-target rule is missing');
     assert(css.includes('@media (max-width: 430px)') && css.includes('@media (max-width: 767px)') && css.includes('@media (max-width: 1023px)'), 'responsive breakpoints are incomplete');

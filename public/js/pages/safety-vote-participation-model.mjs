@@ -169,7 +169,7 @@ export function safeReceipt({ campaign = {}, receiptCode = '', submittedAt = '',
 
 export function filterCampaigns(campaigns = [], { view = 'open', query = '' } = {}) {
     const normalized = String(query).trim().toLocaleLowerCase('th');
-    return campaigns.filter(campaign => participationState(campaign) === view).filter(campaign => {
+    return campaigns.filter(campaign => view === 'all' || participationState(campaign) === view).filter(campaign => {
         if (!normalized) return true;
         return ['TitleTh', 'Summary', 'CampaignCode', 'CampaignType'].some(key => String(campaign[key] || '').toLocaleLowerCase('th').includes(normalized));
     });

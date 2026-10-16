@@ -12,6 +12,6 @@ for(const marker of['ประกาศล่วงหน้า · ยังไ�
 assert(!ui.includes('รายละเอียดกิจกรรมจะเปิดเมื่อแคมเปญเผยแพร่'),'active promotion CTA must not remain disabled until lifecycle publication');
 assert(ui.includes("const liveEnabled = !preOpen"),'live results must stay unavailable during pre-open detail');
 for(const marker of['.svp-auth-media__status','data-svp-media-state="loaded"','.svp-preopen-cover img { display: block; width: 100%; height: 100%; object-fit: contain; }'])assert(style.includes(marker),`promotion image UX style missing ${marker}`);
-assert(main.includes('20261016-safety-vote-promotion-image-ux-r1'),'page cache key was not advanced');
-assert(html.includes('20261016-safety-vote-promotion-image-ux-r1'),'style cache key was not advanced');
+assert(main.includes('20261016-safety-vote-public-discovery-r1'),'page cache key was not advanced');
+assert(html.includes('20261016-safety-vote-wizard-layout-r1'),'style cache key was not advanced');
 console.log('Safety Vote pre-open campaign detail static/security contract: PASS');
