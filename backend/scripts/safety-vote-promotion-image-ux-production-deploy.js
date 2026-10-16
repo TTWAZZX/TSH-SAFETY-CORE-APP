@@ -119,7 +119,7 @@ async function resolveSmokeToken() {
 
 async function authenticatedSmoke(auth) {
     const requests = [];
-    for (const relative of ['/api/index.php?route=safety-vote/admin/health', '/api/index.php?route=safety-vote/campaigns']) {
+    for (const relative of ['/api/index.php?route=safety-vote/admin/health', '/api/index.php?route=safety-vote/admin/campaigns']) {
         const response = await fetch(`${baseUrl}${relative}`, { headers: { Authorization: `Bearer ${auth.token}`, Accept: 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' });
         const body = await response.json().catch(() => null);
         assert.equal(response.status, 200, `Authenticated GET failed: ${relative}`);
