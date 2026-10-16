@@ -1,6 +1,6 @@
 'use strict';
 
-const CONTRACT_VERSION = '2026-10-15-safety-vote-live-results-r1';
+const CONTRACT_VERSION = '2026-10-16-safety-vote-empty-threshold-live-r1';
 const SERVER_MINIMUM_THRESHOLD = 5;
 const SCORE_MODES = Object.freeze(['count', 'percentage', 'count_percentage']);
 const VISIBILITY_MODES = Object.freeze(['after_submit', 'always', 'admin_only']);
@@ -59,4 +59,21 @@ function aggregate(questions = [], answerRows = [], topN = 5) {
     });
 }
 
-module.exports = { CONTRACT_VERSION, SERVER_MINIMUM_THRESHOLD, SCORE_MODES, VISIBILITY_MODES, normalizeConfig, supportedQuestions, aggregate };
+function maskedQuestions(questions = [], topN = 5, empty = false) {
+    return questions.map(question => {
+        const options = (question.options || []).map((option, index) => ({
+            optionId: Number(option.id), optionCode: option.optionCode ?? option.OptionCode, label: option.label ?? option.Label,
+            description: option.description ?? option.Description ?? null, fileId: Number(option.fileId ?? option.FileID) || null,
+            displayPosition: index + 1, rank: null, voteCount: empty ? 0 : null, percentage: empty ? 0 : null,
+            tied: false, pending: true
+        }));
+        return {
+            questionId: Number(question.id), questionCode: question.questionCode ?? question.QuestionCode,
+            title: question.title ?? question.Title, validAnswerCount: empty ? 0 : null,
+            denominatorPolicy: 'valid_option_answers_including_abstain', scoreDisclosure: empty ? 'zero' : 'masked',
+            options, summary: options.slice(0, topN)
+        };
+    });
+}
+
+module.exports = { CONTRACT_VERSION, SERVER_MINIMUM_THRESHOLD, SCORE_MODES, VISIBILITY_MODES, normalizeConfig, supportedQuestions, aggregate, maskedQuestions };

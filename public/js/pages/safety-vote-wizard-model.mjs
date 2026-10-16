@@ -83,7 +83,7 @@ export function defaultQuestion(type = 'survey', index = 0) {
 export function createWizardDraft() {
     return {
         campaignType: 'survey', campaignCode: '', titleTh: '', titleEn: '', summary: '', description: '',
-        privacyMode: 'identified', privacyThreshold: 5, discoveryMode: 'eligible_only',
+        privacyMode: 'identified', privacyThreshold: 5, maxParticipationAttempts: 1, discoveryMode: 'eligible_only',
         openAt: '', closeAt: '', resultVisibility: 'hidden_until_close',
         liveLeaderboardEnabled: false, liveLeaderboardTopN: 5, liveLeaderboardScoreMode: 'count_percentage',
         liveLeaderboardVisibility: 'after_submit', liveLeaderboardRefreshSeconds: 15, liveLeaderboardPrivacyThreshold: 5,
@@ -99,6 +99,7 @@ export function applyTemplate(draft, type) {
         ...draft,
         campaignType: template.key,
         privacyMode: template.privacyMode,
+        maxParticipationAttempts: template.privacyMode === 'secret_ballot' ? 1 : Number(draft.maxParticipationAttempts || 1),
         resultVisibility: template.key === 'secret_election' ? 'certified_only' : 'hidden_until_close',
         liveLeaderboardEnabled: false,
         questions: [defaultQuestion(template.key)],
@@ -156,7 +157,9 @@ export function scheduleValid(draft) {
 }
 
 export function privacyValid(draft) {
-    return !(draft.privacyMode === 'secret_ballot' && draft.resultVisibility === 'live');
+    const attempts = Number(draft.maxParticipationAttempts || 1);
+    return Number.isInteger(attempts) && attempts >= 1 && attempts <= 10
+        && !(draft.privacyMode === 'secret_ballot' && (draft.resultVisibility === 'live' || attempts !== 1));
 }
 
 export function validateStep(step, draft) {
@@ -208,6 +211,7 @@ export function campaignPayload(draft) {
         campaignType: draft.campaignType,
         privacyMode: draft.privacyMode,
         privacyThreshold: Number(draft.privacyThreshold || 5),
+        maxParticipationAttempts: draft.privacyMode === 'secret_ballot' ? 1 : Number(draft.maxParticipationAttempts || 1),
         discoveryMode: draft.discoveryMode,
         resultVisibility: draft.resultVisibility,
         liveLeaderboardEnabled: Boolean(draft.liveLeaderboardEnabled),

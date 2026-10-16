@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('assert'),fs=require('fs'),path=require('path');
+const root=path.resolve(__dirname,'..','..'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
+const node2=read('backend/routes/safety-vote-phase2.js'),node3=read('backend/routes/safety-vote-phase3.js'),php2=read('api/handlers/safety_vote_phase2.php'),php3=read('api/handlers/safety_vote_phase3.php'),engagementNode=read('backend/routes/safety-vote-engagement.js'),engagementPhp=read('api/handlers/safety_vote_engagement.php'),ui=read('public/js/pages/safety-vote-page-ux1.js'),main=read('public/js/main.js'),html=read('index.html');
+for(const source of[node2,node3])for(const marker of['activePromotion','pre_open_promotion','preOpen','opensAt','CAMPAIGN_NOT_ELIGIBLE','VotingWindowOpen'])assert(source.includes(marker),`Node pre-open detail parity missing ${marker}`);
+for(const source of[php2,php3])for(const marker of['sv2_active_promotion','pre_open_promotion','preOpen','opensAt','CAMPAIGN_NOT_ELIGIBLE','VotingWindowOpen'])assert(source.includes(marker),`PHP pre-open detail parity missing ${marker}`);
+for(const source of[node2,node3])assert(source.includes("p.Status='Published' AND p.StartAt<=NOW() AND p.EndAt>NOW()"),'Node pre-open access must require an active published promotion');
+assert(php2.includes("p.Status='Published' AND p.StartAt<=NOW() AND p.EndAt>NOW()"),'PHP pre-open access must require an active published promotion');
+assert(php3.includes('sv2_active_promotion'),'PHP Phase 3 must reuse the guarded active-promotion lookup');
+for(const source of[engagementNode,engagementPhp])for(const marker of['c.IsHidden=0','c.IsTest=0'])assert(source.includes(marker),`participant promotion query missing ${marker}`);
+for(const marker of['ประกาศล่วงหน้า · ยังไม่เปิดลงคะแนน','ดูรายละเอียดได้แล้ว · ยังไม่เปิดลงคะแนน','data-svp-promotion-file','detail.preOpen','pre_open_promotion'])assert(ui.includes(marker),`participant UX missing ${marker}`);
+assert(!ui.includes('รายละเอียดกิจกรรมจะเปิดเมื่อแคมเปญเผยแพร่'),'active promotion CTA must not remain disabled until lifecycle publication');
+assert(ui.includes("const liveEnabled = !preOpen"),'live results must stay unavailable during pre-open detail');
+assert(main.includes('20261016-safety-vote-preopen-detail-r1'),'page cache key was not advanced');
+assert(html.includes('20261016-safety-vote-preopen-detail-r1'),'style cache key was not advanced');
+console.log('Safety Vote pre-open campaign detail static/security contract: PASS');

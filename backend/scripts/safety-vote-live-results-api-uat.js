@@ -38,7 +38,7 @@ async function seed(name) {
     const db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: name, multipleStatements: true });
     try {
         await db.query("CREATE TABLE Admin_RolePermissions(role VARCHAR(50),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(role,permission));CREATE TABLE Admin_UserPermissions(employee_id VARCHAR(20),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(employee_id,permission));CREATE TABLE Employees(EmployeeID VARCHAR(20) PRIMARY KEY,Department VARCHAR(100)) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;INSERT INTO Employees VALUES('SV-USER','Production'),('SV-USER2','Production')");
-        for (const file of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261015_safety_vote_live_results.sql']) {
+        for (const file of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261015_safety_vote_live_results.sql', '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql']) {
             await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', file), 'utf8'));
         }
         await db.query("UPDATE SafetyVote_Settings SET SettingValue='1' WHERE SettingKey='module_enabled'");
@@ -79,7 +79,9 @@ function stable(data) {
 }
 
 async function browserUat(base, campaignId) {
-    const browser = await chromium.launch({ headless: true });
+    const browserCandidates = [process.env.SAFETY_VOTE_BROWSER, 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'].filter(Boolean);
+    const executablePath = browserCandidates.find(candidate => fs.existsSync(candidate));
+    const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
     try {
         for (const viewport of [{ width: 390, height: 844 }, { width: 1366, height: 768 }]) {
             const page = await browser.newPage({ viewportSize: viewport });
@@ -145,7 +147,18 @@ async function lifecycle(label, base, name, fixture) {
         assert.strictEqual(threshold.status, 200);
         assert.strictEqual(threshold.data.data.status, 'threshold_not_met');
         assert.strictEqual(threshold.data.data.totalAcceptedVotes, null, 'exact count is suppressed below threshold');
-        assert.deepStrictEqual(threshold.data.data.questions, []);
+        assert.strictEqual(threshold.data.data.questions[0].summary.length, 5, 'threshold state retains Top N placeholders');
+        assert.strictEqual(threshold.data.data.questions[0].summary[0].voteCount, null, 'threshold state suppresses option count');
+        assert.strictEqual(threshold.data.data.questions[0].summary[0].rank, null, 'threshold state suppresses ranking');
+        await db.query('DELETE FROM SafetyVote_BallotAnswers WHERE BallotID IN (SELECT id FROM SafetyVote_Ballots WHERE CampaignVersionID=?)', [fixture.versionId]);
+        await db.query('DELETE FROM SafetyVote_Ballots WHERE CampaignVersionID=?', [fixture.versionId]);
+        const empty = await call(base, `/campaigns/${fixture.campaignId}/live-results`, 'sv-user');
+        assert.strictEqual(empty.status, 200);
+        assert.strictEqual(empty.data.data.status, 'empty');
+        assert.strictEqual(empty.data.data.totalAcceptedVotes, 0);
+        assert.strictEqual(empty.data.data.questions[0].summary.length, 5, 'empty state renders configured Top N placeholders');
+        assert.strictEqual(empty.data.data.questions[0].summary[0].voteCount, 0, 'empty state safely exposes zero');
+        assert.strictEqual(empty.data.data.questions[0].summary[0].rank, null, 'empty state does not invent ranking');
         await db.query("UPDATE SafetyVote_CampaignVersions SET LiveLeaderboardPrivacyThreshold=5,LiveLeaderboardVisibility='admin_only' WHERE id=?", [fixture.versionId]);
         assert.strictEqual((await call(base, `/campaigns/${fixture.campaignId}/live-results`, 'sv-user')).data.code, 'LIVE_RESULTS_ADMIN_ONLY');
         await db.query('UPDATE SafetyVote_CampaignVersions SET LiveLeaderboardEnabled=0 WHERE id=?', [fixture.versionId]);

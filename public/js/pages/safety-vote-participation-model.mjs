@@ -45,22 +45,22 @@ export function privacyNotice(campaign = {}) {
     const mode = privacyMode(campaign);
     if (mode === 'secret_ballot') return {
         title: 'บัตรลงคะแนนลับ',
-        description: 'ระบบรับรองเฉพาะว่ารับบัตรแล้ว ใบรับจะไม่แสดงตัวเลือกและไม่สามารถใช้ค้นหาบัตรของคุณได้',
+        description: 'ระบบแยกสถานะการเข้าร่วมออกจากบัตรลงคะแนน ใบรับไม่แสดงตัวเลือก และแม้เป็น Admin ก็ไม่สามารถเชื่อมว่าคุณเลือกอะไรได้',
         receiptShowsAnswers: false
     };
     if (mode === 'anonymous') return {
         title: 'ไม่ระบุตัวตนในผลลัพธ์',
-        description: 'คำตอบถูกจัดเก็บตามข้อกำหนดความเป็นส่วนตัว และใบรับไม่แสดงคำตอบที่ส่ง',
+        description: 'คำตอบไม่เชื่อมกลับไปยังบัญชีของคุณ ระบบเก็บเฉพาะสถานะการเข้าร่วมแยกกัน และ Admin ดูได้เฉพาะผลรวมที่ผ่านเกณฑ์',
         receiptShowsAnswers: false
     };
     if (mode === 'confidential') return {
         title: 'ข้อมูลลับตามสิทธิ์',
-        description: 'ข้อมูลผู้เข้าร่วมถูกจำกัดการเข้าถึงตามสิทธิ์ของระบบ เมื่อส่งแล้วไม่สามารถแก้ไขได้',
+        description: 'ระบบเชื่อมคำตอบกับบัญชี แต่จำกัดการเข้าถึงข้อมูลรายบุคคลตาม Permission และบันทึก Audit; Admin ยังดูสถานะและผลรวมได้',
         receiptShowsAnswers: false
     };
     return {
         title: 'ระบุตัวตนตามสิทธิ์',
-        description: 'ระบบบันทึกการเข้าร่วมตามบัญชีของคุณ เมื่อส่งแล้วไม่สามารถแก้ไขได้',
+        description: 'ระบบเชื่อมคำตอบกับบัญชีเพื่อรองรับการติดตามรายบุคคล ผู้ดูแลต้องมี Permission ตามงาน และ Admin ดูสถานะกับผลรวมได้',
         receiptShowsAnswers: false
     };
 }

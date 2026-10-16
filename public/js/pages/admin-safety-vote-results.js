@@ -4,7 +4,7 @@ import { isSafetyVoteUxV1Enabled, safetyVoteJourneyNav, safetyVoteRoleNav, safet
 import { snapshotList, selectedSnapshot, resultReadiness, verificationChecks, publicPreview, isSecretCampaign } from './safety-vote-results-model.mjs?v=20261008-safety-vote-ux6-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
-const state = { container: null, campaign: null, onClose: null, onNavigate: null, snapshots: [], stages: [], verification: null, published: null, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null };
+const state = { container: null, campaign: null, onClose: null, onNavigate: null, snapshots: [], stages: [], verification: null, published: null, dashboard: null, dashboardLoading: false, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null };
 
 function dateTime(value) {
     return formatThaiDateTime(value, '—');
@@ -40,6 +40,25 @@ function publicationPanel(snapshot) {
     return `<div class="svr-publication is-visible"><strong>ตัวอย่างผลที่เผยแพร่แล้ว</strong><p>${escHtml(preview.message)}</p><div class="svr-public-rows">${preview.rows.map(row => `<article><span>${escHtml(row.positionCode || 'ผลรวม')}</span><strong>อันดับ ${row.rank || '—'}</strong><small>${row.count.toLocaleString('th-TH')} คะแนน/บัตร · ${escHtml(row.state)}</small></article>`).join('')}</div></div>`;
 }
 
+function metricLabel(metric) {
+    const labels = { combined_score: 'คะแนนรวม', secret_count: 'คะแนน', aggregate_score: 'คะแนนรวม', popular_vote: 'คะแนนโหวต' };
+    return labels[String(metric)] || String(metric || 'ผลรวม').replaceAll('_', ' ');
+}
+
+function dashboardPanel(snapshot) {
+    if (!snapshot) return `<section class="svr-panel svr-panel--dashboard"><div class="svr-empty"><strong>Campaign Result Dashboard</strong><p>Dashboard จะพร้อมหลังสร้าง Result Snapshot แรก</p></div></section>`;
+    if (state.dashboardLoading) return `<section class="svr-panel svr-panel--dashboard" aria-busy="true"><div class="svp-skeleton svp-skeleton--card"></div></section>`;
+    const dashboard = state.dashboard;
+    if (!dashboard?.available) return `<section class="svr-panel svr-panel--dashboard"><div class="svr-empty"><strong>ยังไม่มีผลรวมสำหรับ Snapshot นี้</strong><p>ไม่มีการอ่านบัตรหรือคำตอบรายบุคคลจากหน้าจอนี้</p></div></section>`;
+    const k = dashboard.kpis || {}, exportReady = ['Frozen', 'Certified', 'Published'].includes(String(snapshot.status));
+    const kpis = [
+        ['ผู้มีสิทธิ์', k.eligible, 'คน'], ['เข้าร่วม', k.participation, 'คน'], ['บัตรที่รับ', k.accepted, 'บัตร'],
+        ['Turnout', k.turnoutPercentage, '%'], ['งดออกเสียง', k.abstain, 'บัตร'], ['ผลลัพธ์', dashboard.totalResultRows, 'รายการ']
+    ];
+    const groups = (dashboard.groups || []).map(group => `<section class="svr-result-group"><h3>${escHtml(group.title)}</h3><div class="svr-ranking-list">${(group.rows || []).map(row => `<article class="svr-ranking-row"><span class="svr-rank">${row.rank ? `#${row.rank}` : '—'}</span><div class="svr-ranking-main"><div><strong>${escHtml(row.label)}</strong>${row.code ? `<small>${escHtml(row.code)}</small>` : ''}</div><div class="svr-result-bar" aria-label="${escHtml(row.label)} ${Number(row.barPercentage || 0)} เปอร์เซ็นต์เทียบอันดับสูงสุด"><i style="width:${Math.max(0, Math.min(100, Number(row.barPercentage || 0)))}%"></i></div></div><div class="svr-ranking-value"><strong>${row.value == null ? '—' : Number(row.value).toLocaleString('th-TH', { maximumFractionDigits: 2 })}</strong><small>${escHtml(metricLabel(row.metric))}</small></div></article>`).join('') || '<p class="svr-help">Snapshot นี้ไม่มี Result Row</p>'}</div></section>`).join('');
+    return `<section class="svr-panel svr-panel--dashboard" aria-labelledby="svr-dashboard-title"><div class="svr-panel__heading svr-dashboard-heading"><div><p class="sv-eyebrow">Aggregate-only · Snapshot ${Number(dashboard.snapshot?.snapshotNo || 0)}</p><h2 id="svr-dashboard-title">Campaign Result Dashboard</h2><p class="svr-help">ไม่รวมชื่อผู้โหวต รหัสพนักงาน หรือคำตอบที่เชื่อมกลับถึงบุคคล</p></div><div class="svr-export-actions"><button type="button" class="sv-button sv-button--secondary" data-svr-action="export-excel" ${state.busy || !exportReady ? 'disabled' : ''}>Excel ทางการ</button><button type="button" class="sv-button sv-button--secondary" data-svr-action="export-pdf" ${state.busy || !exportReady ? 'disabled' : ''}>PDF ทางการ</button><small>${['Certified', 'Published'].includes(String(snapshot.status)) ? 'รายงานรับรองอย่างเป็นทางการ' : 'Controlled result copy — ยังไม่รับรอง'}</small></div></div><div class="svr-kpi-grid">${kpis.map(([label, value, unit]) => `<article><span>${escHtml(label)}</span><strong>${value == null ? '—' : Number(value).toLocaleString('th-TH', { maximumFractionDigits: 2 })}</strong><small>${escHtml(unit)}</small></article>`).join('')}</div><div class="svr-turnout"><div><span>อัตราการมีส่วนร่วม</span><strong>${k.turnoutPercentage == null ? '—' : `${Number(k.turnoutPercentage).toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`}</strong></div><div class="svr-result-bar"><i style="width:${Math.max(0, Math.min(100, Number(k.turnoutPercentage || 0)))}%"></i></div></div>${groups || '<div class="svr-empty"><strong>ยังไม่มีอันดับผลลัพธ์</strong><p>Snapshot มี KPI แล้ว แต่ยังไม่มี Result Row สำหรับจัดอันดับ</p></div>'}<footer class="svr-dashboard-foot"><span>สถานะ ${escHtml(dashboard.snapshot?.status || snapshot.status)}</span><code>${escHtml(dashboard.snapshot?.resultHash || snapshot.resultHash)}</code></footer></section>`;
+}
+
 function certifierAssignment(secret) {
     if (!secret || String(state.campaign?.Status) !== 'Draft') return '';
     return `<section class="svr-panel" aria-labelledby="svr-assignment-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Dual control setup</p><h2 id="svr-assignment-title">มอบหมายผู้รับรองอิสระ</h2></div></div><p class="svr-help">ใช้ได้เฉพาะ Secret Election สถานะ Draft และอ้างอิง Employee Master เดิม การมอบหมายไม่ใช่การรับรองผล</p><div class="svr-assignment-form"><label><span>รหัสพนักงาน</span><input type="text" maxlength="20" data-svr-employee autocomplete="off"></label><label><span>บทบาทควบคุม</span><select data-svr-control-role><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label><button type="button" class="sv-button sv-button--primary" data-svr-action="assign-certifier">ตรวจและยืนยันการมอบหมาย</button></div></section>`;
@@ -57,7 +76,7 @@ function render() {
     const rows = snapshotList(state.snapshots), snapshot = selectedSnapshot(rows, state.selectedId), secret = isSecretCampaign(state.campaign);
     state.selectedId = snapshot?.id || null;
     const partial = state.partial.length ? `<section class="svr-partial-list" aria-labelledby="svr-partial-title"><h2 id="svr-partial-title">ข้อมูลบางส่วนไม่พร้อม</h2>${state.partial.map(item => `<article role="status"><strong>${escHtml(item.label)}</strong><span>${escHtml(item.message)}</span></article>`).join('')}</section>` : '';
-    state.container.innerHTML = `<div class="svr-shell" data-sv-results="2026-10-08-safety-vote-ux6-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svr-hero"><button type="button" class="sv-icon-button" data-svr-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ตรวจสอบและรับรองผล Safety Vote</p><h1>${escHtml(state.campaign.TitleTh || state.campaign.CampaignCode || 'Safety Vote')}</h1><p>${secret ? 'Secret Election · dual control' : 'ผลมาตรฐาน'} · ตรวจ snapshot และ exact hash ก่อนดำเนินการที่ย้อนกลับไม่ได้</p></div>${safetyVoteStatusBadge(state.campaign.Status)}</header>${partial}${state.actionError ? `<div class="svr-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.notice ? `<div class="svr-message is-success" role="status">${escHtml(state.notice)}</div>` : ''}${state.receipt ? `<div class="svr-receipt" role="status"><strong>${escHtml(state.receipt.title)}</strong><span>Snapshot ${Number(state.receipt.snapshotId || 0)} · ${escHtml(state.receipt.status || '')}</span><code>${escHtml(state.receipt.resultHash || '')}</code></div>` : ''}<main class="svr-grid"><section class="svr-panel svr-panel--snapshots" aria-labelledby="svr-snapshots-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Immutable result versions</p><h2 id="svr-snapshots-title">เปรียบเทียบ Snapshot</h2></div><span>${rows.length.toLocaleString('th-TH')} รุ่น</span></div>${snapshotCards(rows, snapshot)}</section><section class="svr-panel" aria-labelledby="svr-readiness-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Readiness</p><h2 id="svr-readiness-title">ความพร้อมและ exact hash</h2></div></div>${readinessPanel(snapshot, secret)}</section><section class="svr-panel" aria-labelledby="svr-governance-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">SHE governance</p><h2 id="svr-governance-title">หลักฐานการควบคุมและความเป็นส่วนตัว</h2></div></div>${verificationPanel(secret)}</section><section class="svr-panel" aria-labelledby="svr-public-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Visibility preview</p><h2 id="svr-public-title">ตัวอย่างหลังเผยแพร่</h2></div></div>${publicationPanel(snapshot)}</section></main>${certifierAssignment(secret)}${actions(snapshot, secret)}</div>`;
+    state.container.innerHTML = `<div class="svr-shell" data-sv-results="2026-10-16-campaign-result-dashboard-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svr-hero"><button type="button" class="sv-icon-button" data-svr-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ตรวจสอบและรับรองผล Safety Vote</p><h1>${escHtml(state.campaign.TitleTh || state.campaign.CampaignCode || 'Safety Vote')}</h1><p>${secret ? 'Secret Election · dual control' : 'ผลมาตรฐาน'} · ตรวจ snapshot และ exact hash ก่อนดำเนินการที่ย้อนกลับไม่ได้</p></div>${safetyVoteStatusBadge(state.campaign.Status)}</header>${partial}${state.actionError ? `<div class="svr-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.notice ? `<div class="svr-message is-success" role="status">${escHtml(state.notice)}</div>` : ''}${state.receipt ? `<div class="svr-receipt" role="status"><strong>${escHtml(state.receipt.title)}</strong><span>Snapshot ${Number(state.receipt.snapshotId || 0)} · ${escHtml(state.receipt.status || '')}</span><code>${escHtml(state.receipt.resultHash || '')}</code></div>` : ''}<main class="svr-grid">${dashboardPanel(snapshot)}<section class="svr-panel svr-panel--snapshots" aria-labelledby="svr-snapshots-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Immutable result versions</p><h2 id="svr-snapshots-title">เปรียบเทียบ Snapshot</h2></div><span>${rows.length.toLocaleString('th-TH')} รุ่น</span></div>${snapshotCards(rows, snapshot)}</section><section class="svr-panel" aria-labelledby="svr-readiness-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Readiness</p><h2 id="svr-readiness-title">ความพร้อมและ exact hash</h2></div></div>${readinessPanel(snapshot, secret)}</section><section class="svr-panel" aria-labelledby="svr-governance-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">SHE governance</p><h2 id="svr-governance-title">หลักฐานการควบคุมและความเป็นส่วนตัว</h2></div></div>${verificationPanel(secret)}</section><section class="svr-panel" aria-labelledby="svr-public-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Visibility preview</p><h2 id="svr-public-title">ตัวอย่างหลังเผยแพร่</h2></div></div>${publicationPanel(snapshot)}</section></main>${certifierAssignment(secret)}${actions(snapshot, secret)}</div>`;
     state.container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'results', campaign: state.campaign, onPage: typeof state.onNavigate !== 'function' }));
     bind();
 }
@@ -79,14 +98,19 @@ async function loadData() {
         state.error = state.denied || state.moduleDisabled ? null : error;
         state.loading = false; render(); return;
     }
-    const [stages, verification] = await Promise.allSettled([
+    const currentSnapshot = selectedSnapshot(state.snapshots, state.selectedId);
+    state.selectedId = currentSnapshot?.id || null;
+    const [stages, verification, dashboard] = await Promise.allSettled([
         API.get(`/safety-vote/admin/campaigns/${id}/stages`, { suppressErrorLog: true }),
-        API.get(`/safety-vote/admin/campaigns/${id}/release-verification`, { suppressErrorLog: true })
+        API.get(`/safety-vote/admin/campaigns/${id}/release-verification`, { suppressErrorLog: true }),
+        currentSnapshot ? API.get(`/safety-vote/admin/campaigns/${id}/results/dashboard?snapshotId=${currentSnapshot.id}`, { suppressErrorLog: true }) : Promise.resolve({ data: { available: false } })
     ]);
     state.stages = stages.status === 'fulfilled' ? stages.value.data?.rows || [] : [];
     state.verification = verification.status === 'fulfilled' ? verification.value.data : null;
+    state.dashboard = dashboard.status === 'fulfilled' ? dashboard.value.data : null;
     if (stages.status === 'rejected') state.partial.push(partialIssue('บริบท Stage', stages.reason));
     if (verification.status === 'rejected') state.partial.push(partialIssue('หลักฐาน SHE governance', verification.reason));
+    if (dashboard.status === 'rejected') state.partial.push(partialIssue('Campaign Result Dashboard', dashboard.reason));
     const current = selectedSnapshot(state.snapshots, state.selectedId);
     state.published = null;
     if (isSecretCampaign(state.campaign) && current?.published) {
@@ -94,6 +118,31 @@ async function loadData() {
         catch (error) { state.partial.push(partialIssue('ตัวอย่างผลที่เผยแพร่', error)); }
     }
     state.loading = false; render();
+}
+
+async function loadDashboard(snapshotId) {
+    if (!snapshotId || state.dashboardLoading) return;
+    state.dashboardLoading = true; state.actionError = ''; render();
+    try { state.dashboard = (await API.get(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/results/dashboard?snapshotId=${Number(snapshotId)}`, { suppressErrorLog: true })).data; }
+    catch (error) { state.dashboard = null; state.actionError = error?.message || error?.code || 'โหลด Campaign Result Dashboard ไม่สำเร็จ'; }
+    finally { state.dashboardLoading = false; render(); }
+}
+
+async function exportDashboard(format) {
+    const snapshot = selectedSnapshot(state.snapshots, state.selectedId);
+    if (!snapshot || !['Frozen', 'Certified', 'Published'].includes(snapshot.status)) return;
+    await runAction(async () => {
+        const certified = ['Certified', 'Published'].includes(String(snapshot.status));
+        const endpoint = certified ? `/safety-vote/admin/campaigns/${Number(state.campaign.id)}/exports/certified-report` : `/safety-vote/admin/campaigns/${Number(state.campaign.id)}/exports`;
+        const created = await API.post(endpoint, { snapshotId: snapshot.id, format });
+        const report = certified ? created.data : created.data?.report;
+        if (!report?.reportId) throw new Error('ระบบไม่ได้ส่งรหัสรายงานกลับมา');
+        const response = await API.get(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/reports/${encodeURIComponent(report.reportId)}/file`);
+        const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
+        link.href = url; link.download = `${report.reportId}.${format === 'pdf' ? 'pdf' : 'xlsx'}`; document.body.appendChild(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        state.receipt = { title: `สร้างและดาวน์โหลดรายงาน ${format === 'pdf' ? 'PDF' : 'Excel'} แล้ว`, snapshotId: snapshot.id, status: 'Completed', resultHash: report.resultHash };
+    }, `ส่งออกรายงาน ${format === 'pdf' ? 'PDF' : 'Excel'} จาก Snapshot ${snapshot.snapshotNo} แล้ว`);
 }
 
 async function runAction(task, success) {
@@ -156,12 +205,14 @@ async function assignCertifier() {
 
 function bind() {
     state.container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => state.onNavigate?.(button.dataset.svJourneyStep)));
-    state.container?.querySelectorAll('[data-svr-snapshot]').forEach(button => button.addEventListener('click', () => { state.selectedId = Number(button.dataset.svrSnapshot); render(); }));
+    state.container?.querySelectorAll('[data-svr-snapshot]').forEach(button => button.addEventListener('click', () => { state.selectedId = Number(button.dataset.svrSnapshot); loadDashboard(state.selectedId); }));
     state.container?.querySelectorAll('[data-svr-action]').forEach(button => button.addEventListener('click', async () => {
         const action = button.dataset.svrAction;
         if (action === 'back') state.onClose?.();
         else if (action === 'retry' || action === 'refresh') loadData();
         else if (action === 'copy-hash') { const snapshot = selectedSnapshot(state.snapshots, state.selectedId); if (snapshot?.resultHash) { await navigator.clipboard?.writeText(snapshot.resultHash); showToast('คัดลอก Result SHA-256 แล้ว', 'success'); } }
+        else if (action === 'export-excel') await exportDashboard('excel');
+        else if (action === 'export-pdf') await exportDashboard('pdf');
         else if (action === 'assign-certifier') assignCertifier();
         else confirmAction(action);
     }));
@@ -169,7 +220,7 @@ function bind() {
 
 export async function renderSafetyVoteResultsWorkspace(container, { campaign = null, onClose = null, onNavigate = null } = {}) {
     if (!isSafetyVoteUxV1Enabled() || !container || !campaign?.id) return false;
-    Object.assign(state, { container, campaign, onClose, onNavigate, snapshots: [], stages: [], verification: null, published: null, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null });
+    Object.assign(state, { container, campaign, onClose, onNavigate, snapshots: [], stages: [], verification: null, published: null, dashboard: null, dashboardLoading: false, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null });
     await loadData();
     return true;
 }

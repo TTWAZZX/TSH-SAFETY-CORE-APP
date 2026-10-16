@@ -12,9 +12,9 @@ import {
 } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9a-r1';
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
 import { CORE_TEMPLATES } from './safety-vote-wizard-model.mjs?v=20261015-safety-vote-live-results-r1';
-import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261015-safety-vote-thai-time-r1';
-import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261015-safety-vote-thai-time-r1';
-import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261015-safety-vote-thai-time-r1';
+import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261016-safety-vote-privacy-permissions-r1';
+import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261016-safety-vote-empty-threshold-live-r1';
+import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261016-safety-vote-official-reports-r1';
 import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261015-safety-vote-thai-time-r1';
 import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261015-safety-vote-thai-time-r1';
 import { renderSafetyVoteReviewWorkspace } from './admin-safety-vote-review.js?v=20261015-safety-vote-thai-time-r1';
@@ -25,6 +25,8 @@ const VIEW_LABELS = {
     draft: 'ฉบับร่าง',
     scheduled: 'รอเปิด',
     completed: 'เสร็จสิ้น',
+    hidden: 'ซ่อนจากผู้ใช้',
+    test: 'แคมเปญทดสอบ',
     archived: 'เก็บถาวร',
     voided: 'ยกเลิกแล้ว'
 };
@@ -45,7 +47,7 @@ const TYPE_LABELS = {
     event_choice: 'เลือกกิจกรรม', risk_perception: 'สำรวจการรับรู้ความเสี่ยง', knowledge_check: 'แบบทดสอบ', multi_stage: 'หลายขั้นตอน'
 };
 const PRIVACY_LABELS = { identified: 'ระบุตัวตน', confidential: 'ข้อมูลลับ', anonymous: 'ไม่ระบุตัวตน', secret_ballot: 'บัตรลงคะแนนลับ' };
-const RESULT_LABELS = { live: 'แสดงระหว่างกิจกรรม', admin_only: 'ผู้ดูแลเท่านั้น', hidden_until_close: 'แสดงหลังปิดกิจกรรม', certified_only: 'แสดงหลังรับรองผล', published: 'เผยแพร่แล้ว' };
+const RESULT_LABELS = { live: 'ผู้เข้าร่วมเห็นระหว่างกิจกรรม', admin_only: 'ซ่อนจากผู้เข้าร่วม · Admin เท่านั้น', hidden_until_close: 'ผู้เข้าร่วมเห็นหลังปิดกิจกรรม', certified_only: 'ผู้เข้าร่วมเห็นหลังรับรองผล', published: 'เผยแพร่ให้ผู้เข้าร่วมแล้ว' };
 
 const state = {
     health: null,
@@ -168,8 +170,11 @@ function visibleCampaigns() {
     const query = state.query.trim().toLocaleLowerCase('th');
     const rows = state.campaigns.filter(row => {
         const status = String(row.Status || '').toLowerCase();
+        if (state.view === 'test') return Number(row.IsTest) === 1;
+        if (state.view === 'hidden') return Number(row.IsHidden) === 1 && Number(row.IsTest) !== 1 && !['archived','voided'].includes(status);
         if (state.view === 'voided') return status === 'voided';
         if (state.view === 'archived') return status === 'archived';
+        if (Number(row.IsHidden) === 1 || Number(row.IsTest) === 1) return false;
         return statusGroup(row.Status) === state.view;
     }).filter(row => {
         if (!query) return true;
@@ -181,6 +186,22 @@ function visibleCampaigns() {
         if (state.sort === 'status_asc') return String(a.Status || '').localeCompare(String(b.Status || ''), 'en');
         return new Date(b.UpdatedAt || b.CreatedAt || 0) - new Date(a.UpdatedAt || a.CreatedAt || 0);
     });
+}
+
+function governanceBadges(row) {
+    return `${Number(row.IsTest) === 1 ? '<span class="sv-status-badge sv-status-badge--warning">TEST</span>' : ''}${Number(row.IsHidden) === 1 ? '<span class="sv-status-badge">ซ่อนอยู่</span>' : ''}`;
+}
+
+function governanceActions(row) {
+    const status=String(row.Status||''),hidden=Number(row.IsHidden)===1,test=Number(row.IsTest)===1,id=Number(row.id);
+    const items=[];
+    if (!['Archived','Voided'].includes(status)) items.push(`<button type="button" data-sv-governance="${hidden?'unhide':'hide'}" data-campaign-id="${id}">${hidden?'แสดงต่อผู้ใช้':'ซ่อนจากผู้ใช้'}</button>`);
+    if (status==='Draft') items.push(`<button type="button" data-sv-governance="${test?'unmark-test':'mark-test'}" data-campaign-id="${id}">${test?'ยกเลิกป้าย Test':'กำหนดเป็น Test'}</button>`);
+    if (['Closed','Certified','Published'].includes(status)) items.push(`<button type="button" data-sv-governance="archive" data-campaign-id="${id}">เก็บถาวร</button>`);
+    if (status==='Archived') items.push(`<button type="button" data-sv-governance="restore" data-campaign-id="${id}">กู้คืนแคมเปญ</button>`);
+    if (['Draft','Scheduled','Open','Closed','Certified'].includes(status)) items.push(`<button type="button" class="is-danger" data-sv-governance="void" data-campaign-id="${id}">Void แคมเปญ</button>`);
+    if (status==='Voided'&&test) items.push(`<button type="button" class="is-danger" data-sv-governance="purge" data-campaign-id="${id}">Purge ถาวร</button>`);
+    return items.join('');
 }
 
 function formattedDate(value) {
@@ -207,13 +228,13 @@ function campaignCard(row) {
     const selected = Number(row.id) === Number(state.selectedId);
     const draft = String(row.Status).toLowerCase() === 'draft';
     const readiness = draft ? draftReadiness(row) : null;
-    return `<article class="sv-campaign-card ${selected ? 'is-selected' : ''}">${draft && state.view === 'draft' ? `<label class="sv-draft-selector"><input type="checkbox" data-sv-draft-select="${Number(row.id)}" ${state.selectedDraftIds.has(Number(row.id)) ? 'checked' : ''}><span>เลือกฉบับร่างนี้</span></label>` : ''}<button type="button" class="sv-campaign-card__select" data-sv-select="${Number(row.id)}" aria-pressed="${selected}"><span class="sv-campaign-card__top">${safetyVoteStatusBadge(row.Status)}<span class="sv-campaign-code">${escHtml(row.CampaignCode)}</span></span><strong>${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</strong><span>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')}</span>${readiness ? `<span class="sv-readiness-meter"><span><i style="width:${readiness.percent}%"></i></span><small>ความพร้อมเบื้องต้น ${readiness.passed}/${readiness.total}</small></span>` : ''}<small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} · ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></button>${draft ? `<div class="sv-campaign-card__actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><button type="button" class="sv-button sv-button--secondary" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนา</button><button type="button" class="sv-button sv-button--secondary" data-sv-void-draft="${Number(row.id)}">ยกเลิกร่าง</button></div>` : ''}</article>`;
+    return `<article class="sv-campaign-card ${selected ? 'is-selected' : ''}">${draft && state.view === 'draft' ? `<label class="sv-draft-selector"><input type="checkbox" data-sv-draft-select="${Number(row.id)}" ${state.selectedDraftIds.has(Number(row.id)) ? 'checked' : ''}><span>เลือกฉบับร่างนี้</span></label>` : ''}<button type="button" class="sv-campaign-card__select" data-sv-select="${Number(row.id)}" aria-pressed="${selected}"><span class="sv-campaign-card__top">${safetyVoteStatusBadge(row.Status)}${governanceBadges(row)}<span class="sv-campaign-code">${escHtml(row.CampaignCode)}</span></span><strong>${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</strong><span>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')}</span>${readiness ? `<span class="sv-readiness-meter"><span><i style="width:${readiness.percent}%"></i></span><small>ความพร้อมเบื้องต้น ${readiness.passed}/${readiness.total}</small></span>` : ''}<small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} · ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></button>${draft ? `<div class="sv-campaign-card__actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><button type="button" class="sv-button sv-button--secondary" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนา</button></div>` : ''}</article>`;
 }
 
 function campaignTable(rows) {
     const selectable = state.view === 'draft' && rows.some(row => String(row.Status).toLowerCase() === 'draft');
     const allSelected = selectable && rows.filter(row => String(row.Status).toLowerCase() === 'draft').every(row => state.selectedDraftIds.has(Number(row.id)));
-    return `<div class="sv-campaign-table-wrap"><table class="sv-campaign-table"><caption class="sr-only">รายการแคมเปญ Safety Vote</caption><thead><tr>${selectable ? `<th scope="col"><label class="sv-table-check"><input type="checkbox" data-sv-draft-select-all ${allSelected ? 'checked' : ''}><span class="sr-only">เลือกฉบับร่างทั้งหมดในรายการ</span></label></th>` : ''}<th scope="col">แคมเปญ</th><th scope="col">ประเภท</th><th scope="col">ความพร้อม</th><th scope="col">ปรับปรุงล่าสุด</th><th scope="col">ดำเนินการ</th></tr></thead><tbody>${rows.map(row => { const draft = String(row.Status).toLowerCase() === 'draft', readiness = draft ? draftReadiness(row) : null; return `<tr class="${Number(row.id) === Number(state.selectedId) ? 'is-selected' : ''}">${selectable ? `<td><label class="sv-table-check"><input type="checkbox" data-sv-draft-select="${Number(row.id)}" ${state.selectedDraftIds.has(Number(row.id)) ? 'checked' : ''}><span class="sr-only">เลือก ${escHtml(row.TitleTh || row.CampaignCode)}</span></label></td>` : ''}<td><strong>${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</strong><small>${escHtml(row.CampaignCode)}</small></td><td>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุ')}</td><td>${readiness ? `<span class="sv-readiness-meter"><span><i style="width:${readiness.percent}%"></i></span><small>${readiness.passed}/${readiness.total} · ${safetyVoteStatusBadge(row.Status)}</small></span>` : safetyVoteStatusBadge(row.Status)}</td><td><strong>${relativeUpdated(row.UpdatedAt)}</strong><small>${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></td><td><div class="sv-row-actions">${draft ? `<button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button>` : ''}<button type="button" class="sv-button sv-button--secondary" data-sv-select="${Number(row.id)}" aria-label="เปิดรายละเอียด ${escHtml(row.TitleTh || row.CampaignCode)}">ดู</button>${draft ? `<button type="button" class="sv-button sv-button--secondary" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนา</button><button type="button" class="sv-button sv-button--danger-quiet" data-sv-void-draft="${Number(row.id)}">ยกเลิกร่าง</button>` : ''}</div></td></tr>`; }).join('')}</tbody></table></div>`;
+    return `<div class="sv-campaign-table-wrap"><table class="sv-campaign-table"><caption class="sr-only">รายการแคมเปญ Safety Vote</caption><thead><tr>${selectable ? `<th scope="col"><label class="sv-table-check"><input type="checkbox" data-sv-draft-select-all ${allSelected ? 'checked' : ''}><span class="sr-only">เลือกฉบับร่างทั้งหมดในรายการ</span></label></th>` : ''}<th scope="col">แคมเปญ</th><th scope="col">ประเภท</th><th scope="col">ความพร้อม</th><th scope="col">ปรับปรุงล่าสุด</th><th scope="col">ดำเนินการ</th></tr></thead><tbody>${rows.map(row => { const draft = String(row.Status).toLowerCase() === 'draft', readiness = draft ? draftReadiness(row) : null, badges = governanceBadges(row); return `<tr class="${Number(row.id) === Number(state.selectedId) ? 'is-selected' : ''}">${selectable ? `<td><label class="sv-table-check"><input type="checkbox" data-sv-draft-select="${Number(row.id)}" ${state.selectedDraftIds.has(Number(row.id)) ? 'checked' : ''}><span class="sr-only">เลือก ${escHtml(row.TitleTh || row.CampaignCode)}</span></label></td>` : ''}<td><strong>${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</strong><small>${escHtml(row.CampaignCode)}</small></td><td>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุ')}</td><td>${readiness ? `<span class="sv-readiness-meter"><span><i style="width:${readiness.percent}%"></i></span><small>${readiness.passed}/${readiness.total} · ${safetyVoteStatusBadge(row.Status)}${badges}</small></span>` : `${safetyVoteStatusBadge(row.Status)}${badges}`}</td><td><strong>${relativeUpdated(row.UpdatedAt)}</strong><small>${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></td><td><div class="sv-row-actions">${draft ? `<button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button>` : ''}<button type="button" class="sv-button sv-button--secondary" data-sv-select="${Number(row.id)}" aria-label="เปิดรายละเอียด ${escHtml(row.TitleTh || row.CampaignCode)}">ดู</button>${draft ? `<button type="button" class="sv-button sv-button--secondary" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนา</button><button type="button" class="sv-button sv-button--danger-quiet" data-sv-void-draft="${Number(row.id)}">ยกเลิกร่าง</button>` : ''}</div></td></tr>`; }).join('')}</tbody></table></div>`;
 }
 
 function campaignListMarkup(rows, context = 'main') {
@@ -228,9 +249,9 @@ function detailMarkup(row) {
     const draft = String(row.Status).toLowerCase() === 'draft';
     const readiness = draft ? draftReadiness(row) : null;
     const actions = draft
-        ? `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนาเฉพาะการตั้งค่า</button><button type="button" data-sv-action="open-workspace">ตั้งค่าขั้นสูง</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button><button type="button" class="is-danger" data-sv-void-draft="${Number(row.id)}">ยกเลิกร่าง</button></div></details></div>`
-        : `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-action="open-operations">ศูนย์ปฏิบัติการ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-action="open-results">ผลและการรับรอง</button><button type="button" data-sv-action="open-governance">ธรรมาภิบาล</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button></div></details></div>`;
-    return `<section class="sv-master-detail__detail" aria-labelledby="sv-detail-title"><div class="sv-detail-header"><div><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h2 id="sv-detail-title" tabindex="-1">${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</h2><p>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')} · ${escHtml(PRIVACY_LABELS[row.PrivacyMode] || 'ไม่ระบุรูปแบบความเป็นส่วนตัว')}</p><small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} โดย ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></div>${safetyVoteStatusBadge(row.Status)}</div>${draftWarning}${readiness ? `<section class="sv-detail-readiness" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อมเบื้องต้น ${readiness.percent}%</strong><span>${readiness.passed} จาก ${readiness.total} หมวด · ตรวจรายละเอียดจริงใน Wizard ก่อนเปิด</span></div><span><i style="width:${readiness.percent}%"></i></span></section>` : ''}<nav class="sv-workspace-nav" aria-label="ส่วนงานสำหรับแคมเปญประเภท ${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || '')}">${sections.map(([key, label], index) => `<button type="button" data-sv-section="${key}" ${index === 0 ? 'aria-current="page"' : ''}>${escHtml(label)}</button>`).join('')}</nav><dl class="sv-detail-summary"><div><dt>ผู้รับผิดชอบ</dt><dd>${escHtml(row.OwnerEmployeeID || 'ยังไม่ระบุ')}</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledOpenAt || row.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledCloseAt || row.CloseAt)}</dd></div><div><dt>การแสดงผล</dt><dd>${escHtml(RESULT_LABELS[row.ResultVisibility] || 'ตามการตั้งค่าแคมเปญ')}</dd></div></dl>${actions}</section>`;
+        ? `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนาเฉพาะการตั้งค่า</button><button type="button" data-sv-action="open-workspace">ตั้งค่าขั้นสูง</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`
+        : `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-action="open-operations">ศูนย์ปฏิบัติการ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-action="open-results">ผลและการรับรอง</button><button type="button" data-sv-action="open-governance">ธรรมาภิบาล</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`;
+    return `<section class="sv-master-detail__detail" aria-labelledby="sv-detail-title"><div class="sv-detail-header"><div><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h2 id="sv-detail-title" tabindex="-1">${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</h2><p>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')} · ${escHtml(PRIVACY_LABELS[row.PrivacyMode] || 'ไม่ระบุรูปแบบความเป็นส่วนตัว')}</p><small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} โดย ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></div><div>${safetyVoteStatusBadge(row.Status)}${governanceBadges(row)}</div></div>${Number(row.IsHidden)===1?`<div class="sv-readiness-warning" role="status"><strong>ผู้ใช้ทั่วไปมองไม่เห็นแคมเปญนี้</strong><span>${escHtml(row.HideReason||'ซ่อนโดยผู้ดูแลระบบ')}</span></div>`:''}${draftWarning}${readiness ? `<section class="sv-detail-readiness" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อมเบื้องต้น ${readiness.percent}%</strong><span>${readiness.passed} จาก ${readiness.total} หมวด · ตรวจรายละเอียดจริงใน Wizard ก่อนเปิด</span></div><span><i style="width:${readiness.percent}%"></i></span></section>` : ''}<nav class="sv-workspace-nav" aria-label="ส่วนงานสำหรับแคมเปญประเภท ${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || '')}">${sections.map(([key, label], index) => `<button type="button" data-sv-section="${key}" ${index === 0 ? 'aria-current="page"' : ''}>${escHtml(label)}</button>`).join('')}</nav><dl class="sv-detail-summary"><div><dt>ผู้รับผิดชอบ</dt><dd>${escHtml(row.OwnerEmployeeID || 'ยังไม่ระบุ')}</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledOpenAt || row.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledCloseAt || row.CloseAt)}</dd></div><div><dt>การแสดงผล</dt><dd>${escHtml(RESULT_LABELS[row.ResultVisibility] || 'ตามการตั้งค่าแคมเปญ')}</dd></div></dl>${actions}</section>`;
 }
 
 function campaignWorkspaceMarkup(rows, selected) {
@@ -249,7 +270,7 @@ function render() {
     if (state.loading) { container.innerHTML = loadingMarkup(); return; }
     const systemState = systemStateMarkup();
     if (systemState) { container.innerHTML = systemState; bind(); return; }
-    const rows = visibleCampaigns(), kpi = campaignMetrics(state.campaigns), selected = selectedCampaign();
+    const rows = visibleCampaigns(), kpi = campaignMetrics(state.campaigns.filter(row => Number(row.IsHidden) !== 1 && Number(row.IsTest) !== 1)), selected = selectedCampaign();
     const content = state.workspace === 'campaigns' ? campaignWorkspaceMarkup(rows, selected) : state.workspace === 'promotions' ? promotionWorkspaceMarkup() : overviewMarkup(kpi);
     container.innerHTML = `<div class="sv-ux-shell" data-sv-ux-version="2026-10-11-admin-guided-drafts-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}${adminWorkspaceNav()}${content}${campaignLauncherMarkup()}</div>`;
     container.querySelector('.sv-ux-shell')?.setAttribute('data-sv-engagement-version', '2026-10-10-safety-vote-ux-phase9a-r1');
@@ -378,6 +399,51 @@ function voidDraftCampaign(campaignId) {
     });
 }
 
+async function submitGovernanceAction(row, action, reason = '', confirmation = '') {
+    const response = await API.post(`/safety-vote/admin/campaigns/${Number(row.id)}/governance/${action}`, {
+        rowVersion: Number(row.RowVersion), reason, confirmation
+    });
+    if (action === 'purge') state.selectedId = null;
+    await load();
+    const messages = { hide: 'ซ่อนแคมเปญจากผู้ใช้แล้ว', unhide: 'แสดงแคมเปญต่อผู้ใช้แล้ว', 'mark-test': 'กำหนดเป็นแคมเปญ Test และซ่อนจากผู้ใช้แล้ว', 'unmark-test': 'ยกเลิกป้าย Test แล้ว โดยแคมเปญยังคงซ่อนอยู่จนกว่าจะสั่งแสดง', archive: 'เก็บแคมเปญถาวรแล้ว', restore: 'กู้คืนแคมเปญแล้ว โดยยังซ่อนจากผู้ใช้', void: 'Void แคมเปญแล้วและเก็บหลักฐานไว้', purge: 'Purge แคมเปญ Test แล้ว และเก็บ tombstone สำหรับ Audit ไว้' };
+    showToast(messages[action] || 'อัปเดตนโยบายแคมเปญแล้ว', 'success');
+    return response;
+}
+
+async function beginGovernanceAction(campaignId, action) {
+    const row = state.campaigns.find(item => Number(item.id) === Number(campaignId));
+    if (!row) return;
+    if (['unhide', 'unmark-test', 'restore'].includes(action)) {
+        const labels = { unhide: ['แสดงแคมเปญต่อผู้ใช้', 'เมื่อยืนยัน ผู้มีสิทธิ์จะเห็นแคมเปญนี้ตามสถานะและช่วงเวลาปัจจุบัน', 'ยืนยันแสดง'], 'unmark-test': ['ยกเลิกป้าย Test', 'รายการจะไม่ถือเป็น Test อีกต่อไป แต่ยังคงซ่อนอยู่จนกว่าคุณจะกดแสดงต่อผู้ใช้', 'ยืนยัน'], restore: ['กู้คืนจาก Archive', 'ระบบจะคืนสถานะก่อน Archive แต่ยังคงซ่อนรายการไว้เพื่อให้ตรวจสอบก่อนเผยแพร่อีกครั้ง', 'ยืนยันกู้คืน'] }[action];
+        return openSafetyVoteConfirmDialog({ title: labels[0], description: labels[1], confirmLabel: labels[2], onConfirm: () => submitGovernanceAction(row, action) });
+    }
+    let policy;
+    try { policy = (await API.get(`/safety-vote/admin/campaigns/${Number(row.id)}/governance-policy`)).data; }
+    catch (error) { showToast(error?.message || 'ยังตรวจสอบนโยบายของแคมเปญไม่ได้', 'error'); return; }
+    const key = action.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    if (!policy?.capabilities?.[key]) {
+        const usage = policy?.usage || {}, occupied = Object.entries(usage).filter(([, value]) => Number(value) > 0).map(([name, value]) => `${name} ${value}`).join(' · ');
+        showToast(occupied ? `ยังทำรายการไม่ได้ เนื่องจากมีหลักฐานคงอยู่: ${occupied}` : 'สถานะปัจจุบันไม่อนุญาตให้ทำรายการนี้', 'warning');
+        return;
+    }
+    const copy = {
+        hide: ['ซ่อนแคมเปญจากผู้ใช้', 'ผู้ใช้ทั่วไปจะค้นหา เปิด หรือส่งคำตอบในแคมเปญนี้ไม่ได้ แต่ Admin ยังดูและจัดการได้', 'เหตุผลที่ซ่อน', 'ยืนยันซ่อน'],
+        'mark-test': ['กำหนดเป็นแคมเปญ Test', 'ใช้ได้เฉพาะ Draft ที่ไม่มีข้อมูลจริง ระบบจะซ่อนจากผู้ใช้โดยอัตโนมัติ และจะไม่รับคะแนนจากหน้าผู้ใช้', 'วัตถุประสงค์การทดสอบ', 'กำหนดเป็น Test'],
+        archive: ['เก็บแคมเปญถาวร', 'ผลลัพธ์และหลักฐานทั้งหมดจะยังอยู่ สามารถกู้คืนได้ภายหลัง และผู้ใช้จะไม่เห็นรายการนี้', 'เหตุผลที่ Archive', 'ยืนยัน Archive'],
+        void: ['Void แคมเปญ', 'แคมเปญจะหยุดใช้งานและแก้ไขต่อไม่ได้ ข้อมูล คะแนน และ Audit ที่มีอยู่จะยังคงเก็บไว้', 'เหตุผลที่ Void', 'ยืนยัน Void'],
+        purge: ['Purge แคมเปญ Test ถาวร', 'อนุญาตเฉพาะ Test ที่ Void แล้ว ไม่มีข้อมูลธุรกิจและไม่มีไฟล์ การลบย้อนกลับไม่ได้ แต่ระบบจะเก็บ tombstone สำหรับ Audit', 'เหตุผลที่ต้องลบถาวร', 'ดำเนินการต่อ']
+    }[action];
+    if (!copy) return;
+    openSafetyVoteReasonDialog({ title: copy[0], description: copy[1], label: copy[2], confirmLabel: copy[3], onConfirm: async reason => {
+        if (reason.trim().length < 10) throw new Error('กรุณาระบุเหตุผลอย่างน้อย 10 ตัวอักษร');
+        if (action !== 'purge') return submitGovernanceAction(row, action, reason);
+        const confirmation = window.prompt(`พิมพ์ชื่อแคมเปญให้ตรงทุกตัวอักษรเพื่อยืนยันการลบถาวร:\n${row.TitleTh || ''}`, '');
+        if (confirmation === null) throw new Error('ยกเลิกการ Purge แล้ว');
+        if (confirmation !== String(row.TitleTh || '')) throw new Error('ชื่อยืนยันไม่ตรงกับชื่อแคมเปญ');
+        return submitGovernanceAction(row, action, reason, confirmation);
+    } });
+}
+
 function bind() {
     const container = state.container;
     container?.querySelectorAll('[data-sv-view]').forEach(button => button.addEventListener('click', () => { state.view = button.dataset.svView; state.selectedId = null; if (state.view !== 'draft') state.selectedDraftIds.clear(); render(); }));
@@ -396,6 +462,7 @@ function bind() {
     container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => handleJourneyStep(button.dataset.svJourneyStep)));
     container?.querySelectorAll('[data-sv-edit-draft]').forEach(button => button.addEventListener('click', () => openCampaignWizard(Number(button.dataset.svEditDraft))));
     container?.querySelectorAll('[data-sv-void-draft]').forEach(button => button.addEventListener('click', () => voidDraftCampaign(Number(button.dataset.svVoidDraft))));
+    container?.querySelectorAll('[data-sv-governance]').forEach(button => button.addEventListener('click', () => beginGovernanceAction(Number(button.dataset.campaignId), button.dataset.svGovernance)));
     container?.querySelectorAll('[data-sv-duplicate-campaign]').forEach(button => button.addEventListener('click', () => duplicateCampaignConfig(Number(button.dataset.svDuplicateCampaign))));
     container?.querySelectorAll('[data-sv-draft-select]').forEach(input => input.addEventListener('change', () => { const id = Number(input.dataset.svDraftSelect); if (input.checked) state.selectedDraftIds.add(id); else state.selectedDraftIds.delete(id); render(); }));
     container?.querySelector('[data-sv-draft-select-all]')?.addEventListener('change', event => { visibleCampaigns().filter(row => String(row.Status).toLowerCase() === 'draft').forEach(row => event.target.checked ? state.selectedDraftIds.add(Number(row.id)) : state.selectedDraftIds.delete(Number(row.id))); render(); });

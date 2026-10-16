@@ -45,6 +45,9 @@ function normalizeCampaign(input = {}, options = {}) {
     if (!RESULT_VISIBILITY.includes(resultVisibility)) errors.push({ field: 'resultVisibility', code: 'INVALID_ENUM' });
     if (privacyMode === 'secret_ballot' && resultVisibility === 'live') errors.push({ field: 'resultVisibility', code: 'SECRET_LIVE_RESULT_FORBIDDEN' });
     const live = liveResults.normalizeConfig(input, Math.max(2, Math.min(100, Number(input.privacyThreshold || input.PrivacyThreshold || 5))));
+    const maxParticipationAttempts = Number(input.maxParticipationAttempts ?? input.MaxParticipationAttempts ?? 1);
+    if (!Number.isInteger(maxParticipationAttempts) || maxParticipationAttempts < 1 || maxParticipationAttempts > 10) errors.push({ field: 'maxParticipationAttempts', code: 'INVALID_RANGE' });
+    if (privacyMode === 'secret_ballot' && maxParticipationAttempts !== 1) errors.push({ field: 'maxParticipationAttempts', code: 'SECRET_BALLOT_SINGLE_ATTEMPT_REQUIRED' });
     errors.push(...live.errors);
     if (live.value.enabled && campaignType !== 'popular_vote') errors.push({ field: 'liveLeaderboardEnabled', code: 'UNSUPPORTED_CAMPAIGN_TYPE' });
     if (live.value.enabled && privacyMode === 'secret_ballot') errors.push({ field: 'liveLeaderboardEnabled', code: 'SECRET_LIVE_RESULT_FORBIDDEN' });
@@ -66,6 +69,7 @@ function normalizeCampaign(input = {}, options = {}) {
             openAt: clean(input.openAt || input.OpenAt, 32) || null,
             closeAt: clean(input.closeAt || input.CloseAt, 32) || null,
             privacyThreshold: Math.max(2, Math.min(100, Number(input.privacyThreshold || input.PrivacyThreshold || 5))),
+            maxParticipationAttempts: Number.isInteger(maxParticipationAttempts) ? Math.max(1, Math.min(10, maxParticipationAttempts)) : 1,
             liveLeaderboardEnabled: live.value.enabled,
             liveLeaderboardTopN: live.value.topN,
             liveLeaderboardScoreMode: live.value.scoreMode,
