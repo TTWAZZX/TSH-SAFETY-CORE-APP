@@ -48,7 +48,7 @@ async function seed(name) {
     await db.query("CREATE TABLE Admin_RolePermissions(role VARCHAR(50),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(role,permission));CREATE TABLE Admin_UserPermissions(employee_id VARCHAR(20),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(employee_id,permission));CREATE TABLE Master_Departments(id INT PRIMARY KEY,Name VARCHAR(100),Status VARCHAR(20),CreatedAt DATETIME,is_safety_core TINYINT);CREATE TABLE Master_SafetyUnits(id INT PRIMARY KEY,name VARCHAR(100),short_code VARCHAR(30),department_id INT,sort_order INT,created_at DATETIME);CREATE TABLE Master_Positions(id INT PRIMARY KEY,Name VARCHAR(100),IsSupervisorPatrol TINYINT,PatrolPassPct DECIMAL(5,2));CREATE TABLE Employees(EmployeeID VARCHAR(20) PRIMARY KEY,EmployeeName VARCHAR(255),Department VARCHAR(100),Unit VARCHAR(100),Role VARCHAR(50),Team VARCHAR(100),Position VARCHAR(100),CompanyEmail VARCHAR(150),Password VARCHAR(255),MustChangePassword TINYINT);INSERT INTO Master_Departments VALUES(1,'Safety','active',NOW(),1),(2,'Production','active',NOW(),0);INSERT INTO Master_SafetyUnits VALUES(10,'Core','CORE',1,1,NOW()),(20,'Line 1','L1',2,1,NOW());INSERT INTO Master_Positions VALUES(100,'Officer',0,NULL),(200,'Operator',0,NULL);INSERT INTO Employees VALUES('SV-ADMIN','Admin','Safety','Core','Admin','A','Officer','admin@example.test','x',0),('SV-USER','User','Production','Line 1','User','B','Operator','user@example.test','x',0),('SV-USER2','User Two','Production','Line 1','User','B','Operator','user2@example.test','x',0);");
     for (let index = 1; index <= 5; index += 1) {
         const n = String(index).padStart(2, '0');
-        await db.query('INSERT INTO Employees VALUES(?,?,?,?,?,?,?,?,?,?)', [`SV-L${n}`, `Load ${n}`, 'Production', 'Line 1', 'User', 'B', 'Operator', `load${n}@example.test`, 'x', 0]);
+        await db.query('INSERT INTO Employees VALUES(?,?,?,?,?,?,?,?,?,?)', [`SV-L${n}`, `Load ${n}`, 'Production', 'Line 1', 'User', 'B', index === 5 ? 'Unmapped Position' : 'Operator', `load${n}@example.test`, index === 5 ? null : 'x', index === 5 ? 1 : 0]);
     }
     const migrations = ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261010_safety_vote_ux_phase9a_engagement.sql', '20261010_safety_vote_ux_phase9b_planning_content_communication.sql', '20261010_safety_vote_ux_phase9c_engagement_analytics.sql', '20261015_safety_vote_live_results.sql', '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql'];
     for (const migration of migrations) await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', migration), 'utf8'));
@@ -87,6 +87,10 @@ async function lifecycle(label, base) {
     assert.strictEqual(ready.status, 200, `${label} readiness: ${JSON.stringify(ready.data)}`);
     assert.strictEqual(ready.data.data.ready, true, `${label} authoritative readiness`);
     assert.strictEqual(ready.data.data.blockers.length, 0);
+    const accountReadiness = ready.data.data.checks.find(check => check.code === 'ELIGIBLE_ACCOUNTS_READY');
+    assert.strictEqual(accountReadiness?.ok, true, `${label} onboarding status must not block opening`);
+    assert.strictEqual(accountReadiness?.advisory, true, `${label} unready accounts remain visible as an advisory`);
+    assert.strictEqual(Number(ready.data.data.snapshot.warningCount), 1, `${label} master-data warnings must remain advisory`);
 
     const scheduled = await call(base, `/admin/campaigns/${campaignId}/lifecycle/schedule`, { method: 'POST', body: {} });
     assert.strictEqual(scheduled.status, 200, `${label} schedule: ${JSON.stringify(scheduled.data)}`);
@@ -97,7 +101,10 @@ async function lifecycle(label, base) {
     const db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: names[label] });
     await db.query('UPDATE SafetyVote_Campaigns SET ScheduledOpenAt=DATE_SUB(NOW(),INTERVAL 1 MINUTE),ScheduledCloseAt=DATE_ADD(NOW(),INTERVAL 1 HOUR) WHERE id=?', [campaignId]);
     await db.query('UPDATE SafetyVote_CampaignVersions SET OpenAt=DATE_SUB(NOW(),INTERVAL 1 MINUTE),CloseAt=DATE_ADD(NOW(),INTERVAL 1 HOUR) WHERE id=?', [created.data.data.CurrentVersionID]);
-    await db.query("UPDATE Employees SET Team='DRIFTED' WHERE EmployeeID='SV-L05'");
+    await db.query("UPDATE Employees SET Password='x',MustChangePassword=0 WHERE EmployeeID='SV-L05'");
+    const onboardingCompleted = await call(base, `/admin/campaigns/${campaignId}/readiness`);
+    assert.strictEqual(onboardingCompleted.data.data.ready, true, `${label} account onboarding after freeze must not create audience drift`);
+    await db.query("UPDATE Employees SET Team='DRIFTED' WHERE EmployeeID='SV-L04'");
     const driftedReadiness = await call(base, `/admin/campaigns/${campaignId}/readiness`);
     assert.strictEqual(driftedReadiness.status, 200, `${label} drifted readiness response`);
     assert.strictEqual(driftedReadiness.data.data.ready, false, `${label} master-data drift invalidates readiness: ${JSON.stringify(driftedReadiness.data)}`);
@@ -108,7 +115,7 @@ async function lifecycle(label, base) {
     assert(blockedCampaign?.blockers?.some(code => ['ELIGIBILITY_NOT_DRIFTED', 'ELIGIBILITY_ROWS_UNCHANGED'].includes(code)), `${label} schedule processor exposes audience drift blocker`);
     const [[stillScheduled]] = await db.query('SELECT Status FROM SafetyVote_Campaigns WHERE id=?', [campaignId]);
     assert.strictEqual(stillScheduled.Status, 'Scheduled', `${label} campaign remains scheduled while readiness drift exists`);
-    await db.query("UPDATE Employees SET Team='B' WHERE EmployeeID='SV-L05'");
+    await db.query("UPDATE Employees SET Team='B' WHERE EmployeeID='SV-L04'");
     const processed = await call(base, '/admin/operations/process-due', { method: 'POST', body: {} });
     assert.strictEqual(processed.status, 200, `${label} schedule processor: ${JSON.stringify(processed.data)}`);
     assert(processed.data.data.changed.some(row => Number(row.id) === campaignId && row.status === 'Open'), `${label} scheduled campaign opened`);

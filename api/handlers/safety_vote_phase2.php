@@ -14,6 +14,8 @@ function sv2_readiness(array$c):array{
     $parsed=sv_rules($raw);$eligible=[];$currentRuleHash='';$currentRowsHash='';
     if($parsed['ok']&&$parsed['rules']){$eligible=sv_evaluate($parsed['rules'],sv_master_projection()['employees']);$currentRuleHash=sv_hash($parsed['rules']);$currentRowsHash=sv2_rows_hash($eligible);}
     $snapshot=db_row("SELECT id,SnapshotNo,RuleHash,RowsHash,EligibleCount,AccountReadyCount,WarningCount,FrozenAt FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen' ORDER BY SnapshotNo DESC LIMIT 1",[$version]);
+    $frozenRows=$snapshot?db_rows('SELECT EmployeeID employeeId,DepartmentIDSnapshot departmentId,SafetyUnitIDSnapshot safetyUnitId,PositionIDSnapshot positionId,RoleSnapshot role,TeamSnapshot team FROM SafetyVote_EligibleVoters WHERE SnapshotID=? ORDER BY EmployeeID',[$snapshot['id']]):[];
+    $audienceUnchanged=(bool)($snapshot&&hash_equals(sv2_eligibility_rows_hash($frozenRows),sv2_eligibility_rows_hash($eligible)));
     $selection=['single_choice','multiple_choice','yes_no_abstain','ranking','score_allocation','token_allocation','matrix_single','matrix_multiple'];$optionsComplete=true;
     foreach($questions as$q)if(in_array($q['questionType'],$selection,true)&&count($q['options'])<2){$optionsComplete=false;break;}
     $openAt=$c['OpenAt']?:($c['ScheduledOpenAt']??null);$closeAt=$c['CloseAt']?:($c['ScheduledCloseAt']??null);$scheduleValid=$openAt&&$closeAt&&strtotime((string)$closeAt)>strtotime((string)$openAt);
@@ -23,9 +25,9 @@ function sv2_readiness(array$c):array{
         ['code'=>'ELIGIBILITY_RULES_VALID','ok'=>$parsed['ok']&&count($parsed['rules'])>0,'detail'=>count($parsed['rules']).' active rule(s)'],
         ['code'=>'ELIGIBILITY_FROZEN','ok'=>(bool)$snapshot,'detail'=>$snapshot?'Snapshot '.(int)$snapshot['SnapshotNo'].' frozen':'No frozen eligibility snapshot'],
         ['code'=>'ELIGIBILITY_RULES_UNCHANGED','ok'=>(bool)($snapshot&&$currentRuleHash!==''&&hash_equals((string)$snapshot['RuleHash'],$currentRuleHash)),'detail'=>'Frozen rule hash must match current rules'],
-        ['code'=>'ELIGIBILITY_ROWS_UNCHANGED','ok'=>(bool)($snapshot&&$currentRowsHash!==''&&hash_equals((string)$snapshot['RowsHash'],$currentRowsHash)),'detail'=>'Frozen voter rows must match current master data'],
+        ['code'=>'ELIGIBILITY_ROWS_UNCHANGED','ok'=>(bool)($snapshot&&$audienceUnchanged),'detail'=>'Frozen voter identity and eligibility attributes must match current master data'],
         ['code'=>'ELIGIBLE_POPULATION','ok'=>(bool)($snapshot&&(int)$snapshot['EligibleCount']>0),'detail'=>$snapshot?(int)$snapshot['EligibleCount'].' eligible voter(s)':'Eligibility not frozen'],
-        ['code'=>'ELIGIBLE_ACCOUNTS_READY','ok'=>(bool)($snapshot&&(int)$snapshot['AccountReadyCount']===(int)$snapshot['EligibleCount']&&(int)$snapshot['WarningCount']===0),'detail'=>$snapshot?((int)$snapshot['AccountReadyCount'].'/'.(int)$snapshot['EligibleCount'].' account(s) ready; '.(int)$snapshot['WarningCount'].' warning(s)'):'Account readiness not frozen'],
+        ['code'=>'ELIGIBLE_ACCOUNTS_READY','ok'=>true,'advisory'=>(bool)($snapshot&&((int)$snapshot['AccountReadyCount']!==(int)$snapshot['EligibleCount']||(int)$snapshot['WarningCount']>0)),'detail'=>$snapshot?((int)$snapshot['AccountReadyCount'].'/'.(int)$snapshot['EligibleCount'].' account(s) ready; '.(int)$snapshot['WarningCount'].' warning(s). Account onboarding is informational and does not block campaign opening.'):'Account readiness is informational and does not block campaign opening'],
         ['code'=>'SCHEDULE_VALID','ok'=>(bool)$scheduleValid,'detail'=>$scheduleValid?'Open/close order is valid':'Open and close times are required in the correct order'],
         ['code'=>'PARTICIPANT_VISIBILITY','ok'=>(int)($c['IsHidden']??0)===0&&(int)($c['IsTest']??0)===0,'detail'=>((int)($c['IsHidden']??0)||(int)($c['IsTest']??0))?'Hidden/test campaigns cannot accept ballots':'Campaign is participant-visible']
     ];$blockers=array_values(array_filter($checks,fn($x)=>!$x['ok']));
