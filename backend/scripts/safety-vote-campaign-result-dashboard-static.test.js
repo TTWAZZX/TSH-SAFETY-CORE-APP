@@ -32,7 +32,7 @@ const checks = [
   [phpRoute.includes("'UTF-16BE'"), 'PHP PDF Unicode encoding missing'],
   [css.includes('.svr-panel--dashboard'), 'Dashboard styles missing'],
   [css.includes('.svr-kpi-grid'), 'Responsive KPI grid missing'],
-  [index.includes('20261016-safety-vote-preview-parity-r1'), 'Current runtime cache key missing'],
+  [index.includes('20261019-safety-vote-lifecycle-r1'), 'Current runtime cache key missing'],
   [!page.includes('SafetyVote_ResultRows'), 'Client must not query result tables directly']
 ];
 checks.forEach(([ok, message]) => assert(ok, message));

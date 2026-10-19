@@ -33,8 +33,8 @@ assert.match(phpLib, /SHE-%03d-%04d/);
 assert.match(wizard, /ระบบสร้างรหัสรูปแบบ SHE-001-YYYY อัตโนมัติ/);
 assert.match(wizard, /readonly aria-describedby="svw-campaign-code-help"/);
 assert.match(wizard, /PRIVACY_DETAILS/);
-assert.match(wizard, /ป้องกันการตอบซ้ำ/);
-assert.match(wizard, /ข้อมูลลับไม่เท่ากับไม่ระบุตัวตน/);
+assert.match(wizard, /ควบคุมจำนวนครั้ง/);
+assert.match(wizard, /ยังเชื่อมตัวตนกับคำตอบ/);
 assert.match(wizard, /หลังตรึงรายชื่อหรือเปิดรับคำตอบแล้ว/);
 assert.doesNotMatch(model, /กรุณาระบุรหัสแคมเปญ/);
 

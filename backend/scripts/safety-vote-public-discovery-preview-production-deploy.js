@@ -11,23 +11,30 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 const root = path.resolve(__dirname, '..', '..');
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = '5603d7eae47dcf670fc1afcbaa608ab1458b07bb';
-const confirmation = 'DEPLOY_SAFETY_VOTE_PUBLIC_DISCOVERY_AND_PREVIEW_PARITY';
+const productionBaseline = 'a4e2c73';
+const confirmation = 'DEPLOY_SAFETY_VOTE_LIFECYCLE_INTEGRITY_RUNTIME';
 const runtimePaths = [
+    'api/handlers/safety_vote.php',
+    'api/handlers/safety_vote_phase10_4.php',
     'api/handlers/safety_vote_phase2.php',
-    'api/handlers/safety_vote_phase3.php',
+    'api/handlers/safety_vote_phase4.php',
+    'api/handlers/safety_vote_phase5.php',
+    'api/handlers/safety_vote_phase6.php',
+    'api/handlers/safety_vote_planning.php',
+    'api/lib/safety_vote_phase2.php',
+    'api/lib/safety_vote_phase5.php',
+    'api/lib/safety_vote_planning.php',
     'index.html',
     'public/js/main.js',
-    'public/js/pages/admin.js',
+    'public/js/pages/admin-safety-vote-operations.js',
+    'public/js/pages/admin-safety-vote-results.js',
     'public/js/pages/admin-safety-vote-ux1.js',
+    'public/js/pages/admin.js',
     'public/js/pages/safety-vote-campaign-wizard.js',
-    'public/js/pages/safety-vote-page-ux1.js',
-    'public/js/pages/safety-vote-participation-model.mjs',
-    'public/js/pages/safety-vote-ux-components.js',
 ];
 const publicPaths = runtimePaths.filter(relative => relative === 'index.html' || relative.startsWith('public/'));
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-public-discovery-preview-deploy-${stamp}`);
+const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-lifecycle-integrity-deploy-${stamp}`);
 const candidateRoot = path.join(evidenceRoot, 'candidate');
 const rollbackRoot = path.join(evidenceRoot, 'rollback-package');
 const bearer = String(process.env.SAFETY_VOTE_PHASE95_PROD_BEARER_TOKEN || '').trim();
@@ -106,12 +113,14 @@ function prepareCandidateAndRollback(commit, tree) {
         restoreFiles.push({ path: relative, bytes: before.bytes, sha256: before.sha256, rollbackPath });
         remoteBefore.push({ path: relative, bytes: before.bytes, sha256: before.sha256, normalizedSha256: before.normalizedSha256, doubleDownloadMatched: true });
     }
-    assert(fs.readFileSync(under(candidateRoot, 'index.html'), 'utf8').includes('20261016-safety-vote-preview-parity-r1'), 'Preview parity cache marker missing');
-    const wizard = fs.readFileSync(under(candidateRoot, 'public/js/pages/safety-vote-campaign-wizard.js'), 'utf8');
-    assert(wizard.includes('data-svw-preview-submitted') && wizard.includes('data-svw-user-view'), 'Preview parity behavior missing');
-    const participant = fs.readFileSync(under(candidateRoot, 'public/js/pages/safety-vote-page-ux1.js'), 'utf8');
-    assert(participant.includes('public_listing_preview') && participant.includes("view: 'all'"), 'Public discovery behavior missing');
-    const manifest = { contract: '2026-10-16-safety-vote-public-discovery-preview-r1', productionBaseline, candidate: { commit, tree }, restoreFiles: restoreFiles.map(({ rollbackPath: ignored, ...file }) => file), removeOnRollback: [], schemaChanged: false };
+    assert(fs.readFileSync(under(candidateRoot, 'index.html'), 'utf8').includes('20261019-safety-vote-lifecycle-r1'), 'Lifecycle cache marker missing');
+    const adminWorkspace = fs.readFileSync(under(candidateRoot, 'public/js/pages/admin-safety-vote-ux1.js'), 'utf8');
+    assert(adminWorkspace.includes('duplicateCampaignConfig') && adminWorkspace.includes('/duplicate'), 'Atomic duplicate workflow missing');
+    const operations = fs.readFileSync(under(candidateRoot, 'public/js/pages/admin-safety-vote-operations.js'), 'utf8');
+    assert(operations.includes('close') && operations.includes('lifecycle'), 'Admin lifecycle controls missing');
+    const results = fs.readFileSync(under(candidateRoot, 'public/js/pages/admin-safety-vote-results.js'), 'utf8');
+    assert(results.includes('certif') && results.includes('publish'), 'Result certification workflow missing');
+    const manifest = { contract: '2026-10-19-safety-vote-lifecycle-integrity-production-r1', productionBaseline, candidate: { commit, tree }, restoreFiles: restoreFiles.map(({ rollbackPath: ignored, ...file }) => file), removeOnRollback: [], schemaChanged: false };
     const manifestPath = path.join(rollbackRoot, 'rollback-manifest.json');
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     return { candidate, restoreFiles, remoteBefore, manifestSha256: fileSha(manifestPath) };
@@ -187,7 +196,7 @@ async function main() {
         const https = await httpsVerify(preparedRelease.candidate, commit);
         const smokeAfter = await authenticatedSmoke(auth);
         const result = {
-            contract: '2026-10-16-safety-vote-public-discovery-preview-r1', generatedAt: new Date().toISOString(), decision: 'PASS_SAFETY_VOTE_PUBLIC_DISCOVERY_PREVIEW_PRODUCTION_DEPLOYMENT',
+            contract: '2026-10-19-safety-vote-lifecycle-integrity-production-r1', generatedAt: new Date().toISOString(), decision: 'PASS_SAFETY_VOTE_LIFECYCLE_INTEGRITY_PRODUCTION_DEPLOYMENT',
             candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length }, remoteBefore: preparedRelease.remoteBefore,
             deployment: { uploaded: runtimePaths, doubleDownloadVerified: deployed.length, httpsVerified: https.length }, smokeBefore, smokeAfter,
             rollbackPackage: { manifestSha256: preparedRelease.manifestSha256, restoreFiles: preparedRelease.restoreFiles.length, removeOnRollback: 0, verified: true },
@@ -209,4 +218,4 @@ async function main() {
     }
 }
 
-main().catch(error => { process.stderr.write(`Safety Vote public discovery/preview deployment failed: ${error.message}\n`); process.exitCode = 1; });
+main().catch(error => { process.stderr.write(`Safety Vote lifecycle integrity deployment failed: ${error.message}\n`); process.exitCode = 1; });

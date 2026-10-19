@@ -22,7 +22,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
 
     check(components.includes('__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true'), 'Safety Vote UX must remain strict opt-in');
     check(center.includes('renderLegacySafetyVoteFoundation(container)'), 'flag-off rollback must retain the legacy Admin workspace');
-    check(center.includes("action: 'open-operations'"), 'Admin Campaign Center must expose the Operations workspace');
+    check(center.includes('data-sv-action="open-operations"'), 'Admin Campaign Center must expose the Operations workspace');
     check(workspace.includes('/operations`'), 'existing Operations API is not used');
     check(workspace.includes('/analytics/organization`'), 'existing organization analytics API is not used');
     check(workspace.includes('/jury/progress`'), 'existing jury progress API is not used');
@@ -51,7 +51,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(workspace.includes('openSafetyVoteConfirmDialog'), 'mutating operations need accessible confirmation');
     check(workspace.includes('if (state.busy) return'), 'duplicate action protection is missing');
     check(workspace.includes('SAFETY_VOTE_CERTIFY') && workspace.includes('exact result hash'), 'certification ownership wording is missing');
-    check(/safety-vote-(?:ux(?:5|6|7|8)|preview-gallery)-r1/.test(main) && /safety-vote-(?:ux(?:5|6|7|8)|preview-gallery)-r1/.test(html), 'Phase 5-or-later cache chain is incomplete');
+    check(/safety-vote-(?:ux(?:5|6|7|8)|preview-gallery|atomic-duplicate)-r1/.test(main) && /safety-vote-(?:ux(?:5|6|7|8)|preview-gallery|atomic-duplicate)-r1/.test(html), 'Phase 5-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 5'), 'Phase 5 scoped CSS marker is missing');
     check(css.includes('.svo-action-bar') && css.includes('env(safe-area-inset-bottom)'), 'responsive sticky action bar lacks safe-area handling');
     check(css.includes('.svo-shell button') && css.includes('min-height: 44px'), '44 px touch targets are not enforced');

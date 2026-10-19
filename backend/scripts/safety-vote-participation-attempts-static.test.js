@@ -33,6 +33,8 @@ const nodeRoute = read('backend/routes/safety-vote-phase3.js');
 const phpRoute = read('api/handlers/safety_vote_phase3.php');
 const nodeList = read('backend/routes/safety-vote-phase2.js');
 const phpList = read('api/handlers/safety_vote_phase2.php');
+const nodeCampaign = read('backend/routes/safety-vote.js');
+const phpCampaign = read('api/handlers/safety_vote.php');
 const wizard = read('public/js/pages/safety-vote-campaign-wizard.js');
 const user = read('public/js/pages/safety-vote-page-ux1.js');
 const migration = read('backend/migrations/20261016_safety_vote_participation_attempts.sql');
@@ -47,7 +49,8 @@ for (const route of [nodeRoute, phpRoute]) {
 for (const list of [nodeList, phpList]) {
     ok(list.includes('AttemptCount') && list.includes('MaxParticipationAttempts'), 'campaign list exposes attempt status');
 }
-ok(wizard.includes('maxParticipationAttempts') && wizard.includes('/participation-policy'), 'wizard saves the attempt policy');
+ok(wizard.includes('maxParticipationAttempts') && !wizard.includes('/participation-policy`'), 'wizard includes attempt policy in the atomic campaign save');
+for (const route of [nodeCampaign, phpCampaign]) ok(route.includes('MaxParticipationAttempts') && route.includes('maxParticipationAttempts'), 'core campaign create/update persists attempt policy atomically');
 ok(user.includes('ทำแล้ว ${Math.min(attemptCount, maxAttempts)}/${maxAttempts} ครั้ง'), 'campaign card shows completed attempts');
 ok(user.includes('คำตอบที่คุณส่ง') && user.includes('new-attempt'), 'post-submit history and next-attempt action are present');
 ok(user.includes('ไม่ระบุตัวตนหรือบัตรลงคะแนนลับ'), 'privacy-safe receipt-only explanation is present');

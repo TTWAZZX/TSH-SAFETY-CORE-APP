@@ -12,9 +12,9 @@ import {
 } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9a-r1';
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
 import { CORE_TEMPLATES } from './safety-vote-wizard-model.mjs?v=20261015-safety-vote-live-results-r1';
-import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261016-safety-vote-preview-parity-r1';
+import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261019-safety-vote-atomic-duplicate-r1';
 import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261016-safety-vote-empty-threshold-live-r1';
-import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261016-safety-vote-official-reports-r1';
+import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261019-safety-vote-lifecycle-r1';
 import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261015-safety-vote-thai-time-r1';
 import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261015-safety-vote-thai-time-r1';
 import { renderSafetyVoteReviewWorkspace } from './admin-safety-vote-review.js?v=20261015-safety-vote-thai-time-r1';
@@ -73,6 +73,7 @@ const state = {
     templates: [],
     planningUnavailable: false,
     campaignLauncherOpen: false,
+    capabilities: { duplicateCampaign: false },
     selectedDraftIds: new Set(),
     workspace: 'overview'
 };
@@ -212,6 +213,12 @@ function selectedCampaign() {
     return state.campaigns.find(row => Number(row.id) === Number(state.selectedId)) || null;
 }
 
+function duplicateCampaignButton(campaignId, label = 'ทำสำเนา') {
+    const allowed = Boolean(state.capabilities?.duplicateCampaign);
+    if (!allowed) return '';
+    return `<button type="button" class="sv-button sv-button--secondary" data-sv-duplicate-campaign="${Number(campaignId)}">${escHtml(label)}</button>`;
+}
+
 function loadingMarkup() {
     return `<div class="sv-ux-shell" aria-busy="true" aria-live="polite"><span class="sr-only">กำลังโหลดรายการแคมเปญ</span><div class="sv-skeleton sv-skeleton--hero"></div><div class="sv-kpi-grid">${Array.from({ length: 4 }, () => '<div class="sv-skeleton sv-skeleton--kpi"></div>').join('')}</div><div class="sv-skeleton sv-skeleton--content"></div></div>`;
 }
@@ -228,13 +235,13 @@ function campaignCard(row) {
     const selected = Number(row.id) === Number(state.selectedId);
     const draft = String(row.Status).toLowerCase() === 'draft';
     const readiness = draft ? draftReadiness(row) : null;
-    return `<article class="sv-campaign-card ${selected ? 'is-selected' : ''}">${draft && state.view === 'draft' ? `<label class="sv-draft-selector"><input type="checkbox" data-sv-draft-select="${Number(row.id)}" ${state.selectedDraftIds.has(Number(row.id)) ? 'checked' : ''}><span>เลือกฉบับร่างนี้</span></label>` : ''}<button type="button" class="sv-campaign-card__select" data-sv-select="${Number(row.id)}" aria-pressed="${selected}"><span class="sv-campaign-card__top">${safetyVoteStatusBadge(row.Status)}${governanceBadges(row)}<span class="sv-campaign-code">${escHtml(row.CampaignCode)}</span></span><strong>${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</strong><span>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')}</span>${readiness ? `<span class="sv-readiness-meter"><span><i style="width:${readiness.percent}%"></i></span><small>ความพร้อมเบื้องต้น ${readiness.passed}/${readiness.total}</small></span>` : ''}<small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} · ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></button>${draft ? `<div class="sv-campaign-card__actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><button type="button" class="sv-button sv-button--secondary" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนา</button></div>` : ''}</article>`;
+    return `<article class="sv-campaign-card ${selected ? 'is-selected' : ''}">${draft && state.view === 'draft' ? `<label class="sv-draft-selector"><input type="checkbox" data-sv-draft-select="${Number(row.id)}" ${state.selectedDraftIds.has(Number(row.id)) ? 'checked' : ''}><span>เลือกฉบับร่างนี้</span></label>` : ''}<button type="button" class="sv-campaign-card__select" data-sv-select="${Number(row.id)}" aria-pressed="${selected}"><span class="sv-campaign-card__top">${safetyVoteStatusBadge(row.Status)}${governanceBadges(row)}<span class="sv-campaign-code">${escHtml(row.CampaignCode)}</span></span><strong>${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</strong><span>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')}</span>${readiness ? `<span class="sv-readiness-meter"><span><i style="width:${readiness.percent}%"></i></span><small>ความพร้อมเบื้องต้น ${readiness.passed}/${readiness.total}</small></span>` : ''}<small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} · ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></button>${draft ? `<div class="sv-campaign-card__actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button>${duplicateCampaignButton(row.id)}</div>` : ''}</article>`;
 }
 
 function campaignTable(rows) {
     const selectable = state.view === 'draft' && rows.some(row => String(row.Status).toLowerCase() === 'draft');
     const allSelected = selectable && rows.filter(row => String(row.Status).toLowerCase() === 'draft').every(row => state.selectedDraftIds.has(Number(row.id)));
-    return `<div class="sv-campaign-table-wrap"><table class="sv-campaign-table"><caption class="sr-only">รายการแคมเปญ Safety Vote</caption><thead><tr>${selectable ? `<th scope="col"><label class="sv-table-check"><input type="checkbox" data-sv-draft-select-all ${allSelected ? 'checked' : ''}><span class="sr-only">เลือกฉบับร่างทั้งหมดในรายการ</span></label></th>` : ''}<th scope="col">แคมเปญ</th><th scope="col">ประเภท</th><th scope="col">ความพร้อม</th><th scope="col">ปรับปรุงล่าสุด</th><th scope="col">ดำเนินการ</th></tr></thead><tbody>${rows.map(row => { const draft = String(row.Status).toLowerCase() === 'draft', readiness = draft ? draftReadiness(row) : null, badges = governanceBadges(row); return `<tr class="${Number(row.id) === Number(state.selectedId) ? 'is-selected' : ''}">${selectable ? `<td><label class="sv-table-check"><input type="checkbox" data-sv-draft-select="${Number(row.id)}" ${state.selectedDraftIds.has(Number(row.id)) ? 'checked' : ''}><span class="sr-only">เลือก ${escHtml(row.TitleTh || row.CampaignCode)}</span></label></td>` : ''}<td><strong>${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</strong><small>${escHtml(row.CampaignCode)}</small></td><td>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุ')}</td><td>${readiness ? `<span class="sv-readiness-meter"><span><i style="width:${readiness.percent}%"></i></span><small>${readiness.passed}/${readiness.total} · ${safetyVoteStatusBadge(row.Status)}${badges}</small></span>` : `${safetyVoteStatusBadge(row.Status)}${badges}`}</td><td><strong>${relativeUpdated(row.UpdatedAt)}</strong><small>${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></td><td><div class="sv-row-actions">${draft ? `<button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button>` : ''}<button type="button" class="sv-button sv-button--secondary" data-sv-select="${Number(row.id)}" aria-label="เปิดรายละเอียด ${escHtml(row.TitleTh || row.CampaignCode)}">ดู</button>${draft ? `<button type="button" class="sv-button sv-button--secondary" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนา</button><button type="button" class="sv-button sv-button--danger-quiet" data-sv-void-draft="${Number(row.id)}">ยกเลิกร่าง</button>` : ''}</div></td></tr>`; }).join('')}</tbody></table></div>`;
+    return `<div class="sv-campaign-table-wrap"><table class="sv-campaign-table"><caption class="sr-only">รายการแคมเปญ Safety Vote</caption><thead><tr>${selectable ? `<th scope="col"><label class="sv-table-check"><input type="checkbox" data-sv-draft-select-all ${allSelected ? 'checked' : ''}><span class="sr-only">เลือกฉบับร่างทั้งหมดในรายการ</span></label></th>` : ''}<th scope="col">แคมเปญ</th><th scope="col">ประเภท</th><th scope="col">ความพร้อม</th><th scope="col">ปรับปรุงล่าสุด</th><th scope="col">ดำเนินการ</th></tr></thead><tbody>${rows.map(row => { const draft = String(row.Status).toLowerCase() === 'draft', readiness = draft ? draftReadiness(row) : null, badges = governanceBadges(row); return `<tr class="${Number(row.id) === Number(state.selectedId) ? 'is-selected' : ''}">${selectable ? `<td><label class="sv-table-check"><input type="checkbox" data-sv-draft-select="${Number(row.id)}" ${state.selectedDraftIds.has(Number(row.id)) ? 'checked' : ''}><span class="sr-only">เลือก ${escHtml(row.TitleTh || row.CampaignCode)}</span></label></td>` : ''}<td><strong>${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</strong><small>${escHtml(row.CampaignCode)}</small></td><td>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุ')}</td><td>${readiness ? `<span class="sv-readiness-meter"><span><i style="width:${readiness.percent}%"></i></span><small>${readiness.passed}/${readiness.total} · ${safetyVoteStatusBadge(row.Status)}${badges}</small></span>` : `${safetyVoteStatusBadge(row.Status)}${badges}`}</td><td><strong>${relativeUpdated(row.UpdatedAt)}</strong><small>${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></td><td><div class="sv-row-actions">${draft ? `<button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button>` : ''}<button type="button" class="sv-button sv-button--secondary" data-sv-select="${Number(row.id)}" aria-label="เปิดรายละเอียด ${escHtml(row.TitleTh || row.CampaignCode)}">ดู</button>${draft ? `${duplicateCampaignButton(row.id)}<button type="button" class="sv-button sv-button--danger-quiet" data-sv-void-draft="${Number(row.id)}">ยกเลิกร่าง</button>` : ''}</div></td></tr>`; }).join('')}</tbody></table></div>`;
 }
 
 function campaignListMarkup(rows, context = 'main') {
@@ -249,7 +256,7 @@ function detailMarkup(row) {
     const draft = String(row.Status).toLowerCase() === 'draft';
     const readiness = draft ? draftReadiness(row) : null;
     const actions = draft
-        ? `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-duplicate-campaign="${Number(row.id)}">ทำสำเนาเฉพาะการตั้งค่า</button><button type="button" data-sv-action="open-workspace">ตั้งค่าขั้นสูง</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`
+        ? `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div>${duplicateCampaignButton(row.id, 'ทำสำเนาการตั้งค่าและเนื้อหา')}<button type="button" data-sv-action="open-workspace">ตั้งค่าขั้นสูง</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`
         : `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-action="open-operations">ศูนย์ปฏิบัติการ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-action="open-results">ผลและการรับรอง</button><button type="button" data-sv-action="open-governance">ธรรมาภิบาล</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`;
     return `<section class="sv-master-detail__detail" aria-labelledby="sv-detail-title"><div class="sv-detail-header"><div><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h2 id="sv-detail-title" tabindex="-1">${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</h2><p>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')} · ${escHtml(PRIVACY_LABELS[row.PrivacyMode] || 'ไม่ระบุรูปแบบความเป็นส่วนตัว')}</p><small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} โดย ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></div><div>${safetyVoteStatusBadge(row.Status)}${governanceBadges(row)}</div></div>${Number(row.IsHidden)===1?`<div class="sv-readiness-warning" role="status"><strong>ผู้ใช้ทั่วไปมองไม่เห็นแคมเปญนี้</strong><span>${escHtml(row.HideReason||'ซ่อนโดยผู้ดูแลระบบ')}</span></div>`:''}${draftWarning}${readiness ? `<section class="sv-detail-readiness" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อมเบื้องต้น ${readiness.percent}%</strong><span>${readiness.passed} จาก ${readiness.total} หมวด · ตรวจรายละเอียดจริงใน Wizard ก่อนเปิด</span></div><span><i style="width:${readiness.percent}%"></i></span></section>` : ''}<nav class="sv-workspace-nav" aria-label="ส่วนงานสำหรับแคมเปญประเภท ${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || '')}">${sections.map(([key, label], index) => `<button type="button" data-sv-section="${key}" ${index === 0 ? 'aria-current="page"' : ''}>${escHtml(label)}</button>`).join('')}</nav><dl class="sv-detail-summary"><div><dt>ผู้รับผิดชอบ</dt><dd>${escHtml(row.OwnerEmployeeID || 'ยังไม่ระบุ')}</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledOpenAt || row.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledCloseAt || row.CloseAt)}</dd></div><div><dt>การแสดงผล</dt><dd>${escHtml(RESULT_LABELS[row.ResultVisibility] || 'ตามการตั้งค่าแคมเปญ')}</dd></div></dl>${actions}</section>`;
 }
@@ -328,10 +335,24 @@ async function openReusableTemplate(templateId) {
 async function duplicateCampaignConfig(campaignId) {
     const row = state.campaigns.find(item => Number(item.id) === Number(campaignId));
     if (!row) return;
+    const buttons = [...(state.container?.querySelectorAll(`[data-sv-duplicate-campaign="${Number(campaignId)}"]`) || [])];
+    buttons.forEach(button => { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
     try {
-        const response = await API.get(`/safety-vote/admin/planning/campaigns/${Number(campaignId)}/config-copy`);
-        openCampaignWizard(null, { initialConfig: response.data?.config, sourceLabel: `สำเนา ${row.CampaignCode}` });
-    } catch (error) { showToast(error?.message || 'คัดลอกการตั้งค่าไม่สำเร็จ', 'error'); }
+        const created = await API.post(`/safety-vote/admin/campaigns/${Number(campaignId)}/duplicate`, {});
+        const newCampaignId = Number(created.data?.id || 0);
+        if (!newCampaignId) throw new Error('ระบบไม่ได้ส่งรหัสแคมเปญสำเนากลับมา');
+
+        state.workspace = 'campaigns';
+        state.view = 'draft';
+        state.selectedId = newCampaignId;
+        state.selectedDraftIds.clear();
+        await load();
+        const copied = state.campaigns.find(item => Number(item.id) === newCampaignId);
+        showToast(`สร้างสำเนา ${copied?.CampaignCode || ''} เป็นฉบับร่างครบถ้วนแล้ว`, 'success');
+    } catch (error) {
+        buttons.forEach(button => { button.disabled = false; button.removeAttribute('aria-busy'); });
+        showToast(error?.message || 'สร้างสำเนาแคมเปญไม่สำเร็จ', 'error');
+    }
 }
 
 function bulkVoidDrafts() {
@@ -641,6 +662,8 @@ async function load() {
         if (!state.health?.ready || !state.health?.moduleEnabled) { state.campaigns = []; return; }
         const campaigns = await API.get('/safety-vote/admin/campaigns', { suppressErrorLog: true });
         state.campaigns = campaigns.data?.rows || [];
+        try { const access = await API.get('/safety-vote/admin/permissions', { suppressErrorLog: true }); state.capabilities = { duplicateCampaign: Boolean(access.data?.capabilities?.duplicateCampaign) }; }
+        catch (_) { state.capabilities = { duplicateCampaign: false }; }
         await enrichOpenCampaigns(state.campaigns);
         await loadEngagement();
         if (state.selectedId && !state.campaigns.some(row => Number(row.id) === Number(state.selectedId))) state.selectedId = null;

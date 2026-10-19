@@ -60,13 +60,15 @@ function dashboardPanel(snapshot) {
 }
 
 function certifierAssignment(secret) {
-    if (!secret || String(state.campaign?.Status) !== 'Draft') return '';
-    return `<section class="svr-panel" aria-labelledby="svr-assignment-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Dual control setup</p><h2 id="svr-assignment-title">มอบหมายผู้รับรองอิสระ</h2></div></div><p class="svr-help">ใช้ได้เฉพาะ Secret Election สถานะ Draft และอ้างอิง Employee Master เดิม การมอบหมายไม่ใช่การรับรองผล</p><div class="svr-assignment-form"><label><span>รหัสพนักงาน</span><input type="text" maxlength="20" data-svr-employee autocomplete="off"></label><label><span>บทบาทควบคุม</span><select data-svr-control-role><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label><button type="button" class="sv-button sv-button--primary" data-svr-action="assign-certifier">ตรวจและยืนยันการมอบหมาย</button></div></section>`;
+    if (secret && String(state.campaign?.Status) !== 'Draft') return '';
+    if (!secret && !['Draft', 'Scheduled', 'Open', 'Closed'].includes(String(state.campaign?.Status))) return '';
+    return `<section class="svr-panel" aria-labelledby="svr-assignment-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">${secret ? 'Dual control setup' : 'Result governance'}</p><h2 id="svr-assignment-title">มอบหมายผู้รับรองอิสระ</h2></div></div><p class="svr-help">${secret ? 'Secret Election ต้องมีผู้รับรองอิสระตามบทบาทควบคุม และตั้งค่าในสถานะ Draft' : 'แคมเปญมาตรฐานต้องมอบหมายผู้รับรองจาก Employee Master อย่างน้อยหนึ่งคนก่อนรับรอง exact result hash'} การมอบหมายยังไม่ถือเป็นการรับรองผล</p><div class="svr-assignment-form"><label><span>รหัสพนักงาน</span><input type="text" maxlength="20" data-svr-employee autocomplete="off"></label>${secret ? '<label><span>บทบาทควบคุม</span><select data-svr-control-role><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label>' : '<input type="hidden" data-svr-control-role value="standard">'}<button type="button" class="sv-button sv-button--primary" data-svr-action="assign-certifier">ตรวจและยืนยันการมอบหมาย</button></div></section>`;
 }
 
 function actions(snapshot, secret) {
     const hasStages = state.stages.length > 0;
-    return `<footer class="svr-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svr-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svr-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button><button type="button" class="sv-button sv-button--secondary" data-svr-action="calculate" ${state.busy || (!secret && !hasStages) ? 'disabled' : ''}>${secret ? 'สร้าง Recount Snapshot' : 'สร้าง Calculation Snapshot'}</button><button type="button" class="sv-button sv-button--secondary" data-svr-action="freeze" ${state.busy || !snapshot?.canFreeze ? 'disabled' : ''}>ตรึง Snapshot</button><button type="button" class="sv-button sv-button--primary" data-svr-action="certify" ${state.busy || !snapshot?.canCertify || snapshot?.status === 'Certified' ? 'disabled' : ''}>รับรองด้วย exact hash</button><button type="button" class="sv-button sv-button--danger" data-svr-action="publish" ${state.busy || !snapshot?.canPublish ? 'disabled' : ''}>เผยแพร่ผล</button></div></footer>`;
+    const popularWithoutStage = !secret && String(state.campaign?.CampaignType || state.campaign?.campaignType) === 'popular_vote';
+    return `<footer class="svr-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svr-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svr-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button><button type="button" class="sv-button sv-button--secondary" data-svr-action="calculate" ${state.busy || (!secret && !hasStages && !popularWithoutStage) || (!secret && String(state.campaign?.Status) !== 'Closed') ? 'disabled' : ''}>${secret ? 'สร้าง Recount Snapshot' : 'สร้าง Calculation Snapshot'}</button><button type="button" class="sv-button sv-button--secondary" data-svr-action="freeze" ${state.busy || !snapshot?.canFreeze ? 'disabled' : ''}>ตรึง Snapshot</button><button type="button" class="sv-button sv-button--primary" data-svr-action="certify" ${state.busy || !snapshot?.canCertify || snapshot?.status === 'Certified' ? 'disabled' : ''}>รับรองด้วย exact hash</button><button type="button" class="sv-button sv-button--danger" data-svr-action="publish" ${state.busy || !snapshot?.canPublish ? 'disabled' : ''}>เผยแพร่ผล</button></div></footer>`;
 }
 
 function render() {
@@ -157,7 +159,7 @@ async function calculate(reason = '') {
     const secret = isSecretCampaign(state.campaign), id = Number(state.campaign.id);
     await runAction(async () => {
         if (secret) await API.post(`/safety-vote/admin/campaigns/${id}/results/recount`, { reason });
-        else await API.post(`/safety-vote/admin/campaigns/${id}/results/calculate`, { stageId: Number(state.stages[0]?.id) });
+        else await API.post(`/safety-vote/admin/campaigns/${id}/results/calculate`, state.stages[0]?.id ? { stageId: Number(state.stages[0].id) } : {});
         state.selectedId = null;
         await loadData();
     }, secret ? 'สร้าง Recount Snapshot ผ่าน contract เดิมแล้ว' : 'สร้าง Calculation Snapshot ผ่าน contract เดิมแล้ว');
@@ -172,6 +174,7 @@ async function certify(snapshot, payload) {
     await runAction(async () => {
         const suffix = secret ? 'certify-secret' : 'certify';
         const response = await API.post(`/safety-vote/admin/campaigns/${id}/results/${snapshot.id}/${suffix}`, payload);
+        if (response.data?.campaignStatus) state.campaign.Status = response.data.campaignStatus;
         state.receipt = { title: secret && response.data?.status === 'AwaitingSecondCertifier' ? 'บันทึกการรับรองคนที่หนึ่งแล้ว — รอผู้รับรองอิสระคนที่สอง' : 'บันทึกการรับรองแล้ว', snapshotId: snapshot.id, status: response.data?.status, resultHash: response.data?.resultHash || snapshot.resultHash };
         await loadData();
     }, 'บันทึกการรับรองตาม exact result hash แล้ว');

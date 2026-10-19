@@ -41,14 +41,15 @@ async function setup() {
     await adminDb.query(`CREATE DATABASE \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: dbName, multipleStatements: true });
     await db.query("CREATE TABLE Admin_RolePermissions(role VARCHAR(50),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(role,permission));CREATE TABLE Admin_UserPermissions(employee_id VARCHAR(20),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(employee_id,permission));CREATE TABLE Master_Departments(id INT PRIMARY KEY,Name VARCHAR(100),Status VARCHAR(20),CreatedAt DATETIME,is_safety_core TINYINT);CREATE TABLE Master_SafetyUnits(id INT PRIMARY KEY,name VARCHAR(100),short_code VARCHAR(30),department_id INT,sort_order INT,created_at DATETIME);CREATE TABLE Master_Positions(id INT PRIMARY KEY,Name VARCHAR(100),IsSupervisorPatrol TINYINT,PatrolPassPct DECIMAL(5,2));CREATE TABLE Employees(EmployeeID VARCHAR(20) PRIMARY KEY,EmployeeName VARCHAR(255),Department VARCHAR(100),Unit VARCHAR(100),Role VARCHAR(50),Team VARCHAR(100),Position VARCHAR(100),CompanyEmail VARCHAR(150),Password VARCHAR(255),MustChangePassword TINYINT);INSERT INTO Master_Departments VALUES(1,'Safety','active',NOW(),1);INSERT INTO Master_SafetyUnits VALUES(10,'Core','CORE',1,1,NOW());INSERT INTO Master_Positions VALUES(100,'Officer',0,NULL);INSERT INTO Employees VALUES('SV-ADMIN','Admin','Safety','Core','Admin','A','Officer','admin@example.test','x',0),('SV-USER','User','Production','Line 1','User','A','Officer','user@example.test','x',0),('SV-USER2','Juror','Production','Line 1','User','A','Officer','juror@example.test','x',0);");
-    for (const file of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261010_safety_vote_ux_phase9a_engagement.sql', '20261010_safety_vote_ux_phase9b_planning_content_communication.sql', '20261010_safety_vote_ux_phase9c_engagement_analytics.sql', '20261015_safety_vote_live_results.sql']) await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', file), 'utf8'));
+    for (const file of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261010_safety_vote_ux_phase9a_engagement.sql', '20261010_safety_vote_ux_phase9b_planning_content_communication.sql', '20261010_safety_vote_ux_phase9c_engagement_analytics.sql', '20261015_safety_vote_live_results.sql', '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql']) await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', file), 'utf8'));
     await db.query("UPDATE SafetyVote_Settings SET SettingValue='1' WHERE SettingKey IN ('module_enabled','engagement_enabled')");
     children.push(spawn(process.execPath, [path.join(__dirname, 'safety-vote-phase1-node-fixture-host.js')], { cwd: root, env: { ...process.env, DB_NAME: dbName, SAFETY_VOTE_FIXTURE_DB: dbName, SAFETY_VOTE_FIXTURE_PORT: String(port) }, stdio: 'ignore', windowsHide: true }));
     await waitReady();
-    const created = await call('/admin/campaigns', { method: 'POST', body: { titleTh: 'ร่างกิจกรรมความปลอดภัยประจำเดือน', summary: 'ร่างสำหรับทดสอบงานผู้ดูแล', description: 'ข้อมูลจำลองในฐานข้อมูลชั่วคราว', campaignType: 'survey', privacyMode: 'identified', resultVisibility: 'hidden_until_close' } });
+    const created = await call('/admin/campaigns', { method: 'POST', body: { titleTh: 'ร่างกิจกรรมความปลอดภัยประจำเดือน', summary: 'ร่างสำหรับทดสอบงานผู้ดูแล', description: 'ข้อมูลจำลองในฐานข้อมูลชั่วคราว', campaignType: 'popular_vote', privacyMode: 'identified', resultVisibility: 'live', maxParticipationAttempts: 3, liveLeaderboardEnabled: true, liveLeaderboardTopN: 10, liveLeaderboardScoreMode: 'count_percentage', liveLeaderboardVisibility: 'after_submit', liveLeaderboardRefreshSeconds: 20, liveLeaderboardPrivacyThreshold: 7 } });
     assert.strictEqual(created.status, 201, JSON.stringify(created.data));
     const id = Number(created.data.data.id);
     assert.strictEqual((await call(`/admin/campaigns/${id}/builder`, { method: 'PUT', body: { questions: [{ questionCode: 'Q1', questionType: 'single_choice', title: 'กิจกรรมที่สนใจ', isRequired: true, minSelections: 1, maxSelections: 1, options: [{ optionCode: 'O1', label: 'Safety Talk' }, { optionCode: 'O2', label: 'Risk Hunt' }] }] } })).status, 200);
+    assert.strictEqual((await call(`/admin/campaigns/${id}/eligibility/rules`, { method: 'PUT', body: { rules: [{ ruleGroup: 1, ruleOrder: 1, effect: 'include', attributeKey: 'department_id', operator: 'equals', values: ['1'], reason: 'Guided duplicate UAT' }] } })).status, 200);
     assert.strictEqual((await call(`/admin/planning/templates/from-campaign/${id}`, { method: 'POST', body: { name: 'แม่แบบ Phase 2' } })).status, 201);
     return id;
 }
@@ -78,7 +79,7 @@ async function inspect(viewport) {
     assert.strictEqual(await chooser.locator('[data-sv-built-in-template]').count(), 6);
     assert.strictEqual(await chooser.locator('[data-sv-reusable-template]').count(), 1);
     await chooser.locator('[data-sv-built-in-template="survey"]').click();
-    await page.locator('[data-sv-wizard="2026-10-15-thai-time-r1"]').waitFor();
+    await page.locator('[data-sv-wizard="2026-10-16-preview-parity-r1"]').waitFor();
     assert.strictEqual(await page.locator('.svw-readiness-summary [role="progressbar"]').count(), 1);
     await page.getByRole('button', { name: 'กลับศูนย์จัดการ' }).click();
     await page.getByRole('heading', { name: 'จัดการ Safety Vote' }).waitFor();
@@ -94,11 +95,16 @@ async function inspect(viewport) {
     await page.getByRole('dialog', { name: /ยกเลิกแคมเปญฉบับร่าง/ }).waitFor();
     await page.getByRole('button', { name: 'ยกเลิก', exact: true }).click();
     if (viewport.width >= 768 && viewport.width < 1200) await page.getByRole('button', { name: 'เลือกแคมเปญ' }).click();
+    const duplicateCreated = page.waitForResponse(response => response.request().method() === 'POST' && /\/api\/safety-vote\/admin\/campaigns\/\d+\/duplicate(?:\?|$)/.test(response.url()));
     await page.locator('[data-sv-duplicate-campaign]:visible').first().click();
-    await page.locator('[data-sv-wizard="2026-10-15-thai-time-r1"]').waitFor();
-    assert((await page.locator('.svw-header').innerText()).includes('สำเนา'));
-    await page.getByRole('button', { name: 'กลับศูนย์จัดการ' }).click();
-    if (await page.locator('[data-sv-dialog="confirm"]:visible').count()) await page.getByRole('button', { name: 'ออกจากหน้านี้' }).click();
+    const duplicatePayload = await (await duplicateCreated).json();
+    const duplicateId = Number(duplicatePayload?.data?.id || 0);
+    assert(duplicateId > 0, 'duplicate campaign ID is required');
+    const [[copied]] = await db.query('SELECT v.TitleTh,v.MaxParticipationAttempts,v.LiveLeaderboardEnabled,v.LiveLeaderboardTopN,v.LiveLeaderboardScoreMode,v.LiveLeaderboardVisibility,v.LiveLeaderboardRefreshSeconds,v.LiveLeaderboardPrivacyThreshold,(SELECT COUNT(*) FROM SafetyVote_Questions q WHERE q.CampaignVersionID=v.id) questions,(SELECT COUNT(*) FROM SafetyVote_Options o JOIN SafetyVote_Questions q ON q.id=o.QuestionID WHERE q.CampaignVersionID=v.id) options,(SELECT COUNT(*) FROM SafetyVote_Options o JOIN SafetyVote_Questions q ON q.id=o.QuestionID WHERE q.CampaignVersionID=v.id AND o.FileID IS NOT NULL) optionFiles,(SELECT COUNT(*) FROM SafetyVote_EligibilityRules r WHERE r.CampaignVersionID=v.id) rules FROM SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID WHERE c.id=?', [duplicateId]);
+    assert(String(copied.TitleTh).includes('(สำเนา)'), 'duplicate title suffix is required');
+    assert.deepStrictEqual([Number(copied.MaxParticipationAttempts), Number(copied.LiveLeaderboardEnabled), Number(copied.LiveLeaderboardTopN), copied.LiveLeaderboardScoreMode, copied.LiveLeaderboardVisibility, Number(copied.LiveLeaderboardRefreshSeconds), Number(copied.LiveLeaderboardPrivacyThreshold), Number(copied.questions), Number(copied.options), Number(copied.optionFiles), Number(copied.rules)], [3, 1, 10, 'count_percentage', 'after_submit', 20, 7, 1, 2, 0, 1]);
+    await page.locator(`[data-sv-select="${duplicateId}"]:visible`).first().waitFor();
+    assert.strictEqual(await page.locator('[data-sv-wizard="2026-10-16-preview-parity-r1"]').count(), 0);
     await page.getByRole('heading', { name: 'แคมเปญ', exact: true }).waitFor();
     await page.getByRole('button', { name: 'ป้ายประชาสัมพันธ์', exact: true }).focus();
     await page.keyboard.press('Enter');
@@ -108,7 +114,7 @@ async function inspect(viewport) {
     await pageMetrics(page, viewport, errors);
     if ([390, 1920].includes(viewport.width)) await page.screenshot({ path: path.join(evidence, `admin-${viewport.width}x${viewport.height}.png`), fullPage: true });
     await page.close();
-    return { viewport, templateChooser: true, reusableTemplate: true, draftReadiness: true, bulkConfirmation: true, configDuplicatePreview: true, promotionAssetLibrary: true, overflow: false, smallTargets: 0, consoleErrors: 0 };
+    return { viewport, templateChooser: true, reusableTemplate: true, draftReadiness: true, bulkConfirmation: true, atomicDraftDuplicate: true, promotionAssetLibrary: true, overflow: false, smallTargets: 0, consoleErrors: 0 };
 }
 
 async function main() {
@@ -118,8 +124,8 @@ async function main() {
     const results = [];
     for (const viewport of viewports) results.push(await inspect(viewport));
     const [[counts]] = await db.query('SELECT (SELECT COUNT(*) FROM SafetyVote_Ballots) ballots,(SELECT COUNT(*) FROM SafetyVote_BallotAnswers) answers,(SELECT COUNT(*) FROM SafetyVote_JuryScores) jury,(SELECT COUNT(*) FROM SafetyVote_Certifications) certifications,(SELECT COUNT(*) FROM SafetyVote_Campaigns) campaigns,(SELECT COUNT(*) FROM SafetyVote_CampaignTemplates) templates');
-    assert.deepStrictEqual([Number(counts.ballots), Number(counts.answers), Number(counts.jury), Number(counts.certifications), Number(counts.campaigns), Number(counts.templates)], [0, 0, 0, 0, 1, 1]);
-    const result = { contract: '2026-10-11-safety-vote-admin-guided-drafts-r1', viewports, results, authenticatedAdminCombinations: results.length, keyboardAndDialogSemantics: true, protectedBusinessRows: { ballots: 0, answers: 0, jury: 0, certifications: 0 }, fixtureRows: { campaigns: 1, templates: 1 }, externalDelivery: false, productionConnected: false, deployed: false, committed: false, pushed: false, disposableDatabaseResidue: 0 };
+    assert.deepStrictEqual([Number(counts.ballots), Number(counts.answers), Number(counts.jury), Number(counts.certifications), Number(counts.campaigns), Number(counts.templates)], [0, 0, 0, 0, 6, 1]);
+    const result = { contract: '2026-10-19-safety-vote-atomic-draft-duplicate-r1', viewports, results, authenticatedAdminCombinations: results.length, keyboardAndDialogSemantics: true, atomicDraftDuplicate: true, participationAndLiveSettingsPreserved: true, protectedBusinessRows: { ballots: 0, answers: 0, jury: 0, certifications: 0 }, fixtureRows: { campaigns: 6, templates: 1 }, externalDelivery: false, productionConnected: false, deployed: false, committed: false, pushed: false, disposableDatabaseResidue: 0 };
     result.resultSha256 = crypto.createHash('sha256').update(JSON.stringify(result)).digest('hex');
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     console.log(`Safety Vote Admin guided Drafts Browser UAT: PASS (5 authenticated Admin viewports, ${evidence})`);

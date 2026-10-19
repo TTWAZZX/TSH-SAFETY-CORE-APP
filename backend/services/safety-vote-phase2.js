@@ -2,7 +2,7 @@
 const crypto=require('crypto');
 const PHASE2_CONTRACT='2026-10-08-safety-vote-phase2-r1';
 const QUESTION_TYPES=['single_choice','multiple_choice'];
-const TRANSITIONS=Object.freeze({Draft:['Open'],Open:['Closed'],Closed:['Published'],Published:[]});
+const TRANSITIONS=Object.freeze({Draft:['Scheduled','Open'],Scheduled:['Open'],Open:['Closed'],Closed:[],Certified:['Published'],Published:[]});
 const text=(v,n=300)=>String(v??'').replace(/[\u0000-\u001f\u007f]/g,' ').trim().replace(/\s+/g,' ').slice(0,n);
 const int=v=>Number.isInteger(Number(v))&&Number(v)>0?Number(v):null;
 function normalizeQuestion(input={},index=0){const type=text(input.questionType||input.QuestionType,32).toLowerCase(),title=text(input.title||input.Title,300),min=Number(input.minSelections??input.MinSelections??1),max=Number(input.maxSelections??input.MaxSelections??1),errors=[];if(!QUESTION_TYPES.includes(type))errors.push('INVALID_TYPE');if(!title)errors.push('TITLE_REQUIRED');if(!Number.isInteger(min)||min<0||!Number.isInteger(max)||max<1||min>max||type==='single_choice'&&(min>1||max!==1))errors.push('INVALID_SELECTION_LIMIT');return{ok:!errors.length,errors,value:{id:int(input.id),questionCode:text(input.questionCode||input.QuestionCode||`Q${index+1}`,50).toUpperCase(),questionType:type,title,helpText:text(input.helpText||input.HelpText,1000)||null,isRequired:Boolean(input.isRequired??input.IsRequired??true),minSelections:min,maxSelections:max,sortOrder:int(input.sortOrder||input.SortOrder)||index+1,options:Array.isArray(input.options)?input.options:[]}};}

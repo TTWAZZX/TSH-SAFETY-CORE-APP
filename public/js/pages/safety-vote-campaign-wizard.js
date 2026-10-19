@@ -305,7 +305,6 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
             state.persisted.rowVersion = Number(row.RowVersion || row.rowVersion || 1);
             state.persisted.serverUpdatedAt = row.UpdatedAt || row.updatedAt || new Date().toISOString();
             state.draft.campaignCode = row.CampaignCode || row.campaignCode || state.draft.campaignCode;
-            await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/participation-policy`, { maxParticipationAttempts: state.draft.privacyMode === 'secret_ballot' ? 1 : Number(state.draft.maxParticipationAttempts || 1) });
             const codeField = container.querySelector('#svw-campaignCode');
             if (codeField && state.draft.campaignCode) codeField.value = state.draft.campaignCode;
             state.dirty = false;
@@ -449,7 +448,8 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
     const reviewAction = () => {
         const ready = readinessItems(state.draft,state.persisted).every(item=>item.pass), advanced = templateFor(state.draft.campaignType).advancedRequired;
         if (advanced) return `<button type="button" class="sv-button sv-button--primary" data-svw-action="advanced" ${!state.persisted.campaignId?'disabled':''}>ไปตั้งค่าขั้นสูง</button>`;
-        return `<button type="button" class="sv-button sv-button--primary" data-svw-action="open" ${!ready?'disabled':''}>เปิดแคมเปญ</button>`;
+        const scheduled = state.draft.openAt && new Date(state.draft.openAt).getTime() > Date.now();
+        return `<button type="button" class="sv-button sv-button--primary" data-svw-action="open" ${!ready?'disabled':''}>${scheduled ? 'ตั้งเวลาแคมเปญ' : 'เปิดแคมเปญ'}</button>`;
     };
 
     const next = async () => {
@@ -466,7 +466,7 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
 
     const freezeEligibility = () => openSafetyVoteConfirmDialog({title:'ยืนยันการตรึงรายชื่อผู้มีสิทธิ์',description:`ระบบจะบันทึกรายชื่อผู้มีสิทธิ์ ${Number(state.draft.eligibilityPreview?.eligibleCount||0).toLocaleString('th-TH')} คนเป็น snapshot สำหรับแคมเปญนี้ การเปลี่ยนกฎภายหลังต้องตรวจสอบและตรึงใหม่`,confirmLabel:'ยืนยันและตรึงรายชื่อ',onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/eligibility/freeze`,{reason:'Safety Vote UX Phase 2 readiness wizard'});state.draft.eligibilityFrozen=true;state.draft.eligibilityPreview={...state.draft.eligibilityPreview,...response.data};setSaveState('saved','ตรึงรายชื่อผู้มีสิทธิ์แล้ว');render();}});
 
-    const openCampaign = () => openSafetyVoteConfirmDialog({title:'ยืนยันการเปิดแคมเปญ',description:'เมื่อเปิดแล้ว เนื้อหาและรายชื่อผู้มีสิทธิ์ชุดนี้จะถูกใช้รับคำตอบ การแก้ไขฉบับร่างจะถูกจำกัดตามกติกาเดิมของระบบ',confirmLabel:'เปิดแคมเปญ',onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/lifecycle/open`,{});showToast('เปิดแคมเปญแล้ว','success');cleanup();await onComplete({campaignId:state.persisted.campaignId,status:response.data?.status||'Open'});}});
+    const openCampaign = () => { const scheduled = state.draft.openAt && new Date(state.draft.openAt).getTime() > Date.now(), command = scheduled ? 'schedule' : 'open', label = scheduled ? 'ตั้งเวลาแคมเปญ' : 'เปิดแคมเปญ'; return openSafetyVoteConfirmDialog({title:`ยืนยันการ${label}`,description:scheduled?'ระบบจะตรึงเนื้อหาและรายชื่อผู้มีสิทธิ์ แล้วเปิดรับคะแนนอัตโนมัติเมื่อถึงเวลา Asia/Bangkok ที่กำหนด':'เมื่อเปิดแล้ว เนื้อหาและรายชื่อผู้มีสิทธิ์ชุดนี้จะถูกใช้รับคำตอบ การแก้ไขฉบับร่างจะถูกจำกัดตามกติกาเดิมของระบบ',confirmLabel:label,onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/lifecycle/${command}`,{});showToast(`${label}แล้ว`,'success');cleanup();await onComplete({campaignId:state.persisted.campaignId,status:response.data?.status||(scheduled?'Scheduled':'Open')});}}); };
 
     const beforeUnload = event => { if (!state.dirty && state.saveState !== 'saving') return; event.preventDefault(); event.returnValue = ''; };
     const cleanup = () => { clearTimeout(state.timer); window.removeEventListener('beforeunload', beforeUnload); state.objectUrls.forEach(url=>URL.revokeObjectURL(url)); state.objectUrls.clear(); };
