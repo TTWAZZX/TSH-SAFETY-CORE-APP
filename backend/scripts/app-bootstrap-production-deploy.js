@@ -134,7 +134,8 @@ function prepare(commit, tree) {
     assert(index.includes('public/tailwind.production.css?v=20261019-local-production-r1'), 'Local Production CSS marker missing');
     assert(index.includes('public/js/main.js?v=20261019-route-vendors-r1'), 'Application cache marker missing');
     assert(main.includes('./utils/vendor-loader.js?v=20261019-route-vendors-r1'), 'Lazy vendor loader integration missing');
-    assert(session.includes('SESSION_BOOTSTRAP_TIMEOUT_MS'), 'Session bootstrap timeout missing');
+    assert(main.includes('APP_BOOTSTRAP_TIMEOUTS') && main.includes('SESSION_VERIFY_TIMEOUT'), 'Session bootstrap timeout missing');
+    assert(session.includes('const signal = options?.signal') && session.includes('throwOnFailure'), 'Abortable session verification contract missing');
     assert(loader.includes('ensureRouteVendors'), 'Route vendor loader contract missing');
 
     const manifest = {
