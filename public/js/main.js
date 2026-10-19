@@ -26,7 +26,7 @@ const loadOjtPage = lazyPage('./pages/ojt.js?v=20260820-card-image-phase2d', 'lo
 const loadTrainingPage = lazyPage('./pages/training.js?v=20260820-card-image-phase2d-rollout-r2', 'loadTrainingPage');
 const loadAccidentPage = lazyPage('./pages/accident.js?v=20261002-accident-accessibility-r3', 'loadAccidentPage');
 const loadSafetyCulturePage = lazyPage('./pages/safety-culture.js?v=20261011-design-system-a11y-r1', 'loadSafetyCulturePage');
-const loadBbsSmartCardPage = lazyPage('./pages/bbs-smart-card.js?v=20260921-bbs-issued-batch-r1', 'loadBbsSmartCardPage');
+const loadBbsSmartCardPage = lazyPage('./pages/bbs-smart-card.js?v=20261019-local-production-css-r1', 'loadBbsSmartCardPage');
 const loadContractorPage = lazyPage('./pages/contractor.js?v=20260715-phase32d-remaining-async-ux', 'loadContractorPage');
 const loadHiyariPage = lazyPage('./pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2', 'loadHiyariPage');
 const loadKyPage = lazyPage('./pages/ky.js?v=20261015-ky-video-manager-r4', 'loadKyPage');
@@ -38,6 +38,7 @@ import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=2026
 const loadDashboardPage = lazyPage('./pages/dashboard.js?v=20260822-cccf-shared-target-r4', 'loadDashboardPage');
 const loadSearchPage = lazyPage('./pages/search.js?v=20261005-safety360-data-integrity-r1', 'loadSearchPage');
 import { initLoginModuleGuides } from './login-guides.js?v=20261011-login-branding-background-r2';
+import { loadVendorsForPage } from './utils/vendor-loader.js?v=20261019-route-vendors-r1';
 import { MODULE_ORDER, moduleTitleMap } from './module-meta.js?v=20260825-bbs-phase4-r1';
 import { BBS_QR_INTENT_KEY, BBS_QR_PENDING_KEY, shouldDiscardBbsQrIntent, isBbsRolloutBlockedError, normalizeBbsQrRoute } from './utils/bbs-qr-intent.js?v=20260917-bbs-qr-login-intent-r1';
 import { captureFileLibraryIntent, consumeFileLibraryIntent } from './file-library-link.js?v=20261012-file-library-access-r2';
@@ -83,6 +84,7 @@ let _safetyUnitGateActive = false;
 const FIRST_LOGIN_REENTRY_KEY = 'tsh_first_login_reentry';
 let _companyEmailVerificationResult = null;
 let _passwordResetToken = null;
+const APP_BOOTSTRAP_TIMEOUTS = Object.freeze({ branding: 4000, session: 8000 });
 
 const DEFAULT_BRANDING = {
     appName: 'TSH Safety Core',
@@ -155,6 +157,25 @@ function _normalizeBranding(raw = {}) {
     };
 }
 
+function _resolveBrandAssetUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        const parsed = new URL(raw, window.location.href);
+        if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+        if (raw.startsWith('/') && parsed.pathname.includes('/uploads/')) {
+            const storedName = parsed.pathname.split('/').pop();
+            if (!storedName) return '';
+            const localAsset = new URL(`uploads/${storedName}`, document.baseURI);
+            localAsset.search = parsed.search;
+            return localAsset.href;
+        }
+        return parsed.href;
+    } catch (_) {
+        return '';
+    }
+}
+
 function _loginAnnouncementIsActive(branding, now = Date.now()) {
     if (!branding.loginAnnouncementEnabled) return false;
     if (!branding.loginAnnouncementTitle && !branding.loginAnnouncementMessage) return false;
@@ -223,23 +244,25 @@ function _renderLoginCommunications(root = document, branding = _currentBranding
 
 function applyAppBranding(branding = {}) {
     _currentBranding = _normalizeBranding(branding);
+    const logoUrl = _resolveBrandAssetUrl(_currentBranding.logoUrl);
+    const loginBackgroundUrl = _resolveBrandAssetUrl(_currentBranding.loginBackgroundUrl);
 
     document.querySelectorAll('[data-brand-logo]').forEach(el => {
         if (!el.dataset.defaultLogo) el.dataset.defaultLogo = el.innerHTML;
-        el.classList.toggle('has-custom-logo', Boolean(_currentBranding.logoUrl));
+        el.classList.toggle('has-custom-logo', Boolean(logoUrl));
         const size = Math.max(24, Math.min(64, Number.parseInt(el.dataset.brandSize || '32', 10) || 32));
         el.style.width = `${size}px`;
         el.style.height = `${size}px`;
         el.style.maxWidth = `${size}px`;
         el.style.maxHeight = `${size}px`;
         el.style.overflow = 'hidden';
-        if (!_currentBranding.logoUrl) {
+        if (!logoUrl) {
             el.innerHTML = el.dataset.defaultLogo;
             return;
         }
         el.innerHTML = '';
         const img = document.createElement('img');
-        img.src = _currentBranding.logoUrl;
+        img.src = logoUrl;
         img.alt = _currentBranding.appName;
         img.loading = 'eager';
         img.style.width = '100%';
@@ -265,7 +288,7 @@ function applyAppBranding(branding = {}) {
     });
     const loginBrandPanel = document.getElementById('login-brand-panel');
     if (loginBrandPanel) {
-        const backgroundUrl = _currentBranding.loginBackgroundUrl;
+        const backgroundUrl = loginBackgroundUrl;
         const baseGradient = 'linear-gradient(160deg, rgba(2,44,34,.94) 0%, rgba(6,78,59,.88) 42%, rgba(6,95,70,.82) 75%, rgba(13,148,136,.76) 100%)';
         const shouldLoadBackground = Boolean(backgroundUrl && _loginBrandMediaQuery.matches);
         loginBrandPanel.classList.toggle('has-custom-background', shouldLoadBackground);
@@ -284,15 +307,29 @@ function applyAppBranding(branding = {}) {
     document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', _currentBranding.appName);
 
     const favicon = document.querySelector('link[rel="icon"]');
-    if (favicon && _currentBranding.logoUrl) favicon.href = _currentBranding.logoUrl;
+    if (favicon && logoUrl) favicon.href = logoUrl;
 }
 
-async function loadAppBranding() {
+async function loadAppBranding({ timeoutMs = APP_BOOTSTRAP_TIMEOUTS.branding } = {}) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeoutMs);
     try {
-        const res = await apiFetch('/public/branding');
+        const res = await apiFetch('/public/branding', {
+            signal: controller.signal,
+            suppressErrorLog: true,
+            preserveSessionOnAuthError: true,
+        });
         applyAppBranding(res?.data || {});
+        return { source: 'remote', timedOut: false };
     } catch (err) {
         applyAppBranding(DEFAULT_BRANDING);
+        return { source: 'default', timedOut: timedOut || err?.name === 'AbortError' };
+    } finally {
+        window.clearTimeout(timeout);
     }
 }
 
@@ -303,24 +340,37 @@ _loginBrandMediaQuery.addEventListener?.('change', () => applyAppBranding(_curre
 // App Bootstrap
 // ======================================================
 async function bootstrapFrontend() {
-    document.querySelectorAll('[data-current-year]').forEach(el => { el.textContent = String(new Date().getFullYear()); });
-    document.querySelectorAll('[data-module-count]').forEach(el => { el.textContent = String(MODULE_ORDER.length); });
-    console.log('🚀 Frontend Application Started');
+    try {
+        document.querySelectorAll('[data-current-year]').forEach(el => { el.textContent = String(new Date().getFullYear()); });
+        document.querySelectorAll('[data-module-count]').forEach(el => { el.textContent = String(MODULE_ORDER.length); });
+        console.log('🚀 Frontend Application Started');
 
-    await loadAppBranding();
-    initLoginModuleGuides();
-    setupGlobalEventListeners();
-    setupMobileViewportBehavior();
+        window.__TSH_APP_BOOTSTRAP__?.setMessage('กำลังโหลดการตั้งค่าองค์กร…');
+        const brandingTask = loadAppBranding().then(result => {
+            initLoginModuleGuides();
+            return result;
+        });
+        setupGlobalEventListeners();
+        setupMobileViewportBehavior();
 
-    await captureCompanyEmailVerification();
-    capturePasswordResetLink();
-    captureFileLibraryIntent();
-    await captureBbsQrIntent();
+        await captureCompanyEmailVerification();
+        capturePasswordResetLink();
+        captureFileLibraryIntent();
+        await captureBbsQrIntent();
 
-    // 🔒 รอ session ให้จบก่อนทำอย่างอื่น
-    await initializeSession();
-    showCompanyEmailVerificationResult();
-    showPasswordResetFromLink();
+        window.__TSH_APP_BOOTSTRAP__?.setMessage('กำลังตรวจสอบการเข้าสู่ระบบ…');
+        // 🔒 รอ session ให้จบก่อนทำอย่างอื่น
+        await Promise.all([brandingTask, initializeSession()]);
+        showCompanyEmailVerificationResult();
+        showPasswordResetFromLink();
+        window.__TSH_APP_BOOTSTRAP__?.complete();
+    } catch (error) {
+        console.error('Frontend bootstrap failed:', error);
+        const message = error?.code === 'SESSION_VERIFY_TIMEOUT'
+            ? 'การตรวจสอบการเข้าสู่ระบบใช้เวลานานเกินไป กรุณาตรวจสอบเครือข่ายแล้วลองใหม่'
+            : 'ไม่สามารถเชื่อมต่อเพื่อตรวจสอบการเข้าสู่ระบบได้ กรุณาลองใหม่';
+        window.__TSH_APP_BOOTSTRAP__?.fail(message);
+    }
 }
 
 if (document.readyState === 'loading') {
@@ -512,10 +562,31 @@ function showCompanyEmailVerificationResult() {
 // ======================================================
 // Session Handling
 // ======================================================
-async function initializeSession() {
+async function initializeSession({ timeoutMs = APP_BOOTSTRAP_TIMEOUTS.session } = {}) {
     UI.showLoading('กำลังตรวจสอบเซสชัน...');
-
-    const verification = await TSHSession.refreshSession();
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeoutMs);
+    let verification = null;
+    try {
+        verification = await TSHSession.refreshSession({
+            preserveOnFailure: true,
+            throwOnFailure: true,
+            signal: controller.signal,
+        });
+    } catch (error) {
+        if (timedOut || error?.name === 'AbortError') {
+            const timeoutError = new Error('Session verification timed out');
+            timeoutError.code = 'SESSION_VERIFY_TIMEOUT';
+            throw timeoutError;
+        }
+        throw error;
+    } finally {
+        window.clearTimeout(timeout);
+    }
 
     if (!verification) {
         showLoginScreen();
@@ -790,8 +861,22 @@ async function refreshBbsNavigation() {
 }
 
 async function refreshSafetyVoteNavigation() {
-    const nav=document.getElementById('safety-vote-nav-item');if(!nav)return;nav.classList.add('hidden');
-    try{const health=await apiFetch('/safety-vote/admin/health',{suppressErrorLog:true});if(health?.data?.ready&&health?.data?.moduleEnabled)nav.classList.remove('hidden');}catch(_){}
+    const nav = document.getElementById('safety-vote-nav-item');
+    if (!nav) return;
+    nav.classList.add('hidden');
+
+    try {
+        if (AppState.isAdmin) {
+            const health = await apiFetch('/safety-vote/admin/health', { suppressErrorLog: true });
+            if (health?.data?.ready && health?.data?.moduleEnabled) nav.classList.remove('hidden');
+            return;
+        }
+
+        // Member discovery is the correct permission boundary for non-Admins.
+        // The former Admin health probe produced an avoidable 403 on every Viewer bootstrap.
+        await apiFetch('/safety-vote/me/campaigns', { suppressErrorLog: true });
+        nav.classList.remove('hidden');
+    } catch (_) {}
 }
 
 function normalizeSafetyGateName(value) {
@@ -1051,6 +1136,12 @@ async function handleRouting() {
     target.style.display = 'block';
     window.scrollTo(0, 0);
     document.getElementById('main-content')?.scrollTo({ top: 0, left: 0 });
+
+    try {
+        await loadVendorsForPage(hash);
+    } catch (error) {
+        console.error(`Unable to load optional libraries for ${hash}:`, error);
+    }
 
     // Load page data
     switch (hash) {

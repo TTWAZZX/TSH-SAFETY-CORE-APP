@@ -33,8 +33,8 @@ assert.match(designer,/Create editable Draft copy/,'Active layouts must offer an
 assert.match(designer,/sourceVersionId:Number\(row\.id\)/,'Draft copy must use the server-authoritative same-template clone contract.');
 assert.match(page,/previewEmployees:state\.cardEmployees\.filter/,'Admin Personal Designer must receive permission-scoped employee rows.');
 assert.match(page,/previewEmployees:String\(kind\)\.toLowerCase\(\)==='personal'/,'Restored Personal Designer sessions must retain real preview rows.');
-assert.match(main,/20260921-bbs-issued-batch-r1/,'Main module must cache-bust the updated BBS page.');
+assert.match(main,/20261019-local-production-css-r1/,'Main module must cache-bust the updated BBS page.');
 assert.match(page,/20260921-bbs-artwork-fidelity-r3/,'BBS page must cache-bust the updated Designer and output modules.');
-assert.match(index,/public\/js\/main\.js\?v=20260923-fourm-curriculum-soft-disable-r1/,'HTML entry point must use the current application cache chain.');
+assert.match(index,/public\/js\/main\.js\?v=20261019-route-vendors-r1/,'HTML entry point must use the current application cache chain.');
 
 console.log('BBS Card Designer real preview and 70% group scale contract passed.');

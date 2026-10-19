@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="th" data-app-bootstrap="loading">
 <head>
     <base target="_top">
     <meta charset="UTF-8">
@@ -14,23 +14,130 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23059669'/%3E%3Cstop offset='100%25' stop-color='%230d9488'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M16 4L7 8v7c0 6.1 3.8 11.5 9 12.9 5.2-1.4 9-6.8 9-12.9V8L16 4z' fill='white' opacity='0.95'/%3E%3Cpath d='M13 16l2.5 2.5L19.5 13' stroke='%23059669' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
     <link rel="manifest" href="./public/manifest.webmanifest">
     <link rel="apple-touch-icon" href="./public/icons/app-icon.svg">
+
+    <style id="app-critical-css">
+        /* First-paint contract: these rules must not depend on Tailwind or any external asset. */
+        /* Keep Tailwind responsive variants (for example hidden md:flex) able to override .hidden. */
+        .hidden { display: none; }
+        [hidden] { display: none !important; }
+        html[data-app-bootstrap="loading"],
+        html[data-app-bootstrap="error"] { background: #f0fdf4; }
+        html[data-app-bootstrap="loading"] body,
+        html[data-app-bootstrap="error"] body { margin: 0; overflow: hidden; }
+        #app-bootstrap {
+            position: fixed;
+            z-index: 2147483000;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            box-sizing: border-box;
+            min-height: 100vh;
+            min-height: 100dvh;
+            padding: 24px;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 18% 16%, rgba(52, 211, 153, .18), transparent 32%),
+                radial-gradient(circle at 84% 86%, rgba(13, 148, 136, .13), transparent 34%),
+                linear-gradient(145deg, #f8fffc 0%, #ecfdf5 52%, #f0fdfa 100%);
+            color: #0f172a;
+            font-family: Kanit, "Noto Sans Thai", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            opacity: 1;
+            visibility: visible;
+            transition: opacity .18s ease, visibility .18s ease;
+        }
+        #app-bootstrap::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            opacity: .16;
+            background-image: radial-gradient(#059669 1px, transparent 1px);
+            background-size: 22px 22px;
+            pointer-events: none;
+        }
+        html[data-app-bootstrap="ready"] #app-bootstrap {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        html[data-app-bootstrap="ready"] #login-overlay:not(.hidden),
+        html[data-app-bootstrap="ready"] #app-container:not(.hidden) {
+            animation: app-surface-enter .18s cubic-bezier(.2, .8, .2, 1) both;
+        }
+        .app-bootstrap__card {
+            position: relative;
+            width: min(100%, 420px);
+            box-sizing: border-box;
+            padding: 32px 30px 28px;
+            border: 1px solid rgba(5, 150, 105, .16);
+            border-radius: 24px;
+            background: rgba(255, 255, 255, .92);
+            box-shadow: 0 24px 70px rgba(6, 78, 59, .14);
+            text-align: center;
+        }
+        .app-bootstrap__mark {
+            display: grid;
+            place-items: center;
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 18px;
+            border-radius: 20px;
+            background: linear-gradient(145deg, #047857, #0d9488);
+            box-shadow: 0 12px 26px rgba(5, 150, 105, .26);
+        }
+        .app-bootstrap__mark svg { display: block; width: 36px; height: 36px; }
+        .app-bootstrap__eyebrow {
+            margin: 0 0 5px;
+            color: #047857;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+        .app-bootstrap__title { margin: 0; font-size: clamp(22px, 5vw, 28px); line-height: 1.25; font-weight: 800; }
+        .app-bootstrap__message { margin: 9px 0 20px; color: #64748b; font-size: 14px; line-height: 1.6; }
+        .app-bootstrap__track { height: 5px; overflow: hidden; border-radius: 999px; background: #dff7ec; }
+        .app-bootstrap__bar {
+            width: 42%;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #059669, #2dd4bf);
+            animation: app-bootstrap-progress 1.15s ease-in-out infinite;
+        }
+        .app-bootstrap__retry {
+            display: none;
+            min-height: 44px;
+            margin: 18px auto 0;
+            padding: 0 20px;
+            border: 0;
+            border-radius: 12px;
+            background: #047857;
+            color: #fff;
+            font: inherit;
+            font-size: 14px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        html[data-app-bootstrap="error"] .app-bootstrap__track { display: none; }
+        html[data-app-bootstrap="error"] .app-bootstrap__retry { display: inline-flex; align-items: center; justify-content: center; }
+        @keyframes app-bootstrap-progress { from { transform: translateX(-115%); } to { transform: translateX(340%); } }
+        @keyframes app-surface-enter {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #app-bootstrap { transition: none; }
+            .app-bootstrap__bar { width: 100%; animation: none; }
+            html[data-app-bootstrap="ready"] #login-overlay:not(.hidden),
+            html[data-app-bootstrap="ready"] #app-container:not(.hidden) { animation: none; }
+        }
+    </style>
     
-    <script defer src="https://cdn.tailwindcss.com"></script>
-    <script defer src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
-    <script defer src="public/js/fullcalendar.js"></script>
+    <link rel="stylesheet" href="public/tailwind.production.css?v=20261019-local-production-r1">
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <script defer src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
 
     <link rel="stylesheet" href="public/style.css?v=20261016-safety-vote-wizard-layout-r1">
 
@@ -56,6 +163,40 @@
         document.documentElement.classList.remove('dark');
         localStorage.removeItem('theme');
 
+        (() => {
+            const root = document.documentElement;
+            let settled = false;
+            // Asset delivery on constrained mobile networks may legitimately exceed 15 seconds.
+            // Session and branding requests still retain their own shorter fail-fast timeouts.
+            const appShellWatchdogMs = 60000;
+            const timeout = window.setTimeout(() => {
+                if (settled) return;
+                root.dataset.appBootstrap = 'error';
+                const message = document.getElementById('app-bootstrap-message');
+                if (message) message.textContent = 'ใช้เวลาเชื่อมต่อนานกว่าปกติ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่';
+            }, appShellWatchdogMs);
+            window.__TSH_APP_BOOTSTRAP__ = {
+                setMessage(message) {
+                    const target = document.getElementById('app-bootstrap-message');
+                    if (target && message) target.textContent = String(message);
+                },
+                complete() {
+                    if (settled) return;
+                    settled = true;
+                    window.clearTimeout(timeout);
+                    root.dataset.appBootstrap = 'ready';
+                    const overlay = document.getElementById('app-bootstrap');
+                    window.setTimeout(() => overlay?.remove(), 220);
+                },
+                fail(message) {
+                    window.clearTimeout(timeout);
+                    root.dataset.appBootstrap = 'error';
+                    const target = document.getElementById('app-bootstrap-message');
+                    if (target) target.textContent = String(message || 'ไม่สามารถเตรียมระบบได้ กรุณาลองใหม่');
+                }
+            };
+        })();
+
         // Safety Vote Phase 9.6: company-wide UX rollout; server-side module and integration gates remain authoritative.
         window.__TSH_FEATURE_FLAGS__ = Object.assign({}, window.__TSH_FEATURE_FLAGS__, {
             safetyVoteUxV1: true,
@@ -65,6 +206,22 @@
 </head>
 
 <body class="text-slate-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-950 font-[Kanit]">
+
+    <div id="app-bootstrap" role="status" aria-live="polite" aria-busy="true" aria-label="กำลังเตรียมระบบ TSH Safety Core">
+        <div class="app-bootstrap__card">
+            <div class="app-bootstrap__mark" aria-hidden="true">
+                <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 4.5 7.5 10v9.2c0 8.2 5.2 14.4 12.5 17.1 7.3-2.7 12.5-8.9 12.5-17.1V10L20 4.5Z" fill="white" opacity=".96"/>
+                    <path d="m13.8 20.2 4.1 4.1 8.5-9" stroke="#047857" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <p class="app-bootstrap__eyebrow">TSH SCA</p>
+            <h1 class="app-bootstrap__title">TSH Safety Core</h1>
+            <p id="app-bootstrap-message" class="app-bootstrap__message">กำลังเตรียมระบบและตรวจสอบการเข้าสู่ระบบ…</p>
+            <div class="app-bootstrap__track" aria-hidden="true"><div class="app-bootstrap__bar"></div></div>
+            <button class="app-bootstrap__retry" type="button" onclick="window.location.reload()">ลองใหม่</button>
+        </div>
+    </div>
 
     <div id="login-overlay" class="hidden fixed inset-0 z-50 flex overflow-hidden" role="main" aria-labelledby="login-heading" aria-hidden="true">
 
@@ -809,7 +966,7 @@
     </div>
 
     <!-- โหลด session.js ก่อนเสมอ -->
-    <script src="public/js/session.js?v=20260723-onboarding-release"></script>
+    <script src="public/js/session.js?v=20261019-app-bootstrap-timeout-r1"></script>
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
@@ -1174,7 +1331,7 @@
     </script>
 
     <!-- main.js โหลดหลังสุด -->
-    <script type="module" src="public/js/main.js?v=20261019-safety-vote-lifecycle-r1"></script>
+    <script type="module" src="public/js/main.js?v=20261019-route-vendors-r1"></script>
     <script>
         if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
             window.addEventListener('load', () => {

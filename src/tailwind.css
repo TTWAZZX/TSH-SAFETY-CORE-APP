@@ -1,0 +1,4 @@
+/* Compiled locally by `npm run build:css`; do not serve this source file. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

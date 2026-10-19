@@ -17,7 +17,7 @@ function assertBbsRuntimeAssets(){
         return fs.readFileSync(file,'utf8');
     };
     const main=verify(entry[1],'index.html');
-    const bbs=main.match(/from\s+["']([^"']*pages\/bbs-smart-card\.js\?[^"']+)["']/);
+    const bbs=main.match(/["']([^"']*pages\/bbs-smart-card\.js\?[^"']+)["']/);
     assert.ok(bbs,'Main must load the BBS module through a versioned import.');
     const client=verify(bbs[1],'public/js/main.js');
     for(const target of ['bbs-card-designer.js','bbs-card-print.js','bbs-async-ui.js']){

@@ -88,12 +88,15 @@ async function login(employeeId, password) {
  */
 async function refreshSession(options = {}) {
     const preserveOnFailure = options?.preserveOnFailure === true;
+    const throwOnFailure = options?.throwOnFailure === true;
+    const signal = options?.signal;
     const token = getToken();
     if (!token) return null;
 
     try {
         const res = await fetch(`${API_BASE}/session/verify`, {
             method: 'POST',
+            signal,
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
@@ -122,7 +125,9 @@ async function refreshSession(options = {}) {
 
     } catch (err) {
         console.warn('Session verify failed:', err.message);
-        if (!preserveOnFailure || err?.invalidSession) clearSession();
+        const aborted = err?.name === 'AbortError';
+        if (err?.invalidSession || (!preserveOnFailure && !aborted)) clearSession();
+        if (throwOnFailure && !err?.invalidSession) throw err;
         return null;
     }
 }

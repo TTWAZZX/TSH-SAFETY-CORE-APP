@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.cjs -i ./src/tailwind.css -o ./public/tailwind.production.css --minify",
+    "test:production-css": "npm run build:css && node backend/scripts/production-css-static.test.js && npm --prefix backend run test:app-bootstrap",
+    "test:vendor-lazy-loading": "npm --prefix backend run test:vendor-lazy-loading",
+    "uat:vendor-lazy-loading": "npm --prefix backend run uat:vendor-lazy-loading",
+    "uat:app-bootstrap-network": "npm --prefix backend run uat:app-bootstrap-network",
     "inspect:safety-vote-phase1-schema": "npm --prefix backend run inspect:safety-vote-phase1-schema",
     "verify:safety-vote-phase1": "npm --prefix backend run verify:safety-vote-phase1",
     "verify:safety-vote-phase2": "npm --prefix backend run verify:safety-vote-phase2",
@@ -114,6 +119,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "playwright": "^1.64.0"
+    "playwright": "^1.64.0",
+    "tailwindcss": "^3.4.17"
   }
 }
