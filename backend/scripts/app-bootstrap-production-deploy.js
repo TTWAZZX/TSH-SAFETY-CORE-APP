@@ -136,7 +136,7 @@ function prepare(commit, tree) {
     assert(main.includes('./utils/vendor-loader.js?v=20261019-route-vendors-r1'), 'Lazy vendor loader integration missing');
     assert(main.includes('APP_BOOTSTRAP_TIMEOUTS') && main.includes('SESSION_VERIFY_TIMEOUT'), 'Session bootstrap timeout missing');
     assert(session.includes('const signal = options?.signal') && session.includes('throwOnFailure'), 'Abortable session verification contract missing');
-    assert(loader.includes('ensureRouteVendors'), 'Route vendor loader contract missing');
+    assert(loader.includes('loadVendorsForPage') && loader.includes('VENDOR_PAGE_CONTRACT'), 'Route vendor loader contract missing');
 
     const manifest = {
         contract: '2026-10-19-app-bootstrap-local-css-lazy-vendors-r1',
