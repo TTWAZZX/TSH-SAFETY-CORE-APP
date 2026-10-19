@@ -106,6 +106,7 @@
     "deploy:safety-vote-thai-time-production": "node scripts/safety-vote-thai-time-production-deploy.js --execute DEPLOY_SAFETY_VOTE_THAI_TIME_24H_PRODUCTION",
     "deploy:safety-vote-seven-plan-production": "node scripts/safety-vote-seven-plan-production-deploy.js --execute DEPLOY_SAFETY_VOTE_SEVEN_PLAN_RUNTIME_AND_SCHEMA",
     "deploy:safety-vote-lifecycle-integrity-production": "node scripts/safety-vote-public-discovery-preview-production-deploy.js --execute DEPLOY_SAFETY_VOTE_LIFECYCLE_INTEGRITY_RUNTIME",
+    "deploy:safety-vote-open-feedback-production": "node scripts/safety-vote-open-feedback-production-deploy.js --execute DEPLOY_SAFETY_VOTE_OPEN_FEEDBACK_HOTFIX",
     "verify:safety-vote-ux-phase9a": "npm run test:safety-vote-ux-phase9a && npm run test:safety-vote-ux-phase9a-migration && npm run test:safety-vote-ux-phase8 && npm run test:safety-vote-phase104 && npm run test:safety-vote-phase831-disabled",
     "test:safety-vote-ux-phase9b": "node scripts/safety-vote-ux-phase9b-static.test.js",
     "test:safety-vote-ux-phase9b-migration": "node scripts/safety-vote-ux-phase9b-migration.test.js",

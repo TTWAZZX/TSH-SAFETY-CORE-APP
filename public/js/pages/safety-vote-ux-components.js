@@ -128,7 +128,7 @@ export function openSafetyVoteConfirmDialog({
     const host = root.createElement('div');
     host.dataset.svDialog = 'confirm';
     host.className = 'sv-dialog-layer';
-    host.innerHTML = `<div class="sv-dialog-backdrop" data-sv-dialog-close></div><section class="sv-dialog" role="alertdialog" aria-modal="true" aria-labelledby="sv-dialog-title" aria-describedby="sv-dialog-description"><h2 id="sv-dialog-title">${escHtml(title)}</h2><p id="sv-dialog-description">${escHtml(description)}</p><div class="sv-dialog__actions"><button type="button" class="sv-button sv-button--secondary" data-sv-dialog-close>${escHtml(cancelLabel)}</button><button type="button" class="sv-button ${tone === 'danger' ? 'sv-button--danger' : 'sv-button--primary'}" data-sv-dialog-confirm>${escHtml(confirmLabel)}</button></div></section>`;
+    host.innerHTML = `<div class="sv-dialog-backdrop" data-sv-dialog-close></div><section class="sv-dialog" role="alertdialog" aria-modal="true" aria-labelledby="sv-dialog-title" aria-describedby="sv-dialog-description sv-dialog-error"><h2 id="sv-dialog-title">${escHtml(title)}</h2><p id="sv-dialog-description">${escHtml(description)}</p><p id="sv-dialog-error" class="sv-dialog__error" role="alert" aria-live="assertive" hidden></p><div class="sv-dialog__actions"><button type="button" class="sv-button sv-button--secondary" data-sv-dialog-close>${escHtml(cancelLabel)}</button><button type="button" class="sv-button ${tone === 'danger' ? 'sv-button--danger' : 'sv-button--primary'}" data-sv-dialog-confirm>${escHtml(confirmLabel)}</button></div></section>`;
     root.body.appendChild(host);
     const focusable = [...host.querySelectorAll('button')];
     host.querySelector('[data-sv-dialog-confirm]')?.focus();
@@ -136,8 +136,26 @@ export function openSafetyVoteConfirmDialog({
     host.querySelectorAll('[data-sv-dialog-close]').forEach(button => button.addEventListener('click', close));
     host.querySelector('[data-sv-dialog-confirm]')?.addEventListener('click', async () => {
         const button = host.querySelector('[data-sv-dialog-confirm]');
+        const error = host.querySelector('#sv-dialog-error');
+        const originalLabel = button.textContent;
         button.disabled = true;
-        try { await onConfirm(); close(); } catch (_) { button.disabled = false; }
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = 'กำลังตรวจสอบ...';
+        if (error) { error.hidden = true; error.textContent = ''; }
+        try { await onConfirm(); close(); }
+        catch (caught) {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            button.textContent = originalLabel;
+            const details = Array.isArray(caught?.details)
+                ? caught.details.map(item => item?.message || item?.detail || item?.label || item?.code).filter(Boolean)
+                : [];
+            if (error) {
+                error.textContent = [caught?.message || 'ไม่สามารถดำเนินการได้ กรุณาตรวจสอบข้อมูลแล้วลองใหม่', ...details].join(' · ');
+                error.hidden = false;
+            }
+            button.focus();
+        }
     });
     host.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); close(); return; }

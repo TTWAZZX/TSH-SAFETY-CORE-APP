@@ -10,6 +10,7 @@ const ok = (value, message) => { assert(value, message); checks += 1; };
 
 const admin = read('public/js/pages/admin-safety-vote-ux1.js');
 const wizard = read('public/js/pages/safety-vote-campaign-wizard.js');
+const components = read('public/js/pages/safety-vote-ux-components.js');
 const css = read('public/style.css');
 const nodePlanning = read('backend/routes/safety-vote-planning.js');
 const phpPlanning = read('api/handlers/safety_vote_planning.php');
@@ -31,7 +32,7 @@ ok(duplicateFlow.includes('/campaigns/${Number(campaignId)}/duplicate'), 'duplic
 ok(!duplicateFlow.includes('/config-copy') && !duplicateFlow.includes('/builder`') && !duplicateFlow.includes('/eligibility/rules`'), 'duplicate action performs no client-side partial copy writes');
 ok(duplicateFlow.includes("state.view = 'draft'") && duplicateFlow.includes('state.selectedId = newCampaignId') && duplicateFlow.includes('await load()'), 'duplicate action returns to and selects the new Draft');
 ok(!duplicateFlow.includes('openCampaignWizard('), 'duplicate action does not redirect into the creation wizard');
-ok(adminEntry.includes('admin-safety-vote-ux1.js?v=20261019-safety-vote-lifecycle-r1') && mainEntry.includes('admin.js?v=20261019-safety-vote-lifecycle-r1') && index.includes('main.js?v=20261019-safety-vote-lifecycle-r1') && admin.includes('safety-vote-campaign-wizard.js?v=20261019-safety-vote-atomic-duplicate-r1'), 'lifecycle cache-bust chain');
+ok(adminEntry.includes('admin-safety-vote-ux1.js?v=20261019-safety-vote-open-feedback-r1') && mainEntry.includes('admin.js?v=20261019-safety-vote-open-feedback-r1') && index.includes('main.js?v=20261019-safety-vote-open-feedback-r1') && admin.includes('safety-vote-campaign-wizard.js?v=20261019-safety-vote-open-feedback-r1'), 'lifecycle cache-bust chain');
 ok(admin.includes('/safety-vote/admin/permissions') && admin.includes('duplicateCampaign: false'), 'permission capability fails closed in the UI');
 ok(admin.includes('ไม่คัดลอกไฟล์') && admin.includes('Audit'), 'copy exclusions are explicit');
 
@@ -58,6 +59,10 @@ ok(wizard.includes('sessionStorage.setItem(recoveryKey') && wizard.includes('ses
 ok(wizard.includes("window.addEventListener('beforeunload', beforeUnload)") && wizard.includes("window.removeEventListener('beforeunload', beforeUnload)"), 'unsaved-change browser guard has cleanup');
 ok(wizard.includes('data-svw-recovery="restore"') && wizard.includes('data-svw-recovery="discard"'), 'recovery requires explicit user choice');
 ok(wizard.includes('svw-readiness-summary') && wizard.includes('serverUpdatedAt'), 'readiness and last-edited metadata');
+const openCampaignFlow = wizard.slice(wizard.indexOf('const openCampaign = () =>'), wizard.indexOf('const beforeUnload'));
+ok(openCampaignFlow.includes('/readiness') && openCampaignFlow.indexOf('/readiness') < openCampaignFlow.indexOf('/lifecycle/${command}'), 'campaign open checks authoritative server readiness before lifecycle mutation');
+ok(openCampaignFlow.includes('readiness.data?.blockers') && wizard.includes('PRODUCTION_VISIBILITY'), 'campaign open maps authoritative readiness blockers for Admin feedback');
+ok(components.includes('id="sv-dialog-error"') && components.includes('caught?.details') && components.includes("error.hidden = false") && components.includes("button.textContent = 'กำลังตรวจสอบ...'"), 'confirmation dialog exposes progress and asynchronous API failures without closing');
 ok(admin.includes('data-sv-draft-select-all') && admin.includes('data-sv-bulk-void'), 'bulk Draft selection');
 ok(admin.includes('for (const row of rows)') && admin.includes('API.delete(`/safety-vote/admin/campaigns/${Number(row.id)}`'), 'bulk action reuses audited safe void endpoint');
 ok(admin.includes('/planning/campaigns/${id}/assets') && admin.includes('data-sv-library-asset'), 'promotion asset library is campaign scoped');

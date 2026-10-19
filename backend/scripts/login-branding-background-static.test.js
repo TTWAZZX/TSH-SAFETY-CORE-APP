@@ -64,7 +64,7 @@ check('Node background upload is Admin-only and bounded to 5 MB', node.includes(
 check('Node background upload is audited', node.includes("action: 'UPLOAD_BRANDING_BACKGROUND'"));
 check('PHP public Branding response exposes bounded background URL', phpIndex.includes("'loginBackgroundUrl' => mb_substr((string) ($branding['loginBackgroundUrl'] ?? ''), 0, 1024)"));
 check('PHP background upload is Admin-only with matching size and types', phpStorage.includes("$path === '/upload/branding-background'") && phpStorage.includes("store_uploaded_file('background'") && phpStorage.includes('5 * 1024 * 1024'));
-check('cache chain includes the current Login Branding and route-vendor revisions', html.includes('main.js?v=20261019-route-vendors-r1') && main.includes('login-guides.js?v=20261011-login-branding-background-r2'));
+check('cache chain includes the current Login Branding and application revisions', html.includes('main.js?v=20261019-safety-vote-open-feedback-r1') && main.includes('login-guides.js?v=20261011-login-branding-background-r2'));
 
 console.log(JSON.stringify({
     marker: 'LOGIN_BRANDING_BACKGROUND',

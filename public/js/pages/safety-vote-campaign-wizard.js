@@ -1,6 +1,6 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
-import { openSafetyVoteConfirmDialog, safetyVoteCampaignPreview, safetyVoteJourneyNav } from './safety-vote-ux-components.js?v=20261016-safety-vote-preview-parity-r1';
+import { openSafetyVoteConfirmDialog, safetyVoteCampaignPreview, safetyVoteJourneyNav } from './safety-vote-ux-components.js?v=20261019-safety-vote-open-feedback-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 import { formatThaiDateTime, formatThaiTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import {
@@ -466,7 +466,35 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
 
     const freezeEligibility = () => openSafetyVoteConfirmDialog({title:'ยืนยันการตรึงรายชื่อผู้มีสิทธิ์',description:`ระบบจะบันทึกรายชื่อผู้มีสิทธิ์ ${Number(state.draft.eligibilityPreview?.eligibleCount||0).toLocaleString('th-TH')} คนเป็น snapshot สำหรับแคมเปญนี้ การเปลี่ยนกฎภายหลังต้องตรวจสอบและตรึงใหม่`,confirmLabel:'ยืนยันและตรึงรายชื่อ',onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/eligibility/freeze`,{reason:'Safety Vote UX Phase 2 readiness wizard'});state.draft.eligibilityFrozen=true;state.draft.eligibilityPreview={...state.draft.eligibilityPreview,...response.data};setSaveState('saved','ตรึงรายชื่อผู้มีสิทธิ์แล้ว');render();}});
 
-    const openCampaign = () => { const scheduled = state.draft.openAt && new Date(state.draft.openAt).getTime() > Date.now(), command = scheduled ? 'schedule' : 'open', label = scheduled ? 'ตั้งเวลาแคมเปญ' : 'เปิดแคมเปญ'; return openSafetyVoteConfirmDialog({title:`ยืนยันการ${label}`,description:scheduled?'ระบบจะตรึงเนื้อหาและรายชื่อผู้มีสิทธิ์ แล้วเปิดรับคะแนนอัตโนมัติเมื่อถึงเวลา Asia/Bangkok ที่กำหนด':'เมื่อเปิดแล้ว เนื้อหาและรายชื่อผู้มีสิทธิ์ชุดนี้จะถูกใช้รับคำตอบ การแก้ไขฉบับร่างจะถูกจำกัดตามกติกาเดิมของระบบ',confirmLabel:label,onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/lifecycle/${command}`,{});showToast(`${label}แล้ว`,'success');cleanup();await onComplete({campaignId:state.persisted.campaignId,status:response.data?.status||(scheduled?'Scheduled':'Open')});}}); };
+    const readinessLabel = blocker => ({
+        ACTIVE_QUESTIONS: 'ยังไม่มีคำถามที่เปิดใช้งาน', CONTENT_PRESENT: 'ยังไม่มีคำถามที่เปิดใช้งาน',
+        QUESTION_OPTIONS_COMPLETE: 'ตัวเลือกของคำถามยังไม่ครบ', OPTIONS_COMPLETE: 'ตัวเลือกของคำถามยังไม่ครบ',
+        ELIGIBILITY_RULES_VALID: 'กฎผู้มีสิทธิ์ไม่สมบูรณ์', ELIGIBILITY_FROZEN: 'ยังไม่ได้ตรึงรายชื่อผู้มีสิทธิ์',
+        ELIGIBILITY_RULES_UNCHANGED: 'กฎผู้มีสิทธิ์เปลี่ยนหลังตรึงรายชื่อ', ELIGIBILITY_ROWS_UNCHANGED: 'ข้อมูลผู้มีสิทธิ์เปลี่ยนหลังตรึงรายชื่อ',
+        ELIGIBILITY_NOT_DRIFTED: 'กฎหรือข้อมูลผู้มีสิทธิ์เปลี่ยนหลังตรึงรายชื่อ', ELIGIBLE_POPULATION: 'ไม่พบผู้มีสิทธิ์',
+        ELIGIBLE_VOTERS_PRESENT: 'ไม่พบผู้มีสิทธิ์', ELIGIBLE_ACCOUNTS_READY: 'บัญชีผู้มีสิทธิ์บางรายการยังไม่พร้อมหรือมีคำเตือน',
+        SCHEDULE_VALID: 'กำหนดเวลาเปิด–ปิดไม่ถูกต้อง', PARTICIPANT_VISIBILITY: 'แคมเปญถูกซ่อนหรืออยู่ในโหมดทดสอบ',
+        PRODUCTION_VISIBILITY: 'แคมเปญถูกซ่อนหรืออยู่ในโหมดทดสอบ'
+    }[blocker?.code] || blocker?.detail || blocker?.code || 'พบรายการที่ยังไม่พร้อม');
+
+    const openCampaign = () => {
+        const scheduled = state.draft.openAt && new Date(state.draft.openAt).getTime() > Date.now(), command = scheduled ? 'schedule' : 'open', label = scheduled ? 'ตั้งเวลาแคมเปญ' : 'เปิดแคมเปญ';
+        return openSafetyVoteConfirmDialog({
+            title:`ยืนยันการ${label}`,
+            description:scheduled?'ระบบจะตรึงเนื้อหาและรายชื่อผู้มีสิทธิ์ แล้วเปิดรับคะแนนอัตโนมัติเมื่อถึงเวลา Asia/Bangkok ที่กำหนด':'เมื่อเปิดแล้ว เนื้อหาและรายชื่อผู้มีสิทธิ์ชุดนี้จะถูกใช้รับคำตอบ การแก้ไขฉบับร่างจะถูกจำกัดตามกติกาเดิมของระบบ',
+            confirmLabel:label,
+            onConfirm:async()=>{
+                const readiness = await API.get(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/readiness`);
+                if (!readiness.data?.ready) {
+                    const error = new Error('ยังเปิดแคมเปญไม่ได้ กรุณาแก้รายการที่ระบบตรวจพบ');
+                    error.details = (readiness.data?.blockers || []).map(blocker => ({ message: readinessLabel(blocker) }));
+                    throw error;
+                }
+                const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/lifecycle/${command}`,{});
+                showToast(`${label}แล้ว`,'success');cleanup();await onComplete({campaignId:state.persisted.campaignId,status:response.data?.status||(scheduled?'Scheduled':'Open')});
+            }
+        });
+    };
 
     const beforeUnload = event => { if (!state.dirty && state.saveState !== 'saving') return; event.preventDefault(); event.returnValue = ''; };
     const cleanup = () => { clearTimeout(state.timer); window.removeEventListener('beforeunload', beforeUnload); state.objectUrls.forEach(url=>URL.revokeObjectURL(url)); state.objectUrls.clear(); };
