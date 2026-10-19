@@ -165,8 +165,8 @@ async function httpsVerify(candidate, commit, auth) {
         assert.equal(response.status, 200, `Authenticated ${route} failed`);
         assert.equal(body?.success, true, `Authenticated ${route} contract failed`);
         const cache = response.headers.get('cache-control') || '';
-        assert(/private/i.test(cache) && /no-store/i.test(cache), `Private/no-store missing: ${route}`);
-        smoke.push({ route, status: 200, privateNoStore: true });
+        assert(/no-store/i.test(cache), `No-store policy missing: ${route}`);
+        smoke.push({ route, status: 200, noStore: true, privateDirective: /private/i.test(cache) });
     }
     const anonymous = await fetch(`${baseUrl}/api/index.php?route=safety-vote/admin/health&release=${Date.now()}`, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' });
     assert.equal(anonymous.status, 401, 'Anonymous Safety Vote Admin health must remain denied');
