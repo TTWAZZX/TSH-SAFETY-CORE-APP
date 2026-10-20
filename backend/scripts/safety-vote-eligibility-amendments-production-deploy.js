@@ -9,7 +9,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 
 const root = path.resolve(__dirname, '..', '..');
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = '6a531c01f9645b3252b52c4f07d166f4ea2a44d5';
+const productionBaseline = 'ef47230aa705397231c29f988418be3be9cea363';
 const confirmation = 'DEPLOY_SAFETY_VOTE_ELIGIBILITY_AMENDMENTS';
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const helperTemplate = path.join(__dirname, 'safety-vote-eligibility-amendments-production-helper.php.template');
@@ -38,7 +38,7 @@ const runtimePaths = [
     'public/js/utils/safety-vote-auth-image.js',
     'public/style.css',
 ];
-const newPaths = new Set(['api/handlers/safety_vote_eligibility_amendments.php', 'public/js/pages/admin-safety-vote-eligibility.js', 'public/js/utils/safety-vote-auth-image.js']);
+const newPaths = new Set(['public/js/utils/safety-vote-auth-image.js']);
 const publicPaths = runtimePaths.filter(relative => relative === 'index.html' || relative.startsWith('public/'));
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
 const nonce = crypto.randomBytes(6).toString('hex');
@@ -89,7 +89,7 @@ function prepare(commit, tree) {
         const before = doubleDownload(relative, 'remote-before'); assert.equal(before.normalizedSha256, normalizedSha(gitBlob(productionBaseline, relative)), `Production drift from ${productionBaseline}: ${relative}`);
         const rollbackPath = under(path.join(rollbackRoot, 'runtime-before'), relative); fs.mkdirSync(path.dirname(rollbackPath), { recursive: true }); fs.copyFileSync(before.firstPath, rollbackPath); restoreFiles.push({ path: relative, bytes: before.bytes, sha256: before.sha256, rollbackPath }); remoteBefore.push({ path: relative, bytes: before.bytes, sha256: before.sha256, doubleDownloadMatched: true });
     }
-    const manifest = { contract: '2026-10-20-safety-vote-eligibility-amendments-production-r1', productionBaseline, candidate: { commit, tree }, runtimePaths, restoreFiles: restoreFiles.map(({ rollbackPath: ignored, ...file }) => file), removeOnRollback, schemaRollbackPolicy: 'Preserve additive columns and evidence; disable enrollment and restore prior settings.' };
+    const manifest = { contract: '2026-10-20-safety-vote-eligibility-media-runtime-r2', productionBaseline, candidate: { commit, tree }, runtimePaths, restoreFiles: restoreFiles.map(({ rollbackPath: ignored, ...file }) => file), removeOnRollback, schemaRollbackPolicy: 'No schema mutation in this incremental runtime release.' };
     const manifestPath = path.join(rollbackRoot, 'rollback-manifest.json'); fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     return { candidate, restoreFiles, removeOnRollback, remoteBefore, manifestSha256: fileSha(manifestPath) };
 }
@@ -122,8 +122,9 @@ function writeEvidence(name, value) { fs.mkdirSync(evidenceRoot, { recursive: tr
 async function main() {
     assert.equal(process.argv[2], '--execute'); assert.equal(process.argv[3], confirmation, `Confirmation token must be ${confirmation}`);
     const branch = String(git(['branch', '--show-current'])).trim(), commit = String(git(['rev-parse', 'HEAD'])).trim(), origin = String(git(['rev-parse', 'origin/main'])).trim(), tree = String(git(['rev-parse', 'HEAD^{tree}'])).trim(); assert.equal(branch, 'main'); assert.equal(commit, origin, 'Candidate must be pushed'); assert.equal(String(git(['status', '--porcelain'])).trim(), '', 'Worktree must be clean');
-    const auth = await resolveAuth(), smokeBefore = await smoke(auth); prepared = prepare(commit, tree); prepareHelper(); const migration = await migrate(); upload(); const deployed = verify(), https = await verifyHttps(commit); const activation = await activate(); const smokeAfter = await smoke(auth, '2026-10-20-eligibility-amendments-r1'); const cleaned = await cleanup();
-    const result = { contract: '2026-10-20-safety-vote-eligibility-amendments-production-r1', generatedAt: new Date().toISOString(), decision: 'PASS_SAFETY_VOTE_ELIGIBILITY_AMENDMENTS_PRODUCTION_DEPLOYMENT', candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length }, remoteBefore: prepared.remoteBefore, migration, activation, deployment: { uploaded: runtimePaths, doubleDownloadVerified: deployed.length, httpsVerified: https.length }, smokeBefore, smokeAfter, rollbackPackage: { manifestSha256: prepared.manifestSha256, restoreFiles: prepared.restoreFiles.length, removeOnRollback: prepared.removeOnRollback.length, schemaRollbackSha256: migration.backup.sha256, verified: true }, cleanup: cleaned, posture: { externalDelivery: false, permissionsChanged: false, businessRowsMutated: false }, rollback: { attempted: false } };
+    const auth = await resolveAuth(), smokeBefore = await smoke(auth, '2026-10-20-eligibility-amendments-r1'); prepared = prepare(commit, tree); upload(); const deployed = verify(), https = await verifyHttps(commit); const smokeAfter = await smoke(auth, '2026-10-20-eligibility-amendments-r1'); const cleaned = await cleanup();
+    const migration = { attempted: false, alreadyApplied: true, schemaVersion: '2026-10-20-eligibility-amendments-r1', sourceEvidence: 'safety-vote-eligibility-amendments-deploy-20261020033559' }, activation = { attempted: false, alreadyEnabled: true };
+    const result = { contract: '2026-10-20-safety-vote-eligibility-media-runtime-r2', generatedAt: new Date().toISOString(), decision: 'PASS_SAFETY_VOTE_ELIGIBILITY_MEDIA_RUNTIME_PRODUCTION_DEPLOYMENT', candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length }, remoteBefore: prepared.remoteBefore, migration, activation, deployment: { uploaded: runtimePaths, doubleDownloadVerified: deployed.length, httpsVerified: https.length }, smokeBefore, smokeAfter, rollbackPackage: { manifestSha256: prepared.manifestSha256, restoreFiles: prepared.restoreFiles.length, removeOnRollback: prepared.removeOnRollback.length, schemaRollbackSha256: null, verified: true }, cleanup: cleaned, posture: { externalDelivery: false, permissionsChanged: false, schemaChanged: false, businessRowsMutated: false }, rollback: { attempted: false } };
     const resultSha256 = writeEvidence('result.json', result); process.stdout.write(`${JSON.stringify({ evidence: path.relative(root, evidenceRoot).replaceAll('\\', '/'), decision: result.decision, candidate: result.candidate, migration: result.migration, activation: result.activation, deployment: result.deployment, smokeAfter: result.smokeAfter, rollbackPackage: result.rollbackPackage, cleanup: result.cleanup, resultSha256 }, null, 2)}\n`);
 }
 
