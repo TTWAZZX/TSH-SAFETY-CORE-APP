@@ -19,7 +19,8 @@ const state = {
     view: 'all', query: '', screen: 'list', mode: 'edit', newAttempt: false, answers: {}, errors: [], receipt: null,
     loading: true, error: null, denied: false, moduleDisabled: false, inFlight: false, requestKey: '',
     workflowDraftId: null, workflowReference: '', submitError: null, objectUrls: new Set(), promotionBlobs: new Map(), trackedPromotionEvents: new Set(),
-    liveView: false, liveResults: null, liveError: null, liveInFlight: false, livePaused: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null
+    liveView: false, liveResults: null, liveError: null, liveInFlight: false, livePaused: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null,
+    discoveryRefreshing: false, discoveryRefreshHandler: null
 };
 
 function trackPromotionEvent(promotionId, eventType) {
@@ -430,6 +431,32 @@ function render() {
     if (state.screen === 'detail' && state.detail) renderDetail(); else renderList();
 }
 
+async function refreshDiscoveryFromLatestSnapshot() {
+    if (state.discoveryRefreshing || state.loading || state.screen !== 'list' || document.hidden || document.getElementById('safety-vote-page') !== state.page) return;
+    state.discoveryRefreshing = true;
+    try {
+        const response = await API.get('/safety-vote/me/campaigns', { suppressErrorLog: true });
+        state.campaigns = response.data.rows || [];
+        if (state.screen === 'list') renderList();
+    } catch (_) {
+        // Preserve the last successful discovery view; the normal page load still surfaces hard failures.
+    } finally {
+        state.discoveryRefreshing = false;
+    }
+}
+
+function bindLatestSnapshotDiscoveryRefresh() {
+    if (state.discoveryRefreshHandler) {
+        window.removeEventListener('focus', state.discoveryRefreshHandler);
+        document.removeEventListener('visibilitychange', state.discoveryRefreshHandler);
+    }
+    state.discoveryRefreshHandler = () => {
+        if (!document.hidden) refreshDiscoveryFromLatestSnapshot();
+    };
+    window.addEventListener('focus', state.discoveryRefreshHandler);
+    document.addEventListener('visibilitychange', state.discoveryRefreshHandler);
+}
+
 async function load() {
     stopLivePolling();
     clearObjectUrls(); state.promotionBlobs.clear();
@@ -468,5 +495,6 @@ async function load() {
 export async function loadSafetyVotePage() {
     if (!isSafetyVoteUxV1Enabled()) return loadLegacySafetyVotePage();
     state.page = document.getElementById('safety-vote-page'); if (!state.page) return;
+    bindLatestSnapshotDiscoveryRefresh();
     await load();
 }

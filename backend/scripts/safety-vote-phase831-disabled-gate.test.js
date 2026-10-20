@@ -24,6 +24,16 @@ const migrations = [
     '20261008_safety_vote_phase6_secret_election.sql',
     '20261008_safety_vote_phase7_integrations_governance.sql',
 ];
+const currentSchemaMigrations = [
+    '20261009_safety_vote_phase10_4_media_versioning.sql',
+    '20261010_safety_vote_ux_phase9a_engagement.sql',
+    '20261010_safety_vote_ux_phase9b_planning_content_communication.sql',
+    '20261010_safety_vote_ux_phase9c_engagement_analytics.sql',
+    '20261015_safety_vote_live_results.sql',
+    '20261016_safety_vote_participation_attempts.sql',
+    '20261016_safety_vote_campaign_governance.sql',
+    '20261020_safety_vote_eligibility_amendments.sql',
+];
 const children = [];
 let admin;
 
@@ -83,6 +93,13 @@ async function seed(name) {
         }
         const [[integrationSetting]] = await db.query("SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='phase7_integrations_enabled'");
         assert.strictEqual(integrationSetting.SettingValue, '0', 'Phase 7 integrations must finish disabled');
+        for (const migration of currentSchemaMigrations) {
+            const sql = fs.readFileSync(path.join(root, 'backend', 'migrations', migration), 'utf8');
+            await db.query(sql);
+        }
+        await db.query("UPDATE SafetyVote_Settings SET SettingValue='0',UpdatedBy='phase831-disabled-fixture' WHERE SettingKey='module_enabled'");
+        const [[schemaSetting]] = await db.query("SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='schema_version'");
+        assert.strictEqual(schemaSetting.SettingValue, '2026-10-20-eligibility-amendments-r1', 'Disabled fixture must use the current schema contract');
     } finally {
         await db.end();
     }
@@ -93,7 +110,7 @@ async function verifyStack(label, base, name) {
     assert.strictEqual(unauthenticated.status, 401, `${label} health must remain authenticated`);
 
     const health = await call(base, '/admin/health');
-    assert.strictEqual(health.status, 200, `${label} health must remain available`);
+    assert.strictEqual(health.status, 200, `${label} health must remain available: ${JSON.stringify(health.data)}`);
     assert.strictEqual(health.data?.data?.moduleEnabled, false, `${label} health must report disabled`);
 
     const preflight = await call(base, '/admin/campaigns/1/release-preflight');

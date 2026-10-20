@@ -27,7 +27,8 @@ const migrations = [
     '20261010_safety_vote_ux_phase9c_engagement_analytics.sql',
     '20261015_safety_vote_live_results.sql',
     '20261016_safety_vote_participation_attempts.sql',
-    '20261016_safety_vote_campaign_governance.sql'
+    '20261016_safety_vote_campaign_governance.sql',
+    '20261020_safety_vote_eligibility_amendments.sql'
 ];
 const children = [];
 let admin;

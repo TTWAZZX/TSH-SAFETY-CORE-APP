@@ -15,10 +15,12 @@ const user = String(process.env.DB_USER || '');
 const password = String(process.env.DB_PASS || '');
 const target = String(process.env.DB_NAME || '').trim();
 const mysqlBin = process.env.MYSQL_BIN || 'C:\\xampp\\mysql\\bin\\mysql.exe';
-const localBackup = path.join(root, 'backups', '20261015-195254', 'uattshpc_safetytsh.sql');
+const mysqldumpBin = process.env.MYSQLDUMP_BIN || 'C:\\xampp\\mysql\\bin\\mysqldump.exe';
 const blocked = new Set(['mysql', 'sys', 'information_schema', 'performance_schema']);
 const safeName = /^[A-Za-z0-9_]+$/;
 const disposable = `tsh_production_restore_verify_${Date.now()}`;
+const localDisposable = `tsh_local_backup_verify_${Date.now()}`;
+const recoverLocalBackup = process.argv.includes('--recover-local-backup');
 let admin;
 let targetReplaced = false;
 
@@ -61,6 +63,26 @@ function importSql(database, file, useDatabase = true) {
     }
 }
 
+function dumpLocalDatabase(file) {
+    const args = [
+        '--no-defaults', '--protocol=tcp', `--host=${host}`, `--port=${port}`, `--user=${user}`,
+        '--single-transaction', '--routines', '--triggers', '--events', '--hex-blob',
+        '--default-character-set=utf8mb4', '--skip-lock-tables', `--result-file=${file}`, target
+    ];
+    const result = spawnSync(mysqldumpBin, args, {
+        cwd: root,
+        env: { ...process.env, MYSQL_PWD: password },
+        encoding: 'utf8',
+        timeout: 300000,
+        windowsHide: true
+    });
+    if (result.error || result.status !== 0) {
+        const detail = String(result.stderr || result.error?.message || 'unknown dump error').replace(password, '[REDACTED]').slice(0, 2000);
+        throw new Error(`Local database backup failed (${target}): ${detail}`);
+    }
+    assert(fs.existsSync(file) && fs.statSync(file).size > 0, 'Local database backup is empty.');
+}
+
 async function inventory(database) {
     const connection = await mysql.createConnection({ host, port, user, password, database });
     try {
@@ -87,26 +109,59 @@ async function recreate(database) {
     assert(['127.0.0.1', 'localhost', '::1'].includes(host.toLowerCase()), 'Refusing to restore a non-loopback database host.');
     assert(safeName.test(target) && !blocked.has(target.toLowerCase()), 'Refusing to replace an unsafe/system database name.');
     assert(fs.existsSync(mysqlBin), 'Local mysql client was not found.');
-    assert(fs.existsSync(localBackup), 'Pre-restore Local backup was not found.');
+    assert(fs.existsSync(mysqldumpBin), 'Local mysqldump client was not found.');
 
     const evidence = newestExport();
     const resultPath = path.join(evidence, 'result.json');
     const sqlPath = path.join(evidence, 'production-full-database.sql');
     const gzipPath = path.join(evidence, 'production-full-database-a.sql.gz');
+    const recoveryBackup = path.join(evidence, `local-before-${target}.sql`);
+    const localBackup = recoverLocalBackup
+        ? recoveryBackup
+        : path.join(evidence, `local-before-${target}-${Date.now()}.sql`);
     const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
     assert.strictEqual(result.decision, 'PASS_PRODUCTION_FULL_DATABASE_DOWNLOAD');
     assert.strictEqual(sha256(gzipPath), result.sha256, 'Production export SHA-256 no longer matches its signed result.');
 
     admin = await mysql.createConnection({ host, port, user, password });
+    if (recoverLocalBackup) {
+        assert(fs.existsSync(localBackup), `Verified Local recovery backup was not found: ${localBackup}`);
+        await recreate(target);
+        importSql(target, localBackup);
+        const recovered = await inventory(target);
+        const output = {
+            decision: 'PASS_LOCAL_BACKUP_RECOVERY',
+            recoveredAt: new Date().toISOString(),
+            targetHost: 'loopback',
+            targetDatabase: target,
+            backup: path.relative(root, localBackup).replace(/\\/g, '/'),
+            backupSha256: sha256(localBackup),
+            tables: recovered.tables,
+            rows: recovered.rows
+        };
+        fs.writeFileSync(path.join(evidence, 'local-recovery-result.json'), `${JSON.stringify(output, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+        return;
+    }
+    const [[targetExists]] = await admin.query('SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME=?', [target]);
+    assert.strictEqual(Number(targetExists.count), 1, `Local target database does not exist: ${target}`);
+    const localBefore = await inventory(target);
+    dumpLocalDatabase(localBackup);
+    await recreate(localDisposable);
+    importSql(localDisposable, localBackup);
+    const localBackupVerification = await inventory(localDisposable);
+    assert.deepStrictEqual(localBackupVerification, localBefore, 'Fresh Local backup restore inventory does not match the source database.');
+    await admin.query(`DROP DATABASE ${quoteIdent(localDisposable)}`);
+
     await recreate(disposable);
     importSql(disposable, sqlPath);
     const verification = await inventory(disposable);
     assert.deepStrictEqual(verification, { tables: Number(result.tables), rows: Number(result.rows) }, 'Disposable restore inventory does not match Production export.');
     await admin.query(`DROP DATABASE ${quoteIdent(disposable)}`);
 
-    await recreate(target);
     targetReplaced = true;
     try {
+        await recreate(target);
         importSql(target, sqlPath);
         const restored = await inventory(target);
         assert.deepStrictEqual(restored, verification, 'Local restored inventory does not match verified disposable restore.');
@@ -119,7 +174,10 @@ async function recreate(database) {
             tables: restored.tables,
             rows: restored.rows,
             disposableRestoreVerified: true,
-            preRestoreBackup: path.relative(root, localBackup).replace(/\\/g, '/')
+            preRestoreBackup: path.relative(root, localBackup).replace(/\\/g, '/'),
+            preRestoreBackupSha256: sha256(localBackup),
+            preRestoreBackupVerified: true,
+            localBefore
         };
         fs.writeFileSync(path.join(evidence, 'local-restore-result.json'), `${JSON.stringify(output, null, 2)}\n`);
         process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
@@ -135,6 +193,7 @@ async function recreate(database) {
 }).finally(async () => {
     if (admin) {
         await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(disposable)}`).catch(() => {});
+        await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(localDisposable)}`).catch(() => {});
         await admin.end().catch(() => {});
     }
 });

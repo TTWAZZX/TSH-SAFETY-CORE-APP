@@ -14,10 +14,11 @@ import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from '
 import { CORE_TEMPLATES } from './safety-vote-wizard-model.mjs?v=20261015-safety-vote-live-results-r1';
 import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261019-safety-vote-account-advisory-r1';
 import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261016-safety-vote-empty-threshold-live-r1';
-import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261019-safety-vote-lifecycle-r1';
+import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261020-eligibility-reporting-r1';
 import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261015-safety-vote-thai-time-r1';
 import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261015-safety-vote-thai-time-r1';
 import { renderSafetyVoteReviewWorkspace } from './admin-safety-vote-review.js?v=20261015-safety-vote-thai-time-r1';
+import { renderSafetyVoteEligibilityWorkspace } from './admin-safety-vote-eligibility.js?v=20261020-eligibility-admin-r1';
 import { bangkokInputToIso, formatThaiDateTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const VIEW_LABELS = {
@@ -256,8 +257,8 @@ function detailMarkup(row) {
     const draft = String(row.Status).toLowerCase() === 'draft';
     const readiness = draft ? draftReadiness(row) : null;
     const actions = draft
-        ? `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div>${duplicateCampaignButton(row.id, 'ทำสำเนาการตั้งค่าและเนื้อหา')}<button type="button" data-sv-action="open-workspace">ตั้งค่าขั้นสูง</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`
-        : `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-action="open-operations">ศูนย์ปฏิบัติการ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-action="open-results">ผลและการรับรอง</button><button type="button" data-sv-action="open-governance">ธรรมาภิบาล</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`;
+        ? `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div>${duplicateCampaignButton(row.id, 'ทำสำเนาการตั้งค่าและเนื้อหา')}<button type="button" data-sv-action="open-eligibility">จัดการผู้มีสิทธิ์</button><button type="button" data-sv-action="open-workspace">ตั้งค่าขั้นสูง</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`
+        : `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-action="open-operations">ศูนย์ปฏิบัติการ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-action="open-eligibility">จัดการผู้มีสิทธิ์</button><button type="button" data-sv-action="open-results">ผลและการรับรอง</button><button type="button" data-sv-action="open-governance">ธรรมาภิบาล</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`;
     return `<section class="sv-master-detail__detail" aria-labelledby="sv-detail-title"><div class="sv-detail-header"><div><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h2 id="sv-detail-title" tabindex="-1">${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</h2><p>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')} · ${escHtml(PRIVACY_LABELS[row.PrivacyMode] || 'ไม่ระบุรูปแบบความเป็นส่วนตัว')}</p><small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} โดย ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></div><div>${safetyVoteStatusBadge(row.Status)}${governanceBadges(row)}</div></div>${Number(row.IsHidden)===1?`<div class="sv-readiness-warning" role="status"><strong>ผู้ใช้ทั่วไปมองไม่เห็นแคมเปญนี้</strong><span>${escHtml(row.HideReason||'ซ่อนโดยผู้ดูแลระบบ')}</span></div>`:''}${draftWarning}${readiness ? `<section class="sv-detail-readiness" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อมเบื้องต้น ${readiness.percent}%</strong><span>${readiness.passed} จาก ${readiness.total} หมวด · ตรวจรายละเอียดจริงใน Wizard ก่อนเปิด</span></div><span><i style="width:${readiness.percent}%"></i></span></section>` : ''}<nav class="sv-workspace-nav" aria-label="ส่วนงานสำหรับแคมเปญประเภท ${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || '')}">${sections.map(([key, label], index) => `<button type="button" data-sv-section="${key}" ${index === 0 ? 'aria-current="page"' : ''}>${escHtml(label)}</button>`).join('')}</nav><dl class="sv-detail-summary"><div><dt>ผู้รับผิดชอบ</dt><dd>${escHtml(row.OwnerEmployeeID || 'ยังไม่ระบุ')}</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledOpenAt || row.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledCloseAt || row.CloseAt)}</dd></div><div><dt>การแสดงผล</dt><dd>${escHtml(RESULT_LABELS[row.ResultVisibility] || 'ตามการตั้งค่าแคมเปญ')}</dd></div></dl>${actions}</section>`;
 }
 
@@ -479,7 +480,7 @@ function bind() {
     container?.querySelector('[data-sv-sort]')?.addEventListener('change', event => { state.sort = event.target.value; render(); });
     container?.querySelectorAll('[data-sv-select]').forEach(button => button.addEventListener('click', () => { state.selectedId = Number(button.dataset.svSelect); state.drawerOpen = false; render(); state.container?.querySelector('#sv-detail-title')?.focus?.(); }));
     container?.querySelectorAll('[data-sv-action]').forEach(button => button.addEventListener('click', () => handleAction(button.dataset.svAction)));
-    container?.querySelectorAll('[data-sv-section]').forEach(button => button.addEventListener('click', () => { container.querySelectorAll('[data-sv-section]').forEach(item => item.removeAttribute('aria-current')); button.setAttribute('aria-current', 'page'); }));
+    container?.querySelectorAll('[data-sv-section]').forEach(button => button.addEventListener('click', () => { const section = button.dataset.svSection; if (section === 'eligibility') { openEligibilityWorkspace(); return; } container.querySelectorAll('[data-sv-section]').forEach(item => item.removeAttribute('aria-current')); button.setAttribute('aria-current', 'page'); }));
     container?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => handleJourneyStep(button.dataset.svJourneyStep)));
     container?.querySelectorAll('[data-sv-edit-draft]').forEach(button => button.addEventListener('click', () => openCampaignWizard(Number(button.dataset.svEditDraft))));
     container?.querySelectorAll('[data-sv-void-draft]').forEach(button => button.addEventListener('click', () => voidDraftCampaign(Number(button.dataset.svVoidDraft))));
@@ -600,6 +601,12 @@ function openOperationsWorkspace() {
     renderSafetyVoteOperationsWorkspace(state.container, { campaign: row, onClose: () => render(), onNavigate: handleJourneyStep });
 }
 
+function openEligibilityWorkspace() {
+    const row = selectedCampaign();
+    if (!row) return;
+    renderSafetyVoteEligibilityWorkspace(state.container, { campaign: row, onClose: () => render(), onNavigate: handleJourneyStep });
+}
+
 function openResultsWorkspace() {
     const row = selectedCampaign();
     if (!row) return;
@@ -634,6 +641,7 @@ function handleAction(action) {
     if (action === 'close-drawer') { state.drawerOpen = false; render(); return; }
     if (action === 'new-campaign') { openCreationLauncher(); return; }
     if (action === 'open-operations') { openOperationsWorkspace(); return; }
+    if (action === 'open-eligibility') { openEligibilityWorkspace(); return; }
     if (action === 'open-results') { openResultsWorkspace(); return; }
     if (action === 'open-governance') { openGovernanceWorkspace(); return; }
     if (action === 'open-versions') { openVersionWorkspace(); return; }
