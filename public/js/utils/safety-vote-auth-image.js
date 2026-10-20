@@ -24,14 +24,14 @@ function stateHost(image) {
     return host;
 }
 
-function setState(host, state, message) {
+function setState(host, state, message, retryable = state === 'error') {
     if (!host) return;
     host.dataset.svpMediaState = state;
     host.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
     const label = host.querySelector('[data-sv-auth-status]') || host.querySelector('.svp-auth-media__status > span:last-child');
     if (label) label.textContent = message;
     let retry = host.querySelector('[data-sv-auth-retry]');
-    if (state === 'error' && !retry) {
+    if (retryable && !retry) {
         retry = document.createElement('span');
         retry.setAttribute('role', 'button');
         retry.tabIndex = 0;
@@ -39,7 +39,7 @@ function setState(host, state, message) {
         retry.dataset.svAuthRetry = '';
         retry.textContent = 'ลองใหม่';
         host.querySelector('.svp-auth-media__status')?.appendChild(retry);
-    } else if (state !== 'error') retry?.remove();
+    } else if (!retryable) retry?.remove();
 }
 
 async function cachedBlob(fileId, force = false) {
@@ -71,10 +71,11 @@ async function hydrateOne(root, image, force = false) {
         if (typeof image.decode === 'function') await image.decode();
         if (!image.isConnected) return;
         setState(host, 'loaded', 'โหลดภาพแล้ว');
-    } catch (_) {
+    } catch (error) {
         if (!image.isConnected) return;
         image.removeAttribute('src');
-        setState(host, 'error', 'โหลดภาพไม่สำเร็จ');
+        const unavailable = error?.code === 'FILE_NOT_FOUND';
+        setState(host, unavailable ? 'unavailable' : 'error', unavailable ? 'ไม่พบไฟล์ต้นฉบับ' : 'โหลดภาพไม่สำเร็จ', !unavailable);
     }
 }
 

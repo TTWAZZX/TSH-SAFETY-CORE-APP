@@ -10,16 +10,22 @@ const live = read('public/js/pages/safety-vote-live-results.js');
 const planning = read('public/js/pages/admin-safety-vote-planning.js');
 const nodePhase3 = read('backend/routes/safety-vote-phase3.js');
 const phpPhase3 = read('api/handlers/safety_vote_phase3.php');
+const nodeCore = read('backend/routes/safety-vote.js');
+const phpCore = read('api/handlers/safety_vote.php');
+const nodeAnalytics = read('backend/routes/safety-vote-analytics.js');
+const phpAnalytics = read('api/handlers/safety_vote_analytics.php');
 const css = read('public/style.css');
 
-for (const marker of ['blobCache', 'กำลังโหลดภาพ', 'โหลดภาพไม่สำเร็จ', 'ลองใหม่', 'URL.createObjectURL', 'data-sv-auth-retry']) assert(loader.includes(marker), `central authenticated image loader missing ${marker}`);
+for (const marker of ['blobCache', 'กำลังโหลดภาพ', 'โหลดภาพไม่สำเร็จ', 'ไม่พบไฟล์ต้นฉบับ', 'ลองใหม่', 'URL.createObjectURL', 'data-sv-auth-retry']) assert(loader.includes(marker), `central authenticated image loader missing ${marker}`);
+for (const source of [nodeCore, phpCore]) for (const marker of ['ContentSha256', "Status='Active'", 'FileSize']) assert(source.includes(marker), `private-file content alias recovery missing ${marker}`);
+for (const source of [nodeAnalytics, phpAnalytics]) assert(source.includes("c.Status<>'Voided'"), 'published promotion tracking must remain independent from campaign lifecycle');
 assert(user.includes('hydrateSafetyVoteImages(state.page)') && user.includes('data-sv-auth-file'), 'participant images do not use the central loader');
 for (const source of [nodePhase3, phpPhase3]) {
     assert(source.includes('o.FileID OptionFileID'), 'own-response query must include the selected option image');
     assert(source.includes('optionImageFileId'), 'own-response DTO must expose the private option image file ID');
 }
-for (const marker of ['submittedAnswerMarkup', 'svp-submitted-answer__image', 'data-sv-gallery-group', 'optionImageFileId']) assert(user.includes(marker), `submitted-answer image UI missing ${marker}`);
-assert(css.includes('.svp-submitted-answer--with-image') && css.includes('.svp-submitted-answer__image'), 'submitted-answer image layout is incomplete');
+for (const marker of ['submittedAnswerMarkup', 'svp-submitted-answer__image', 'svp-submitted-answer__content', 'svp-review__question', 'data-sv-gallery-group', 'optionImageFileId']) assert(user.includes(marker), `submitted-answer image UI missing ${marker}`);
+assert(css.includes('.svp-submitted-answer--with-image') && css.includes('.svp-submitted-answer__image') && css.includes('[data-svp-media-state="unavailable"]'), 'submitted-answer image layout is incomplete');
 assert(live.includes('hydrateSafetyVoteImages(root)') && live.includes('data-sv-auth-file'), 'live-result images do not use the central loader');
 assert(css.includes('[data-svp-media-state="loaded"]') && css.includes('.svp-auth-media__retry'), 'loading, loaded and retry presentation is incomplete');
 assert(user.includes("if (!isSafetyVoteEngagementV1Enabled() || !state.notificationCenter.length) return ''"), 'empty notification inbox must be hidden');

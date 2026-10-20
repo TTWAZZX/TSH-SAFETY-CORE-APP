@@ -89,7 +89,7 @@ router.post('/engagement/promotions/:id/events', permit('SAFETY_VOTE_VIEW'), asy
     const id = positiveInt(req.params.id), eventType = analytics.normalizeEventType(req.body?.eventType);
     if (!id || !eventType) return fail(res, 400, 'VALIDATION_FAILED', 'Promotion and aggregate event type are required.');
     try {
-        const [[promotion]] = await db.query("SELECT p.id,p.CampaignID,c.CurrentVersionID FROM SafetyVote_Promotions p JOIN SafetyVote_Campaigns c ON c.id=p.CampaignID WHERE p.id=? AND p.Status='Published' AND p.StartAt<=NOW() AND p.EndAt>NOW() AND c.Status IN ('Scheduled','Open','Closed','Certified','Published')", [id]);
+        const [[promotion]] = await db.query("SELECT p.id,p.CampaignID,c.CurrentVersionID FROM SafetyVote_Promotions p JOIN SafetyVote_Campaigns c ON c.id=p.CampaignID WHERE p.id=? AND p.Status='Published' AND p.StartAt<=NOW() AND p.EndAt>NOW() AND c.Status<>'Voided'", [id]);
         if (!promotion) return fail(res, 404, 'PROMOTION_NOT_AVAILABLE', 'Promotion is not available.');
         const [[eligible]] = await db.query("SELECT 1 ok FROM SafetyVote_EligibilitySnapshots s JOIN SafetyVote_EligibleVoters ev ON ev.SnapshotID=s.id WHERE s.CampaignVersionID=? AND s.Status='frozen' AND ev.EmployeeID=? LIMIT 1", [promotion.CurrentVersionID, actor(req)]);
         if (!eligible) return fail(res, 403, 'CAMPAIGN_NOT_ELIGIBLE', 'Campaign eligibility is required.');

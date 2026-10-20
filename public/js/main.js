@@ -32,7 +32,7 @@ const loadHiyariPage = lazyPage('./pages/hiyari.js?v=20260907-hiyari-pdf-summary
 const loadKyPage = lazyPage('./pages/ky.js?v=20261015-ky-video-manager-r4', 'loadKyPage');
 const loadFourmPage = lazyPage('./pages/fourm.js?v=20261011-fourm-chart-containment-r1', 'loadFourmPage');
 const loadJohnnyAiPage = lazyPage('./pages/johnny-ai.js?v=20261011-johnny-admin-workspace-r1', 'loadJohnnyAiPage');
-const loadSafetyVotePage = lazyPage('./pages/safety-vote-page-ux1.js?v=20261020-safety-vote-response-images-r1', 'loadSafetyVotePage');
+const loadSafetyVotePage = lazyPage('./pages/safety-vote-page-ux1.js?v=20261020-safety-vote-response-media-r2', 'loadSafetyVotePage');
 import { initJohnnyDrawer, syncJohnnyDrawerRoute, destroyJohnnyDrawer } from './johnny-drawer.js?v=20261010-johnny-draggable-launcher-r1';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260924-company-email-self-service-r1';
 const loadDashboardPage = lazyPage('./pages/dashboard.js?v=20260822-cccf-shared-target-r4', 'loadDashboardPage');
@@ -1484,6 +1484,10 @@ window._cpPwdStrength = _cpPwdStrength;
 async function handleChangePassword(e) {
     e.preventDefault();
 
+    // Capture the form state before the first await. DOM Event.currentTarget is
+    // reset after the synchronous event callback finishes, so reading it after
+    // apiFetch() incorrectly treated forced first-login changes as optional.
+    const forced = e.currentTarget?.dataset?.forced === '1';
     const currentPassword = document.getElementById('cp-current')?.value;
     const newPassword     = document.getElementById('cp-new')?.value;
     const confirmPassword = document.getElementById('cp-confirm')?.value;
@@ -1515,7 +1519,6 @@ async function handleChangePassword(e) {
             method: 'POST',
             body: JSON.stringify({ currentPassword, newPassword }),
         });
-        const forced = e.currentTarget?.dataset?.forced === '1';
         if (!res?.user || !res?.token || !res?.nextAction) {
             const ambiguousError = new TypeError('Password change response was incomplete.');
             ambiguousError.recoveryRequired = true;

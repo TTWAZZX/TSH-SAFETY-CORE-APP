@@ -27,4 +27,14 @@ assert.match(main, /showFirstLoginCompletion\(verification\.user, \{ safetyUnitS
 assert.match(main, /if \(forced && status === 'READY'\)[\s\S]{0,180}showFirstLoginCompletion\(verification\.user\)/u);
 assert.match(main, /ตั้งค่าบัญชีสำเร็จแล้ว กรุณาเข้าสู่ระบบอีกครั้งด้วยรหัสผ่านใหม่/u);
 
-console.log('First-login completion UX static contract: PASS (18 assertions)');
+const changePasswordHandler = main.slice(
+    main.indexOf('async function handleChangePassword(e)'),
+    main.indexOf('async function recoverSafetyUnitContinuation()')
+);
+assert.ok(
+    changePasswordHandler.indexOf("const forced = e.currentTarget?.dataset?.forced === '1'")
+        < changePasswordHandler.indexOf("await apiFetch('/change-password'"),
+    'forced first-login state must be captured before the async request clears Event.currentTarget'
+);
+
+console.log('First-login completion UX static contract: PASS (19 assertions)');

@@ -27,7 +27,12 @@ const migrations = [
     '20261008_safety_vote_phase4_jury_scoring.sql',
     '20261008_safety_vote_phase5_operations.sql',
     '20261008_safety_vote_phase6_secret_election.sql',
-    '20261008_safety_vote_phase7_integrations_governance.sql'
+    '20261008_safety_vote_phase7_integrations_governance.sql',
+    '20261009_safety_vote_phase10_4_media_versioning.sql',
+    '20261015_safety_vote_live_results.sql',
+    '20261016_safety_vote_participation_attempts.sql',
+    '20261016_safety_vote_campaign_governance.sql',
+    '20261020_safety_vote_eligibility_amendments.sql'
 ];
 let admin;
 
@@ -76,6 +81,8 @@ async function prepare(label, name) {
         const [row] = await db.query('INSERT INTO SafetyVote_Files(CampaignID,CampaignVersionID,SubmissionID,QuestionID,FilePurpose,StoredName,OriginalName,MimeType,FileSize,ContentSha256,UploadedBy) VALUES(?,?,?,?,?,?,?,?,?,?,?)', [campaign.insertId, version.insertId, purpose === 'submission' ? submission.insertId : null, purpose === 'answer' ? question.insertId : null, purpose, physical[purpose].stored, `${purpose}.png`, 'image/png', png.length, physical[purpose].sha256, purpose === 'cover' ? 'SV-ADMIN' : 'SV-USER']);
         ids[purpose] = Number(row.insertId);
     }
+    const [alias] = await db.query("INSERT INTO SafetyVote_Files(CampaignID,CampaignVersionID,FilePurpose,StoredName,OriginalName,MimeType,FileSize,ContentSha256,UploadedBy) VALUES(?,?,'cover',?,'content-alias.png','image/png',?,?,'SV-ADMIN')", [campaign.insertId, version.insertId, `phase92-${label}-missing-content-alias-${stamp}.png`, png.length, physical.cover.sha256]);
+    ids.alias = Number(alias.insertId);
     const [traversal] = await db.query("INSERT INTO SafetyVote_Files(CampaignID,CampaignVersionID,FilePurpose,StoredName,OriginalName,MimeType,FileSize,ContentSha256,UploadedBy) VALUES(?,?,'cover','../phase92-outside.png','outside.png','image/png',?,?,'SV-ADMIN')", [campaign.insertId, version.insertId, png.length, physical.cover.sha256]);
     ids.traversal = Number(traversal.insertId);
     await db.end();
@@ -120,6 +127,11 @@ async function exercise(label, fixture) {
     assert.strictEqual(cover.status, 200, `${label} eligible campaign asset`);
     assert.deepStrictEqual(cover.buffer, png, `${label} campaign asset bytes`);
     assertHeaders(cover, `${label} campaign asset`);
+
+    const alias = await request(base, `/files/${fixture.ids.alias}`, 'sv-user2');
+    assert.strictEqual(alias.status, 200, `${label} content-addressed private-file recovery`);
+    assert.deepStrictEqual(alias.buffer, png, `${label} content-addressed recovery bytes`);
+    assertHeaders(alias, `${label} content-addressed recovery`);
 
     for (const purpose of ['submission', 'answer']) {
         const denied = await request(base, `/files/${fixture.ids[purpose]}`, 'sv-user2');
@@ -184,7 +196,7 @@ async function exercise(label, fixture) {
         decision: 'PASS_LOCAL_ADVERSARIAL',
         contract: '2026-10-09-safety-vote-phase9.2-r1',
         runtimes: ['node', 'php'],
-        controls: ['anti_enumeration', 'cross_user_file_isolation', 'least_privilege', 'traversal_confinement', 'sha256_integrity', 'privacy_headers', 'ballot_schema_separation'],
+        controls: ['anti_enumeration', 'cross_user_file_isolation', 'least_privilege', 'traversal_confinement', 'sha256_integrity', 'content_addressed_private_file_recovery', 'privacy_headers', 'ballot_schema_separation'],
         businessMutation: { ballots: 0, participation: 0, identityMappings: 0 },
         productionConnected: false,
         externalDelivery: false
