@@ -9,23 +9,24 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 
 const root = path.resolve(__dirname, '..', '..');
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const confirmation = 'DEPLOY_SAFETY_VOTE_RESPONSE_MEDIA_FIRST_LOGIN';
+const confirmation = 'DEPLOY_SAFETY_VOTE_DUPLICATE_MEDIA';
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const runtimePaths = [
     'api/handlers/safety_vote.php',
-    'api/handlers/safety_vote_analytics.php',
     'index.html',
     'public/js/main.js',
+    'public/js/pages/admin-safety-vote-operations.js',
+    'public/js/pages/admin-safety-vote-ux1.js',
+    'public/js/pages/admin.js',
     'public/js/pages/safety-vote-live-results.js',
     'public/js/pages/safety-vote-page-ux1.js',
     'public/js/pages/safety-vote.js',
     'public/js/utils/safety-vote-auth-image.js',
-    'public/style.css',
 ];
 const publicPaths = runtimePaths.filter(relative => relative === 'index.html' || relative.startsWith('public/'));
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-response-media-first-login-deploy-${stamp}`);
+const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-duplicate-media-deploy-${stamp}`);
 const bearer = String(process.env.SAFETY_VOTE_PHASE95_PROD_BEARER_TOKEN || '').trim();
 const adminId = String(process.env.PROD_UAT_ADMIN_ID || '').trim();
 const adminPassword = String(process.env.PROD_UAT_ADMIN_PASSWORD || '');
@@ -163,7 +164,7 @@ async function main() {
         if (relative.endsWith('.php')) assert.equal(run(php, ['-l', candidatePath]).status, 0, `PHP lint failed: ${relative}`);
         candidates.push({ path: relative, candidatePath, bytes: candidateBlob.length, sha256: sha256(candidateBlob) });
     }
-    const manifest = { contract: '2026-10-20-safety-vote-response-media-first-login-r1', candidate: { commit, tree, parent }, runtimePaths, restoreFiles: rollbackFiles.map(file => ({ path: file.path, bytes: fs.statSync(file.rollbackPath).size, sha256: file.beforeSha256 })), schemaRollbackPolicy: 'No schema mutation.' };
+    const manifest = { contract: '2026-10-20-safety-vote-duplicate-media-r3', candidate: { commit, tree, parent }, runtimePaths, restoreFiles: rollbackFiles.map(file => ({ path: file.path, bytes: fs.statSync(file.rollbackPath).size, sha256: file.beforeSha256 })), schemaRollbackPolicy: 'No schema mutation.' };
     const manifestPath = path.join(evidenceRoot, 'rollback-package', 'rollback-manifest.json');
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -180,7 +181,7 @@ async function main() {
     }
     const smokeAfter = await authenticatedSmoke(auth, true);
     const anonymous = await anonymousSmoke();
-    const result = { contract: manifest.contract, generatedAt: new Date().toISOString(), decision: 'PASS_SAFETY_VOTE_RESPONSE_MEDIA_FIRST_LOGIN_PRODUCTION_DEPLOYMENT', candidate: { branch, commit, tree, parent, runtimePaths: runtimePaths.length }, remoteBefore, deployment: { uploaded: runtimePaths, doubleDownloadVerified: deployed.length, httpsVerified: https.length }, smokeBefore, smokeAfter, anonymous, rollbackPackage: { files: rollbackFiles.length, manifestSha256: fileSha(manifestPath), verified: true }, posture: { schemaChanged: false, permissionsChanged: false, businessRowsMutated: false, externalDelivery: false }, rollback: { attempted: false } };
+    const result = { contract: manifest.contract, generatedAt: new Date().toISOString(), decision: 'PASS_SAFETY_VOTE_DUPLICATE_MEDIA_PRODUCTION_DEPLOYMENT', candidate: { branch, commit, tree, parent, runtimePaths: runtimePaths.length }, remoteBefore, deployment: { uploaded: runtimePaths, doubleDownloadVerified: deployed.length, httpsVerified: https.length }, smokeBefore, smokeAfter, anonymous, rollbackPackage: { files: rollbackFiles.length, manifestSha256: fileSha(manifestPath), verified: true }, posture: { schemaChanged: false, permissionsChanged: false, businessRowsMutated: false, externalDelivery: false }, rollback: { attempted: false } };
     const resultSha256 = writeEvidence('result.json', result);
     process.stdout.write(`${JSON.stringify({ evidence: path.relative(root, evidenceRoot).replaceAll('\\', '/'), decision: result.decision, candidate: result.candidate, deployment: result.deployment, smokeAfter: result.smokeAfter, anonymous, rollbackPackage: result.rollbackPackage, resultSha256 }, null, 2)}\n`);
 }

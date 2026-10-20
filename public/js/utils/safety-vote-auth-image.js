@@ -2,6 +2,7 @@ import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 
 const blobCache = new Map();
 const urlsByRoot = new WeakMap();
+const hydrationByImage = new WeakMap();
 
 function fileIdOf(image) {
     return Number(image?.dataset?.svAuthFile || 0);
@@ -56,7 +57,7 @@ async function cachedBlob(fileId, force = false) {
     return blobCache.get(fileId);
 }
 
-async function hydrateOne(root, image, force = false) {
+async function performHydration(root, image, force = false) {
     const fileId = fileIdOf(image), host = stateHost(image);
     if (!fileId || !host) return;
     image.classList.add('svp-auth-image');
@@ -77,6 +78,14 @@ async function hydrateOne(root, image, force = false) {
         const unavailable = error?.code === 'FILE_NOT_FOUND';
         setState(host, unavailable ? 'unavailable' : 'error', unavailable ? 'ไม่พบไฟล์ต้นฉบับ' : 'โหลดภาพไม่สำเร็จ', !unavailable);
     }
+}
+
+async function hydrateOne(root, image, force = false) {
+    if (!force && hydrationByImage.has(image)) return hydrationByImage.get(image);
+    const hydration = performHydration(root, image, force)
+        .finally(() => { if (hydrationByImage.get(image) === hydration) hydrationByImage.delete(image); });
+    hydrationByImage.set(image, hydration);
+    return hydration;
 }
 
 function bindRetryControls(root) {

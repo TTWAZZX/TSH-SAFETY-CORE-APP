@@ -19,7 +19,7 @@ const loadPatrolPage = lazyPage('./pages/patrol.js?v=20261011-design-system-a11y
 const loadCccfPage = lazyPage('./pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2', 'loadCccfPage');
 const loadKpiPage = lazyPage('./pages/kpi.js?v=20261011-design-system-a11y-r1', 'loadKpiPage');
 const loadYokotenPage = lazyPage('./pages/yokoten.js?v=20260825-yokoten-department-relevance-r1', 'loadYokotenPage');
-const loadAdminPage = lazyPage('./pages/admin.js?v=20261020-safety-vote-response-images-r1', 'loadAdminPage');
+const loadAdminPage = lazyPage('./pages/admin.js?v=20261020-safety-vote-duplicate-media-r3', 'loadAdminPage');
 const loadMachineSafetyPage = lazyPage('./pages/machine-safety.js?v=20261011-design-system-a11y-r1', 'loadMachineSafetyPage');
 const loadForkliftPage = lazyPage('./pages/forklift.js?v=20261011-design-system-a11y-r1', 'loadForkliftPage');
 const loadOjtPage = lazyPage('./pages/ojt.js?v=20260820-card-image-phase2d', 'loadOjtPage');
@@ -32,7 +32,7 @@ const loadHiyariPage = lazyPage('./pages/hiyari.js?v=20260907-hiyari-pdf-summary
 const loadKyPage = lazyPage('./pages/ky.js?v=20261015-ky-video-manager-r4', 'loadKyPage');
 const loadFourmPage = lazyPage('./pages/fourm.js?v=20261011-fourm-chart-containment-r1', 'loadFourmPage');
 const loadJohnnyAiPage = lazyPage('./pages/johnny-ai.js?v=20261011-johnny-admin-workspace-r1', 'loadJohnnyAiPage');
-const loadSafetyVotePage = lazyPage('./pages/safety-vote-page-ux1.js?v=20261020-safety-vote-response-media-r2', 'loadSafetyVotePage');
+const loadSafetyVotePage = lazyPage('./pages/safety-vote-page-ux1.js?v=20261020-safety-vote-duplicate-media-r3', 'loadSafetyVotePage');
 import { initJohnnyDrawer, syncJohnnyDrawerRoute, destroyJohnnyDrawer } from './johnny-drawer.js?v=20261010-johnny-draggable-launcher-r1';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260924-company-email-self-service-r1';
 const loadDashboardPage = lazyPage('./pages/dashboard.js?v=20260822-cccf-shared-target-r4', 'loadDashboardPage');

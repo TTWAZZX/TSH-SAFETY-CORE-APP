@@ -8,9 +8,10 @@ const { chromium } = require('playwright');
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
-    let file2Attempts = 0;
+    let file1Attempts = 0, file2Attempts = 0;
     await page.route('http://localhost:5000/api/safety-vote/files/**', async route => {
         const file2 = route.request().url().endsWith('/2');
+        if (route.request().url().endsWith('/1')) file1Attempts += 1;
         if (route.request().url().endsWith('/3')) return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ success: false, code: 'FILE_NOT_FOUND' }) });
         if (file2 && file2Attempts++ === 0) return route.fulfill({ status: 500, contentType: 'text/plain', body: 'temporary failure' });
         return route.fulfill({ status: 200, contentType: 'image/png', body: png });
@@ -19,10 +20,14 @@ const { chromium } = require('playwright');
     await page.evaluate(async () => {
         document.body.innerHTML = '<div id="ok" data-sv-auth-media><img data-sv-auth-file="1" alt="ภาพหนึ่ง"></div><div id="retry" data-sv-auth-media><img data-sv-auth-file="2" alt="ภาพสอง"></div><div id="missing" data-sv-auth-media><img data-sv-auth-file="3" alt="ภาพสาม"></div>';
         const module = await import('/tsh-safety-core/public/js/utils/safety-vote-auth-image.js?v=browser-smoke');
-        await module.hydrateSafetyVoteImages(document);
+        await Promise.all([
+            module.hydrateSafetyVoteImages(document),
+            module.hydrateSafetyVoteImages(document)
+        ]);
         window.__hydrateSafetyVoteImages = module.hydrateSafetyVoteImages;
     });
     assert.strictEqual(await page.locator('#ok').getAttribute('data-svp-media-state'), 'loaded');
+    assert.strictEqual(file1Attempts, 1, 'concurrent hydration must fetch and decode the same image once');
     assert.strictEqual(await page.locator('#retry').getAttribute('data-svp-media-state'), 'error');
     assert.strictEqual(await page.locator('#retry [data-sv-auth-status]').textContent(), 'โหลดภาพไม่สำเร็จ');
     assert.strictEqual(await page.locator('#missing').getAttribute('data-svp-media-state'), 'unavailable');

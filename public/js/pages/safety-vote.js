@@ -1,5 +1,5 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
-import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-response-media-r2';
+import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-duplicate-media-r3';
 import { escHtml, showToast, showError } from '../ui.js?v=20260602-mobile-nav-m53';
 
 const state={campaigns:[],detail:null,results:null,nominations:[],juryAssignments:[],notifications:[]};

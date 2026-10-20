@@ -32,16 +32,16 @@ ok(duplicateFlow.includes('/campaigns/${Number(campaignId)}/duplicate'), 'duplic
 ok(!duplicateFlow.includes('/config-copy') && !duplicateFlow.includes('/builder`') && !duplicateFlow.includes('/eligibility/rules`'), 'duplicate action performs no client-side partial copy writes');
 ok(duplicateFlow.includes("state.view = 'draft'") && duplicateFlow.includes('state.selectedId = newCampaignId') && duplicateFlow.includes('await load()'), 'duplicate action returns to and selects the new Draft');
 ok(!duplicateFlow.includes('openCampaignWizard('), 'duplicate action does not redirect into the creation wizard');
-ok(adminEntry.includes('admin-safety-vote-ux1.js?v=20261019-safety-vote-account-advisory-r1') && mainEntry.includes('admin.js?v=20261019-safety-vote-account-advisory-r1') && index.includes('main.js?v=20261019-safety-vote-account-advisory-r1') && admin.includes('safety-vote-campaign-wizard.js?v=20261019-safety-vote-account-advisory-r1'), 'lifecycle cache-bust chain');
+ok(adminEntry.includes('admin-safety-vote-ux1.js?v=20261020-safety-vote-duplicate-media-r3') && mainEntry.includes('admin.js?v=20261020-safety-vote-duplicate-media-r3') && index.includes('main.js?v=20261020-safety-vote-duplicate-media-r3') && admin.includes('safety-vote-campaign-wizard.js?v=20261019-safety-vote-account-advisory-r1'), 'lifecycle cache-bust chain');
 ok(admin.includes('/safety-vote/admin/permissions') && admin.includes('duplicateCampaign: false'), 'permission capability fails closed in the UI');
-ok(admin.includes('ไม่คัดลอกไฟล์') && admin.includes('Audit'), 'copy exclusions are explicit');
+ok(duplicateFlow.includes('เป็นฉบับร่างครบถ้วนแล้ว'), 'duplicate completion is explicit');
 
 for (const source of [nodeCampaign, phpCampaign]) {
     ok(source.includes('SAFETY_VOTE_MANAGE') && source.includes('SAFETY_VOTE_CREATE') && source.includes('SAFETY_VOTE_ELIGIBILITY_MANAGE'), 'duplicate requires all three permissions');
     ok(source.includes('duplicateCampaign') && source.includes('grantedPermissions'), 'permission discovery exposes duplicate capability');
     ok(source.includes('SAFETY_VOTE_CAMPAIGN_DUPLICATE') && source.includes('CAMPAIGN_DUPLICATE_FAILED'), 'duplicate has audit and fail-closed contract');
     ok(source.includes('MaxParticipationAttempts') && source.includes('LiveLeaderboardPrivacyThreshold'), 'create/update/copy include participation and live-result settings');
-    ok(source.includes('FileID') && source.includes('NULL') && source.includes('employee_id'), 'copy strips private option files and employee-specific rules');
+    ok(source.includes('FileID') && source.includes('NULL') && source.includes('employee_id') && source.includes('copiedOptionImages'), 'copy stages options, reattaches cloned private images and strips employee-specific rules');
     ok(source.includes("'ballots'") && source.includes("'certifications'") && source.includes("'notifications'"), 'copy response declares protected exclusions');
 }
 ok(nodeCampaign.includes("router.post('/admin/campaigns/:id/duplicate'") && nodeCampaign.includes('db.getConnection()') && nodeCampaign.includes('beginTransaction()'), 'Node duplicate is one database transaction');

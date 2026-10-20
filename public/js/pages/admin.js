@@ -2,7 +2,7 @@ import { showToast, showError, openModal, openDetailModal, closeModal, escHtml, 
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { createLatestRenderTarget, guardActionHandler, guardSubmitHandler, sectionSkeleton, withActionLock } from '../utils/async-ui.js?v=20261009-safety-vote-phase96-r1';
 import { beginBbsOperation } from '../utils/bbs-async-ui.js?v=20260908-bbs-navigation-loading-r1';
-import { renderSafetyVoteFoundation } from './admin-safety-vote-ux1.js?v=20261020-safety-vote-response-images-r1';
+import { renderSafetyVoteFoundation } from './admin-safety-vote-ux1.js?v=20261020-safety-vote-duplicate-media-r3';
 import { renderFileLibrary } from './admin-file-library.js?v=20261012-file-library-admin-r6';
 
 // â”€â”€â”€ Button loading helper (disable + spinner, returns original HTML) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

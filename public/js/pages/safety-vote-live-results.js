@@ -1,6 +1,6 @@
 import { escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
 import { formatThaiTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
-import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-response-media-r2';
+import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-duplicate-media-r3';
 
 export function clearLiveResultImages(root) {
     releaseSafetyVoteImages(root);
