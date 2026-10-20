@@ -5,7 +5,7 @@ const SAFETY_VOTE_ELIGIBILITY_AMENDMENT_CONTRACT = '2026-10-20-safety-vote-eligi
 
 function svam_campaign(int $campaignId, bool $lock = false): ?array
 {
-    return db_row("SELECT c.id,c.CampaignCode,c.Status,c.CurrentVersionID,v.VersionNo,v.Status VersionStatus,v.EligibilityEnrollmentMode FROM SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID WHERE c.id=?" . ($lock ? ' FOR UPDATE' : ''), [$campaignId]);
+    return db_row("SELECT c.id,c.CampaignCode,c.Status,c.CurrentVersionID,c.ScheduledOpenAt,c.ScheduledCloseAt,v.VersionNo,v.Status VersionStatus,v.TitleTh,v.OpenAt,v.CloseAt,v.EligibilityEnrollmentMode FROM SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID WHERE c.id=?" . ($lock ? ' FOR UPDATE' : ''), [$campaignId]);
 }
 
 function svam_feature_enabled(bool $lock = false): bool
@@ -79,6 +79,87 @@ function svam_event(array $user, array $amendment, string $eventType, ?string $f
     return $eventHash;
 }
 
+function svam_auto_enroll(array $user, int $campaignId): array
+{
+    $employeeId = sv_actor($user);
+    if ($employeeId === '' || sv_role($user) === 'ADMIN') return ['checked' => false, 'enrolled' => false, 'reason' => 'ACTOR_NOT_APPLICABLE'];
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        if (!svam_feature_enabled(true)) { $pdo->rollBack(); return ['checked' => false, 'enrolled' => false, 'reason' => 'FEATURE_DISABLED']; }
+        $campaign = svam_campaign($campaignId, true);
+        if (!$campaign || !in_array((string)$campaign['Status'], ['Scheduled', 'Open'], true) || (string)($campaign['EligibilityEnrollmentMode'] ?? '') !== 'automatic_rule_match') {
+            $pdo->rollBack(); return ['checked' => false, 'enrolled' => false, 'reason' => 'POLICY_NOT_ACTIVE'];
+        }
+        $source = db_row("SELECT * FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen' ORDER BY SnapshotNo DESC,id DESC LIMIT 1 FOR UPDATE", [(int)$campaign['CurrentVersionID']]);
+        if (!$source) { $pdo->rollBack(); return ['checked' => true, 'enrolled' => false, 'reason' => 'FROZEN_SNAPSHOT_REQUIRED']; }
+        if (db_row('SELECT id FROM SafetyVote_EligibleVoters WHERE SnapshotID=? AND EmployeeID=? LIMIT 1', [(int)$source['id'], $employeeId])) {
+            $pdo->rollBack(); return ['checked' => true, 'enrolled' => false, 'eligible' => true, 'reason' => 'ALREADY_ELIGIBLE', 'snapshotId' => (int)$source['id']];
+        }
+        $stored = db_rows('SELECT RuleGroup ruleGroup,RuleOrder ruleOrder,Effect effect,AttributeKey attributeKey,Operator operator,ValuesJson,Reason reason FROM SafetyVote_EligibilityRules WHERE CampaignVersionID=? AND IsActive=1 ORDER BY RuleGroup,RuleOrder,id', [(int)$campaign['CurrentVersionID']]);
+        foreach ($stored as &$rule) $rule['values'] = json_decode((string)$rule['ValuesJson'], true) ?: [];
+        unset($rule);
+        $parsed = sv_rules($stored);
+        if (!$parsed['ok'] || !$parsed['rules']) { $pdo->rollBack(); return ['checked' => true, 'enrolled' => false, 'reason' => 'ELIGIBILITY_RULES_INVALID']; }
+        $master = sv_master_projection();
+        $matched = null;
+        foreach (sv_evaluate($parsed['rules'], $master['employees']) as $candidate) if ((string)$candidate['employeeId'] === $employeeId) { $matched = svam_voter($candidate); break; }
+        if (!$matched) { $pdo->rollBack(); return ['checked' => true, 'enrolled' => false, 'reason' => 'RULE_NOT_MATCHED']; }
+        $reason = 'Automatic enrollment after current eligibility rule match';
+        $keyHash = hash('sha256', 'automatic-rule-match:' . $campaign['CurrentVersionID'] . ':' . $employeeId);
+        $candidateSetHash = sv2_rows_hash([$matched]);
+        $ruleHash = sv_hash($parsed['rules']);
+        $stmt = $pdo->prepare("INSERT INTO SafetyVote_EligibilityAmendments(CampaignID,CampaignVersionID,SourceSnapshotID,EnrollmentMode,RequestType,Status,Reason,CandidateCount,ApprovedCount,BeforeRowsHash,CandidateSetHash,IdempotencyKeyHash,RequestedBy,ReviewedBy,ReviewedAt) VALUES(?,?,?,'automatic_rule_match','automatic_rule_match','Approved',?,1,1,?,?,?,?,?,NOW())");
+        $stmt->execute([$campaignId, (int)$campaign['CurrentVersionID'], (int)$source['id'], $reason, $source['RowsHash'], $candidateSetHash, $keyHash, $employeeId, $employeeId]);
+        $amendmentId = (int)$pdo->lastInsertId();
+        db_execute('INSERT INTO SafetyVote_EligibilityAmendmentMembers(AmendmentID,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,SourceType,SourceReason,MasterWarningsJson,MemberStatus,DecisionReason,DecidedBy,DecidedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())', [$amendmentId, $matched['employeeId'], $matched['employeeName'], $matched['departmentId'], $matched['departmentName'], $matched['safetyUnitId'], $matched['safetyUnitName'], $matched['positionId'], $matched['positionName'], $matched['role'], $matched['team'], $matched['masterPresent'] ? 1 : 0, $matched['accountReady'] ? 1 : 0, 'rule_match', $matched['inclusionReason'], json_encode($matched['masterWarnings']), 'Approved', $reason, $employeeId]);
+        $amendment = ['id' => $amendmentId, 'campaignId' => $campaignId, 'versionId' => (int)$campaign['CurrentVersionID']];
+        $eventHash = svam_event($user, $amendment, 'REQUESTED', null, 'Pending', $reason, ['candidateCount' => 1, 'candidateSetHash' => $candidateSetHash, 'trigger' => 'participant_access'], null, 1);
+        $eventHash = svam_event($user, $amendment, 'APPROVED', 'Pending', 'Approved', $reason, ['approvedCount' => 1, 'enrollmentMode' => 'automatic_rule_match', 'trigger' => 'participant_access'], $eventHash, 2);
+        $next = db_row('SELECT COALESCE(MAX(SnapshotNo),0)+1 snapshotNo FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=?', [(int)$campaign['CurrentVersionID']]);
+        db_execute("INSERT INTO SafetyVote_EligibilitySnapshots(CampaignVersionID,SnapshotNo,Status,RuleHash,RowsHash,EligibleCount,AccountReadyCount,WarningCount,FrozenAt,FrozenBy,Reason,CreatedBy,ParentSnapshotID,SnapshotKind) VALUES(?,?,'building',?,NULL,0,0,?,NULL,NULL,?,?,?,'amendment')", [(int)$campaign['CurrentVersionID'], (int)$next['snapshotNo'], $ruleHash, (int)$source['WarningCount'] + count($matched['masterWarnings']), $reason, $employeeId, (int)$source['id']]);
+        $resultSnapshotId = (int)$pdo->lastInsertId();
+        db_execute('INSERT INTO SafetyVote_EligibleVoters(SnapshotID,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource,InclusionReason,OverrideBy,OverrideAt,OverrideReason) SELECT ?,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource,InclusionReason,OverrideBy,OverrideAt,OverrideReason FROM SafetyVote_EligibleVoters WHERE SnapshotID=?', [$resultSnapshotId, (int)$source['id']]);
+        db_execute("INSERT INTO SafetyVote_EligibleVoters(SnapshotID,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource,InclusionReason,OverrideBy,OverrideAt,OverrideReason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'eligible',?,?,?,NOW(),?)", [$resultSnapshotId, $matched['employeeId'], $matched['employeeName'], $matched['departmentId'], $matched['departmentName'], $matched['safetyUnitId'], $matched['safetyUnitName'], $matched['positionId'], $matched['positionName'], $matched['role'], $matched['team'], $matched['masterPresent'] ? 1 : 0, $matched['accountReady'] ? 1 : 0, 'automatic_rule_match', $matched['inclusionReason'], $employeeId, $reason]);
+        $merged = db_rows('SELECT EmployeeID employeeId,DepartmentIDSnapshot departmentId,SafetyUnitIDSnapshot safetyUnitId,PositionIDSnapshot positionId,RoleSnapshot role,TeamSnapshot team,AccountReady accountReady FROM SafetyVote_EligibleVoters WHERE SnapshotID=? ORDER BY EmployeeID', [$resultSnapshotId]);
+        foreach ($merged as &$row) $row['accountReady'] = (bool)$row['accountReady'];
+        unset($row);
+        $afterRowsHash = sv2_rows_hash($merged);
+        $accountReadyCount = count(array_filter($merged, fn($row) => $row['accountReady']));
+        db_execute("UPDATE SafetyVote_EligibilitySnapshots SET Status='superseded' WHERE id=? AND Status='frozen'", [(int)$source['id']]);
+        db_execute("UPDATE SafetyVote_EligibilitySnapshots SET Status='frozen',RowsHash=?,EligibleCount=?,AccountReadyCount=?,FrozenAt=NOW(),FrozenBy=? WHERE id=? AND Status='building'", [$afterRowsHash, count($merged), $accountReadyCount, $employeeId, $resultSnapshotId]);
+        db_execute("UPDATE SafetyVote_EligibilityAmendmentMembers SET MemberStatus='Applied',AppliedAt=NOW() WHERE AmendmentID=?", [$amendmentId]);
+        db_execute("UPDATE SafetyVote_EligibilityAmendments SET ResultSnapshotID=?,Status='Applied',AddedCount=1,SkippedCount=0,AfterRowsHash=?,AppliedBy=?,AppliedAt=NOW(),MetadataJson=? WHERE id=?", [$resultSnapshotId, $afterRowsHash, $employeeId, json_encode(['trigger' => 'participant_access', 'addOnly' => true, 'automatic' => true]), $amendmentId]);
+        svam_event($user, $amendment, 'APPLIED', 'Approved', 'Applied', $reason, ['sourceSnapshotId' => (int)$source['id'], 'resultSnapshotId' => $resultSnapshotId, 'addedCount' => 1, 'afterRowsHash' => $afterRowsHash, 'trigger' => 'participant_access'], $eventHash, 3);
+        $notificationSuppressionKey = hash('sha256', 'eligibility-auto-enrolled:' . $campaign['CurrentVersionID'] . ':' . $employeeId);
+        $notificationMetadata = [
+            'title' => 'คุณได้รับสิทธิ์เข้าร่วมแคมเปญแล้ว',
+            'message' => $campaign['Status'] === 'Open'
+                ? 'ข้อมูลของคุณตรงตามเงื่อนไขของแคมเปญ สามารถเปิดรายละเอียดและเข้าร่วมโหวตได้แล้ว'
+                : 'ข้อมูลของคุณตรงตามเงื่อนไขของแคมเปญ ระบบเพิ่มสิทธิ์ให้แล้ว และจะเข้าร่วมได้เมื่อถึงเวลาเปิด',
+            'route' => '#safety-vote=' . $campaign['CampaignCode'],
+            'campaignCode' => $campaign['CampaignCode'],
+            'enrollmentMode' => 'automatic_rule_match',
+            'eligibilityReason' => 'CAMPAIGN_RULE_MATCH',
+            'automaticEnrollment' => true,
+            'canParticipateNow' => $campaign['Status'] === 'Open',
+            'opensAt' => $campaign['OpenAt'] ?? $campaign['ScheduledOpenAt'] ?? null,
+            'closesAt' => $campaign['CloseAt'] ?? $campaign['ScheduledCloseAt'] ?? null,
+            'snapshotNo' => (int)$next['snapshotNo'],
+        ];
+        db_execute("INSERT INTO SafetyVote_Notifications(CampaignID,EventType,TemplateKey,Channel,RecipientEmployeeID,ScheduledAt,DispatchedAt,Status,SuppressionKey,AttemptCount,PayloadMetadataJson,CreatedBy) VALUES(?,'eligibility_granted','automatic_eligibility_granted','in_app',?,NOW(),NOW(),'Sent',?,1,?,?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)", [$campaignId, $employeeId, $notificationSuppressionKey, json_encode($notificationMetadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $employeeId]);
+        $notificationId = (int)$pdo->lastInsertId();
+        db_execute("INSERT IGNORE INTO SafetyVote_NotificationDeliveries(NotificationID,AttemptNo,DeliveryState,MetadataJson) VALUES(?,1,'Sent',?)", [$notificationId, json_encode(['channel' => 'in_app', 'transport' => 'internal_auto_enrollment'])]);
+        db_execute('INSERT INTO SafetyVote_AuditLogs(CampaignID,CampaignVersionID,ActorEmployeeID,ActorRole,Action,TargetType,TargetID,StatusCode,BoundedDetail,MetadataJson,IPAddress,UserAgent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', [$campaignId, (int)$campaign['CurrentVersionID'], $employeeId, sv_role($user), 'SAFETY_VOTE_ELIGIBILITY_AUTO_ENROLLED', 'SafetyVote_EligibilityAmendment', (string)$amendmentId, 201, 'employee=' . $employeeId . '; sourceSnapshot=' . $source['id'] . '; resultSnapshot=' . $resultSnapshotId, json_encode(['employeeId' => $employeeId, 'sourceSnapshotId' => (int)$source['id'], 'resultSnapshotId' => $resultSnapshotId, 'beforeRowsHash' => $source['RowsHash'], 'afterRowsHash' => $afterRowsHash, 'candidateSetHash' => $candidateSetHash, 'enrollmentMode' => 'automatic_rule_match', 'trigger' => 'participant_access', 'addOnly' => true]), (string)($_SERVER['REMOTE_ADDR'] ?? ''), mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255)]);
+        $pdo->commit();
+        return ['checked' => true, 'enrolled' => true, 'eligible' => true, 'amendmentId' => $amendmentId, 'notificationId' => $notificationId, 'sourceSnapshotId' => (int)$source['id'], 'snapshotId' => $resultSnapshotId, 'snapshotNo' => (int)$next['snapshotNo']];
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if ((string)$error->getCode() === '23000') return ['checked' => true, 'enrolled' => false, 'reason' => 'CONCURRENTLY_ENROLLED'];
+        throw $error;
+    }
+}
+
 function svam_overview(int $campaignId): ?array
 {
     $campaign = svam_campaign($campaignId);
@@ -91,7 +172,7 @@ function svam_overview(int $campaignId): ?array
         'contractVersion' => SAFETY_VOTE_ELIGIBILITY_AMENDMENT_CONTRACT,
         'featureEnabled' => $enabled,
         'campaign' => ['id' => (int)$campaign['id'], 'campaignCode' => $campaign['CampaignCode'], 'status' => $campaign['Status'], 'versionId' => (int)$campaign['CurrentVersionID'], 'versionNo' => (int)$campaign['VersionNo']],
-        'policy' => ['enrollmentMode' => $mode, 'configurable' => $enabled && in_array($campaign['Status'], ['Draft', 'Scheduled', 'Open'], true), 'previewAllowed' => $enabled && in_array($campaign['Status'], ['Scheduled', 'Open'], true) && in_array($mode, ['admin_approval', 'automatic_rule_match'], true), 'applyAllowed' => $enabled && in_array($campaign['Status'], ['Scheduled', 'Open'], true) && in_array($mode, ['admin_approval', 'automatic_rule_match'], true), 'addOnly' => true, 'allowedModes' => ['closed_after_open', 'admin_approval', 'automatic_rule_match']],
+        'policy' => ['enrollmentMode' => $mode, 'configurable' => $enabled && in_array($campaign['Status'], ['Draft', 'Scheduled', 'Open'], true), 'previewAllowed' => $enabled && in_array($campaign['Status'], ['Scheduled', 'Open'], true) && in_array($mode, ['admin_approval', 'automatic_rule_match'], true), 'applyAllowed' => $enabled && in_array($campaign['Status'], ['Scheduled', 'Open'], true) && in_array($mode, ['admin_approval', 'automatic_rule_match'], true), 'automaticOnParticipantAccess' => $enabled && in_array($campaign['Status'], ['Scheduled', 'Open'], true) && $mode === 'automatic_rule_match', 'automaticTriggers' => ['campaign_discovery', 'campaign_detail', 'ballot_submit'], 'addOnly' => true, 'allowedModes' => ['closed_after_open', 'admin_approval', 'automatic_rule_match']],
         'currentSnapshot' => $snapshot ? ['id' => (int)$snapshot['id'], 'snapshotNo' => (int)$snapshot['SnapshotNo'], 'status' => $snapshot['Status'], 'eligibleCount' => (int)$snapshot['EligibleCount'], 'accountReadyCount' => (int)$snapshot['AccountReadyCount'], 'warningCount' => (int)$snapshot['WarningCount'], 'rowsHash' => $snapshot['RowsHash'], 'frozenAt' => $snapshot['FrozenAt'], 'frozenBy' => $snapshot['FrozenBy'], 'reason' => $snapshot['Reason'], 'parentSnapshotId' => $snapshot['ParentSnapshotID'] ? (int)$snapshot['ParentSnapshotID'] : null, 'snapshotKind' => $snapshot['SnapshotKind'] ?: 'initial_freeze'] : null,
         'amendments' => array_map(fn($row) => ['id' => (int)$row['id'], 'sourceSnapshotId' => (int)$row['SourceSnapshotID'], 'resultSnapshotId' => $row['ResultSnapshotID'] ? (int)$row['ResultSnapshotID'] : null, 'enrollmentMode' => $row['EnrollmentMode'], 'requestType' => $row['RequestType'], 'status' => $row['Status'], 'reason' => $row['Reason'], 'candidateCount' => (int)$row['CandidateCount'], 'approvedCount' => (int)$row['ApprovedCount'], 'addedCount' => (int)$row['AddedCount'], 'skippedCount' => (int)$row['SkippedCount'], 'beforeRowsHash' => $row['BeforeRowsHash'], 'candidateSetHash' => $row['CandidateSetHash'], 'afterRowsHash' => $row['AfterRowsHash'], 'requestedBy' => $row['RequestedBy'], 'requestedAt' => $row['RequestedAt'], 'reviewedBy' => $row['ReviewedBy'], 'reviewedAt' => $row['ReviewedAt'], 'appliedBy' => $row['AppliedBy'], 'appliedAt' => $row['AppliedAt']], $rows),
     ];

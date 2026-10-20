@@ -60,7 +60,7 @@ async function seed(databaseName) {
         '20261020_safety_vote_eligibility_amendments.sql',
     ];
     for (const migration of migrations) await connection.query(fs.readFileSync(path.join(root, 'backend', 'migrations', migration), 'utf8'));
-    await connection.query("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='amendment-uat' WHERE SettingKey='module_enabled'");
+    await connection.query("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='amendment-uat' WHERE SettingKey IN ('module_enabled','engagement_enabled')");
     const [campaign] = await connection.query("INSERT INTO SafetyVote_Campaigns(CampaignCode,Status,OwnerEmployeeID,CreatedBy,UpdatedBy,OpenedAt) VALUES('SHE-991-2026','Open','SV-ADMIN','SV-ADMIN','SV-ADMIN',NOW())");
     const [version] = await connection.query("INSERT INTO SafetyVote_CampaignVersions(CampaignID,VersionNo,ContractVersion,CampaignType,PrivacyMode,TitleTh,Status,EligibilityEnrollmentMode,CreatedBy,UpdatedBy) VALUES(?,1,'2026-10-08-safety-vote-phase0-r1','popular_vote','identified','Eligibility amendment UAT','Frozen','admin_approval','SV-ADMIN','SV-ADMIN')", [campaign.insertId]);
     await connection.query('UPDATE SafetyVote_Campaigns SET CurrentVersionID=? WHERE id=?', [version.insertId, campaign.insertId]);
@@ -119,6 +119,9 @@ async function lifecycle(label, base, databaseName, fixture, concurrentBase = ba
     assert.equal(beforeDiscovery.status, 200, `${label} discovery before amendment`);
     assert.equal(beforeDiscovery.data.data.eligibilitySource, 'latest_frozen_snapshot');
     assert.equal(beforeDiscovery.data.data.rows.length, 0, `${label} new voter must not see campaign before amendment`);
+    const initialDiscovery = await call(base, '/me/campaigns', { token: 'sv-user' });
+    assert.equal(initialDiscovery.status, 200, `${label} initial voter discovery`);
+    assert.equal(initialDiscovery.data.data.rows.find(row => Number(row.id) === fixture.campaignId)?.EligibilityOrigin, 'initial_snapshot', `${label} initial voter must retain its eligibility origin`);
     assert.equal((await call(base, route, { token: 'sv-user' })).status, 403, `${label} permission boundary`);
     let overview = await call(base, route);
     assert.equal(overview.status, 200, `${label} disabled overview remains readable`);
@@ -165,14 +168,17 @@ async function lifecycle(label, base, databaseName, fixture, concurrentBase = ba
     assert.equal(Number(afterDiscovery.data.data.rows[0].Eligible), 1);
     assert.equal(Number(afterDiscovery.data.data.rows[0].EligibilitySnapshotID), Number(applied.data.data.resultSnapshotId));
     assert.equal(Number(afterDiscovery.data.data.rows[0].EligibilitySnapshotNo), Number(applied.data.data.snapshotNo));
+    assert.equal(afterDiscovery.data.data.rows[0].EligibilityOrigin, 'admin_amendment');
     const eligibility = await call(base, `/campaigns/${fixture.campaignId}/eligibility`, { token: 'sv-user2' });
     assert.equal(eligibility.status, 200, `${label} latest eligibility endpoint`);
     assert.equal(eligibility.data.data.eligibilitySource, 'latest_frozen_snapshot');
     assert.equal(eligibility.data.data.eligible, true);
+    assert.equal(eligibility.data.data.eligibilityOrigin, 'admin_amendment');
     assert.equal(Number(eligibility.data.data.snapshotId), Number(applied.data.data.resultSnapshotId));
     const detail = await call(base, `/campaigns/${fixture.campaignId}`, { token: 'sv-user2' });
     assert.equal(detail.status, 200, `${label} latest snapshot campaign detail`);
     assert.equal(detail.data.data.eligibility.eligibilitySource, 'latest_frozen_snapshot');
+    assert.equal(detail.data.data.eligibility.eligibilityOrigin, 'admin_amendment');
     assert.equal(Number(detail.data.data.eligibility.snapshotId), Number(applied.data.data.resultSnapshotId));
     const replayed = await call(base, `${route}/apply`, { method: 'POST', body, headers: { 'Idempotency-Key': `${label}-apply-amendment-0001` } });
     assert.equal(replayed.status, 200, JSON.stringify(replayed.data));
@@ -218,7 +224,40 @@ async function lifecycle(label, base, databaseName, fixture, concurrentBase = ba
     assert.equal(overview.data.data.amendments.length, 2);
     assert.equal(overview.data.data.amendments[0].addedCount, 1);
     const evidence = await inspect(databaseName, fixture);
-    console.log(`PASS ${label} open-campaign amendment/duplicate guard/submitted-vote preservation/concurrent apply/idempotency/audit`);
+    const automaticPolicy = await call(base, `/admin/campaigns/${fixture.campaignId}/eligibility/enrollment-mode`, { method: 'PUT', body: { enrollmentMode: 'automatic_rule_match', reason: 'Guarded UAT enables automatic rule matching', confirmation: 'SET SHE-991-2026 automatic_rule_match' } });
+    assert.equal(automaticPolicy.status, 200, JSON.stringify(automaticPolicy.data));
+    const automaticEmployee = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: databaseName });
+    await automaticEmployee.query("INSERT INTO Employees VALUES('SV-L01','Automatic New Voter','Production','Line 1','User','B','Operator','auto@example.test','hash',0)");
+    await automaticEmployee.end();
+    const automaticDiscovery = await Promise.all([base, concurrentBase].map(origin => call(origin, '/me/campaigns', { token: 'sv-load-01' })));
+    assert(automaticDiscovery.every(item => item.status === 200), `${label} automatic discovery requests must succeed`);
+    assert(automaticDiscovery.every(item => item.data.data.rows.some(row => Number(row.id) === fixture.campaignId && Number(row.Eligible) === 1)), `${label} newly matched user must become eligible during discovery`);
+    assert(automaticDiscovery.every(item => item.data.data.rows.some(row => Number(row.id) === fixture.campaignId && Number(row.AutomaticallyEnrolled) === 1 && row.AutoEnrolledAt)), `${label} campaign card must expose automatic enrollment status`);
+    assert(automaticDiscovery.every(item => item.data.data.rows.some(row => Number(row.id) === fixture.campaignId && row.EligibilityOrigin === 'automatic_rule_match')), `${label} campaign card must expose automatic eligibility origin`);
+    const inbox = await call(base, '/notifications', { token: 'sv-load-01' });
+    assert.equal(inbox.status, 200, JSON.stringify(inbox.data));
+    const granted = inbox.data.data.rows.filter(row => row.EventType === 'eligibility_granted');
+    assert.equal(granted.length, 1, `${label} must create exactly one delivered in-app enrollment notice`);
+    assert.equal(granted[0].metadata.automaticEnrollment, true);
+    assert.equal(granted[0].metadata.eligibilityReason, 'CAMPAIGN_RULE_MATCH');
+    let center = await call(base, '/notification-center', { token: 'sv-load-01' });
+    assert.equal(center.status, 200, JSON.stringify(center.data));
+    const centerGranted = center.data.data.rows.find(row => row.eventType === 'eligibility_granted');
+    assert.ok(centerGranted && !centerGranted.readAt, `${label} enrollment notice must initially be unread`);
+    const readNotice = await call(base, `/notification-center/${centerGranted.id}/read`, { method: 'POST', body: {}, token: 'sv-load-01' });
+    assert.equal(readNotice.status, 200, JSON.stringify(readNotice.data));
+    center = await call(base, '/notification-center', { token: 'sv-load-01' });
+    assert.ok(center.data.data.rows.find(row => Number(row.id) === Number(centerGranted.id))?.readAt, `${label} enrollment notice must retain read state`);
+    const operations = await call(base, `/admin/campaigns/${fixture.campaignId}/operations`);
+    assert.equal(operations.status, 200, JSON.stringify(operations.data));
+    assert.equal(operations.data.data.eligibilityAdmissions.automaticTotal, 1);
+    assert.equal(operations.data.data.eligibilityAdmissions.automaticToday, 1);
+    assert.ok(operations.data.data.eligibilityAdmissions.lastAutomaticAt);
+    const verifyAutomatic = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: databaseName });
+    const [[automaticCounts]] = await verifyAutomatic.query("SELECT (SELECT COUNT(*) FROM SafetyVote_EligibilityAmendments WHERE RequestType='automatic_rule_match' AND Status='Applied') amendments,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE Action='SAFETY_VOTE_ELIGIBILITY_AUTO_ENROLLED') audits,(SELECT COUNT(*) FROM SafetyVote_Notifications WHERE EventType='eligibility_granted' AND Status='Sent') notices,(SELECT COUNT(*) FROM SafetyVote_NotificationDeliveries d JOIN SafetyVote_Notifications n ON n.id=d.NotificationID WHERE n.EventType='eligibility_granted' AND d.DeliveryState='Sent') deliveries,(SELECT EligibleCount FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen' ORDER BY SnapshotNo DESC LIMIT 1) eligible", [fixture.versionId]);
+    await verifyAutomatic.end();
+    assert.deepEqual([Number(automaticCounts.amendments), Number(automaticCounts.audits), Number(automaticCounts.notices), Number(automaticCounts.deliveries), Number(automaticCounts.eligible)], [1, 1, 1, 1, 4], `${label} automatic enrollment must commit once with notice, delivery, audit and latest snapshot`);
+    console.log(`PASS ${label} open-campaign amendment/automatic discovery enrollment/duplicate guard/submitted-vote preservation/concurrent apply/idempotency/audit`);
     return { preview: { ...data, rows: data.rows.map(row => ({ ...row, onboardingStatus: undefined })) }, applied: applied.data.data, overview: overview.data.data, evidence };
 }
 

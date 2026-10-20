@@ -13,12 +13,12 @@ import {
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
 import { CORE_TEMPLATES } from './safety-vote-wizard-model.mjs?v=20261015-safety-vote-live-results-r1';
 import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261019-safety-vote-account-advisory-r1';
-import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261016-safety-vote-empty-threshold-live-r1';
+import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261020-safety-vote-response-images-r1';
 import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261020-eligibility-reporting-r1';
 import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261015-safety-vote-thai-time-r1';
-import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261015-safety-vote-thai-time-r1';
+import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261020-safety-vote-response-images-r1';
 import { renderSafetyVoteReviewWorkspace } from './admin-safety-vote-review.js?v=20261015-safety-vote-thai-time-r1';
-import { renderSafetyVoteEligibilityWorkspace } from './admin-safety-vote-eligibility.js?v=20261020-eligibility-admin-r1';
+import { renderSafetyVoteEligibilityWorkspace } from './admin-safety-vote-eligibility.js?v=20261020-eligibility-auto-enrollment-r2';
 import { bangkokInputToIso, formatThaiDateTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const VIEW_LABELS = {

@@ -50,7 +50,7 @@ async function seed(name) {
         const n = String(index).padStart(2, '0');
         await db.query('INSERT INTO Employees VALUES(?,?,?,?,?,?,?,?,?,?)', [`SV-L${n}`, `Load ${n}`, 'Production', 'Line 1', 'User', 'B', index === 5 ? 'Unmapped Position' : 'Operator', `load${n}@example.test`, index === 5 ? null : 'x', index === 5 ? 1 : 0]);
     }
-    const migrations = ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261010_safety_vote_ux_phase9a_engagement.sql', '20261010_safety_vote_ux_phase9b_planning_content_communication.sql', '20261010_safety_vote_ux_phase9c_engagement_analytics.sql', '20261015_safety_vote_live_results.sql', '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql'];
+    const migrations = ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261010_safety_vote_ux_phase9a_engagement.sql', '20261010_safety_vote_ux_phase9b_planning_content_communication.sql', '20261010_safety_vote_ux_phase9c_engagement_analytics.sql', '20261015_safety_vote_live_results.sql', '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql', '20261020_safety_vote_eligibility_amendments.sql'];
     for (const migration of migrations) await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', migration), 'utf8'));
     await db.query("UPDATE SafetyVote_Settings SET SettingValue='1' WHERE SettingKey='module_enabled'");
     await db.end();
@@ -76,6 +76,10 @@ async function lifecycle(label, base) {
     const builder = await call(base, `/admin/campaigns/${campaignId}/builder`, { method: 'PUT', body: { questions: [{ questionCode: 'Q1', questionType: 'single_choice', title: 'เลือกผลงานที่ชื่นชอบ', isRequired: true, minSelections: 1, maxSelections: 1, options: [{ optionCode: 'A', label: 'ผลงาน A' }, { optionCode: 'B', label: 'ผลงาน B' }] }] } });
     assert.strictEqual(builder.status, 200, `${label} builder: ${JSON.stringify(builder.data)}`);
     const question = builder.data.data.questions[0], optionA = Number(question.options[0].id), optionB = Number(question.options[1].id);
+    const imageDb = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: names[label] });
+    const [optionImage] = await imageDb.query("INSERT INTO SafetyVote_Files(CampaignID,CampaignVersionID,FilePurpose,StoredName,OriginalName,MimeType,FileSize,ContentSha256,UploadedBy) VALUES(?,?,'option_image',?,?, 'image/png',68,?,'SV-ADMIN')", [campaignId, created.data.data.CurrentVersionID, `${label}-submitted-option.png`, 'submitted-option.png', 'a'.repeat(64)]);
+    await imageDb.query('UPDATE SafetyVote_Options SET FileID=? WHERE id=?', [optionImage.insertId, optionA]);
+    await imageDb.end();
 
     const rules = await call(base, `/admin/campaigns/${campaignId}/eligibility/rules`, { method: 'PUT', body: { rules: [{ ruleGroup: 1, ruleOrder: 1, effect: 'include', attributeKey: 'department_id', operator: 'equals', values: ['2'], reason: 'Production lifecycle voters' }] } });
     assert.strictEqual(rules.status, 200, `${label} rules: ${JSON.stringify(rules.data)}`);
@@ -142,6 +146,7 @@ async function lifecycle(label, base) {
     assert.strictEqual(detail.status, 200);
     assert.strictEqual(detail.data.data.participation.state || detail.data.data.participation.State, 'submitted');
     assert(detail.data.data.ownResponses?.length >= 1, `${label} submitted choice remains viewable by its voter`);
+    assert.strictEqual(Number(detail.data.data.ownResponses[0].questions[0].answers[0].optionImageFileId), Number(optionImage.insertId), `${label} submitted choice exposes its authenticated option image reference`);
 
     const closed = await call(base, `/admin/campaigns/${campaignId}/lifecycle/close`, { method: 'POST', body: {} });
     assert.strictEqual(closed.status, 200, `${label} close: ${JSON.stringify(closed.data)}`);

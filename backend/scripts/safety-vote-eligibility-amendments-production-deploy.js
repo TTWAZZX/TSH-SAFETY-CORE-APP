@@ -27,13 +27,18 @@ const runtimePaths = [
     'index.html',
     'public/js/main.js',
     'public/js/pages/admin-safety-vote-eligibility.js',
+    'public/js/pages/admin-safety-vote-operations.js',
+    'public/js/pages/admin-safety-vote-planning.js',
     'public/js/pages/admin-safety-vote-results.js',
     'public/js/pages/admin-safety-vote-ux1.js',
     'public/js/pages/admin.js',
+    'public/js/pages/safety-vote-live-results.js',
     'public/js/pages/safety-vote-page-ux1.js',
+    'public/js/pages/safety-vote.js',
+    'public/js/utils/safety-vote-auth-image.js',
     'public/style.css',
 ];
-const newPaths = new Set(['api/handlers/safety_vote_eligibility_amendments.php', 'public/js/pages/admin-safety-vote-eligibility.js']);
+const newPaths = new Set(['api/handlers/safety_vote_eligibility_amendments.php', 'public/js/pages/admin-safety-vote-eligibility.js', 'public/js/utils/safety-vote-auth-image.js']);
 const publicPaths = runtimePaths.filter(relative => relative === 'index.html' || relative.startsWith('public/'));
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
 const nonce = crypto.randomBytes(6).toString('hex');

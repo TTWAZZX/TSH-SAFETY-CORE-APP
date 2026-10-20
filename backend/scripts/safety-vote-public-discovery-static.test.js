@@ -43,9 +43,9 @@ assert(ui.includes("const VIEW_LABELS = { all: 'ทั้งหมด'"), 'parti
 assert(ui.includes("view: 'all'"), 'all campaigns must be the initial discovery view');
 assert(ui.includes("participationState(item) === 'open' && Number(item.DiscoveryOnly || 0) !== 1"), 'discovery-only campaigns must not appear as actionable tasks');
 assert(participationModel.includes("view === 'all' || participationState(campaign) === view"), 'campaign filtering must support the all-campaigns view');
-assert(main.includes('20261016-safety-vote-public-discovery-r1'), 'Safety Vote page cache key was not advanced');
+assert(main.includes('20261020-safety-vote-response-images-r1'), 'Safety Vote page cache key was not advanced');
 assert(wizard.includes('พนักงานที่เข้าสู่ระบบทุกคนเห็นการ์ดและรายละเอียด'), 'wizard must explain public discovery behavior');
 assert(wizard.includes('เฉพาะผู้มีสิทธิ์ในรายชื่อที่ยืนยันแล้วเท่านั้นที่เห็นคำถามและลงคะแนนได้'), 'wizard must distinguish discovery from voting eligibility');
-for (const source of [main, admin, adminSafetyVote]) assert(/20261016-safety-vote-(?:public-discovery|preview-parity)-r1/.test(source), 'Admin wizard cache chain was not advanced');
+for (const source of [main, admin, adminSafetyVote]) assert(source.includes('20261020-safety-vote-response-images-r1'), 'Admin wizard cache chain was not advanced');
 
 console.log('Safety Vote public discovery visibility/permission contract: PASS');

@@ -1,12 +1,9 @@
-import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml } from '../ui.js?v=20260602-mobile-nav-m53';
 import { formatThaiTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
-
-const urlsByRoot = new WeakMap();
+import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-auth-image-r1';
 
 export function clearLiveResultImages(root) {
-    for (const url of urlsByRoot.get(root) || []) URL.revokeObjectURL(url);
-    urlsByRoot.delete(root);
+    releaseSafetyVoteImages(root);
 }
 
 function liveStatusMarkup(data) {
@@ -38,7 +35,7 @@ function liveQuestionMarkup(question, data, admin) {
         const percentage = pending ? 0 : Math.max(0, Math.min(100, Number(option.percentage) || 0));
         const rank = pending ? '—' : Number(option.rank);
         const progressLabel = pending ? `${option.label} ยังไม่เปิดเผยคะแนน` : `${option.label} ${percentage} เปอร์เซ็นต์`;
-        return `<article class="sv-live-row${pending ? ' is-pending' : ''}"><strong class="sv-live-rank">#${rank}</strong>${option.fileId ? `<button type="button" class="sv-live-image" data-sv-image-gallery data-sv-gallery-group="live-${Number(question.questionId)}" data-sv-gallery-label="${escHtml(option.label)}" aria-label="ขยายภาพ ${escHtml(option.label)}"><img data-sv-live-file="${Number(option.fileId)}" alt="${escHtml(option.label)}"></button>` : ''}<div><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${option.tied && !pending ? '<span class="sv-live-tie">อันดับร่วม</span>' : ''}<div class="sv-live-progress" role="progressbar" aria-label="${escHtml(progressLabel)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><span style="width:${percentage}%"></span></div></div><span class="sv-live-score">${escHtml(score(option))}</span></article>`;
+        return `<article class="sv-live-row${pending ? ' is-pending' : ''}"><strong class="sv-live-rank">#${rank}</strong>${option.fileId ? `<button type="button" class="sv-live-image" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="live-${Number(question.questionId)}" data-sv-gallery-label="${escHtml(option.label)}" aria-label="ขยายภาพ ${escHtml(option.label)}"><img data-sv-live-file="${Number(option.fileId)}" data-sv-auth-file="${Number(option.fileId)}" alt="${escHtml(option.label)}" decoding="async"></button>` : ''}<div><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${option.tied && !pending ? '<span class="sv-live-tie">อันดับร่วม</span>' : ''}<div class="sv-live-progress" role="progressbar" aria-label="${escHtml(progressLabel)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><span style="width:${percentage}%"></span></div></div><span class="sv-live-score">${escHtml(score(option))}</span></article>`;
     }).join('')}</div><small>${escHtml(note)}</small></section>`;
 }
 
@@ -53,10 +50,5 @@ export function liveResultsMarkup(data, { admin = false, error = null, loading =
 }
 
 export async function hydrateLiveResultImages(root) {
-    clearLiveResultImages(root);
-    const urls = new Set(); urlsByRoot.set(root, urls);
-    await Promise.all([...root.querySelectorAll('[data-sv-live-file]')].map(async image => {
-        try { const response = await API.get(`/safety-vote/files/${Number(image.dataset.svLiveFile)}`, { suppressErrorLog: true }); const url = URL.createObjectURL(await response.blob()); urls.add(url); image.src = url; }
-        catch (_) { image.closest('.sv-live-image')?.remove(); }
-    }));
+    await hydrateSafetyVoteImages(root);
 }
