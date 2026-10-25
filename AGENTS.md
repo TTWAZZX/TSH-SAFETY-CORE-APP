@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 7 Production Deployment (PASS, 2026-10-26)
+
+- Immutable commit `b14af90277588aa31d13d95e0a9eb03fcb867f9b` was deployed to the PHP shared-hosting Production target. The guarded release uploaded 49 Safety Vote PHP/frontend runtime files with per-file rollback backup, double-download SHA-256 verification and HTTPS verification of the public entry chain.
+- Eight additive/idempotent migrations advanced Production from `2026-10-20-eligibility-amendments-r1` to `2026-10-25-jury-work-items-atomic-media-r1`. Protected counts remained exact: 7 campaigns, 7 versions, 10 eligibility snapshots, 25,465 eligible voters, 5 ballots, 0 result snapshots/rows/certifications/reports and 22 files.
+- Company-wide visibility, governed visibility-remediation and eligibility-removal gates are enabled. Health reports Question Images, Candidate/Submission Gallery, Jury Work Items, Atomic Media and Company-wide Campaign Visibility ready. Remediation dry-run found 0 candidates, 2 unchanged and 5 excluded campaigns; therefore no remediation batch or campaign row mutation was required.
+- Fresh full database backup evidence is retained only in ignored Local secure evidence at `backups/production/full-db-local-sync-20261025172836/`. Runtime rollback evidence is `backups/production/safety-vote-phase7-final-deploy-20261025173157/`; manifest SHA-256 is `38f28eb0a939581582a0e2c024089ffa90ca00c155dcddd14345d12970637f86`.
+- Authenticated Admin health, ordinary-user company catalogue contract and private authenticated image/browser smoke pass. The ordinary-user catalogue currently contains zero rows because no Production campaign is in a non-hidden published lifecycle state; Draft and Voided campaigns remain intentionally excluded. Temporary helper residue is zero, `.htaccess` was restored byte-exact and external delivery configuration was unchanged. Decision: `PASS_SAFETY_VOTE_PHASE7_FINAL_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Phase 7 Controlled Production Preflight (Candidate PASS, Offline only, 2026-10-26)
 
 - The release candidate is bounded to the reviewed Safety Vote integration scope. `.env`, private/public uploads, Local backups, runtime evidence and unrelated modules are fail-closed exclusions from the commit manifest.
