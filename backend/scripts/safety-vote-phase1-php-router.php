@@ -12,7 +12,7 @@ function db_rows(string$sql,array$params=[]):array{$stmt=db()->prepare($sql);$st
 function db_row(string$sql,array$params=[]):?array{$stmt=db()->prepare($sql);$stmt->execute($params);$row=$stmt->fetch();return$row?:null;}
 function db_execute(string$sql,array$params=[]):int{$stmt=db()->prepare($sql);$stmt->execute($params);return$stmt->rowCount();}
 function route_params(string$path,string$pattern):?array{$names=[];$quoted=preg_quote($pattern,'#');$regex=preg_replace_callback('/\\\\:([A-Za-z0-9_]+)/',function($matches)use(&$names){$names[]=$matches[1];return'([^/]+)';},$quoted);if(!preg_match('#^'.$regex.'$#',$path,$matches))return null;array_shift($matches);$out=[];foreach($names as$i=>$name)$out[$name]=rawurldecode($matches[$i]);return$out;}
-function require_user():array{$header=(string)($_SERVER['HTTP_AUTHORIZATION']??'');$token=preg_match('/^Bearer\s+(.+)$/i',trim($header),$m)?trim($m[1]):'';$users=['sv-admin'=>['id'=>'SV-ADMIN','name'=>'Safety Vote Admin','role'=>'Admin','department'=>'Safety','unit'=>'Core','position'=>'Officer'],'sv-user'=>['id'=>'SV-USER','name'=>'Safety Vote User','role'=>'User','department'=>'Production','unit'=>'Line 1','position'=>'Operator'],'sv-user2'=>['id'=>'SV-USER2','name'=>'Safety Vote User Two','role'=>'User','department'=>'Production','unit'=>'Line 1','position'=>'Operator']];for($i=1;$i<=30;$i++){$n=str_pad((string)$i,2,'0',STR_PAD_LEFT);$users['sv-load-'.$n]=['id'=>'SV-L'.$n,'name'=>'Load Voter '.$n,'role'=>'User','department'=>'Production','unit'=>'Line 1','position'=>'Operator'];}if(!isset($users[$token]))json_response(['success'=>false],401);return$users[$token];}
+function require_user():array{$header=(string)($_SERVER['HTTP_AUTHORIZATION']??'');$token=preg_match('/^Bearer\s+(.+)$/i',trim($header),$m)?trim($m[1]):'';$users=['sv-admin'=>['id'=>'SV-ADMIN','name'=>'Safety Vote Admin','role'=>'Admin','department'=>'Safety','unit'=>'Core','position'=>'Officer'],'sv-user'=>['id'=>'SV-USER','name'=>'Safety Vote User','role'=>'User','department'=>'Production','unit'=>'Line 1','position'=>'Operator'],'sv-user2'=>['id'=>'SV-USER2','name'=>'Safety Vote User Two','role'=>'User','department'=>'Production','unit'=>'Line 1','position'=>'Operator'],'sv-observer'=>['id'=>'SV-OBSERVER','name'=>'Safety Vote Observer','role'=>'User','department'=>'Production','unit'=>'Line 1','position'=>'Operator']];for($i=1;$i<=30;$i++){$n=str_pad((string)$i,2,'0',STR_PAD_LEFT);$users['sv-load-'.$n]=['id'=>'SV-L'.$n,'name'=>'Load Voter '.$n,'role'=>'User','department'=>'Production','unit'=>'Line 1','position'=>'Operator'];}if(!isset($users[$token]))json_response(['success'=>false],401);return$users[$token];}
 if($requestPath==='/__ready'&&(string)getenv('SAFETY_VOTE_FIXTURE_KEEP_DISABLED')!=='1'){db_execute("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='guarded-fixture' WHERE SettingKey='module_enabled'");try{db_execute("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='guarded-fixture' WHERE SettingKey='phase7_integrations_enabled'");}catch(Throwable$error){}}
 require_once __DIR__.'/../../api/lib/onboarding_resolver.php';
 require_once __DIR__.'/../../api/handlers/safety_vote.php';
@@ -28,6 +28,8 @@ require_once __DIR__.'/../../api/handlers/safety_vote_planning.php';
 require_once __DIR__.'/../../api/handlers/safety_vote_analytics.php';
 require_once __DIR__.'/../../api/handlers/safety_vote_live_results.php';
 require_once __DIR__.'/../../api/handlers/safety_vote_eligibility_amendments.php';
+require_once __DIR__.'/../../api/handlers/safety_vote_company_visibility_remediation.php';
+require_once __DIR__.'/../../api/handlers/safety_vote_gallery.php';
 $path=$requestPath;
 if($path==='/__ready')json_response(['success'=>true]);
 if(strpos($path,'/api')===0)$path=substr($path,4)?:'/';
@@ -37,9 +39,12 @@ if(handle_safety_vote_planning_routes((string)($_SERVER['REQUEST_METHOD']??'GET'
 if(handle_safety_vote_analytics_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_live_results_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_eligibility_amendment_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
+if(handle_safety_vote_company_visibility_remediation_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
+if(handle_safety_vote_gallery_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase10_4_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase7_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase6_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
+if(handle_safety_vote_member_results_route((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase5_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase4_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase3_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;

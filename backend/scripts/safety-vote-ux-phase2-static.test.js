@@ -19,10 +19,10 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     assert(components.includes('__TSH_FEATURE_FLAGS__?.safetyVoteUxV1 === true'), 'Safety Vote UX must remain strict opt-in');
     assert(admin.includes('renderLegacySafetyVoteFoundation(container)'), 'flag-off legacy rollback path is missing');
     assert(admin.includes('renderSafetyVoteCampaignWizard'), 'Admin campaign center must launch the Phase 2 wizard');
-    assert.strictEqual(model.WIZARD_STEPS.length, 8, 'wizard must have exactly eight common steps');
-    assert.deepStrictEqual(model.WIZARD_STEPS.map(step => step[0]), ['type', 'details', 'privacy', 'content', 'eligibility', 'schedule', 'results', 'review']);
+    assert.strictEqual(model.WIZARD_STEPS.length, 9, 'wizard must include the governed Jury Criteria and Assignment step');
+    assert.deepStrictEqual(model.WIZARD_STEPS.map(step => step[0]), ['type', 'details', 'privacy', 'content', 'jury', 'eligibility', 'schedule', 'results', 'review']);
     assert.strictEqual(model.CORE_TEMPLATES.length, 6, 'six Phase 0 core templates are required');
-    assert.deepStrictEqual(model.CORE_TEMPLATES.filter(item => item.advancedRequired).map(item => item.key), ['secret_election', 'submission_challenge', 'nomination', 'jury_scoring']);
+    assert.deepStrictEqual(model.CORE_TEMPLATES.filter(item => item.advancedRequired).map(item => item.key), ['secret_election', 'submission_challenge', 'nomination']);
 
     for (const marker of ['data-sv-wizard=', 'role="progressbar"', 'aria-current="step"', 'data-svw-save-status', 'role="alert"', 'svw-action-bar', 'svw-readiness', 'data-svw-preview="user"', 'data-svw-preview="juror"']) {
         assert(wizard.includes(marker) || css.includes(marker), `wizard contract marker missing: ${marker}`);
@@ -55,6 +55,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     assert.strictEqual(model.validateStep(3, draft).length, 0);
     assert.strictEqual(model.validateStep(4, draft).length, 0);
     assert.strictEqual(model.validateStep(5, draft).length, 0);
+    assert.strictEqual(model.validateStep(6, draft).length, 0);
 
     const popular = model.applyTemplate(draft, 'popular_vote');
     popular.questions[0].title = 'เลือกแนวคิดที่ชื่นชอบ';
@@ -77,7 +78,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     assert.strictEqual(questions[0].options[0].optionCode, 'O1');
 
     const ready = model.readinessItems(popular, { campaignId: 1, builderSaved: true });
-    assert(ready.slice(0, 5).every(item => item.pass), 'common readiness checks should pass for a complete popular vote');
+    assert(ready.slice(0, 6).every(item => item.pass), 'common readiness checks should pass for a complete popular vote');
     assert(ready.find(item => item.key === 'advanced').pass, 'popular vote must not require advanced workspace');
     const advanced = model.readinessItems(secret, { campaignId: 1, builderSaved: true });
     assert(!advanced.find(item => item.key === 'advanced').pass, 'secret election must remain routed through advanced setup');

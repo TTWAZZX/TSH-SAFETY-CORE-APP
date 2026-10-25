@@ -2190,7 +2190,7 @@ function handle_johnny_ai_routes(string $method, string $path): void
         $summary = db_row("SELECT COUNT(*) AS total, SUM(IsActive=1 AND IndexedStatus='ready') AS readyDocs, COALESCE(SUM(ChunkCount),0) AS chunks FROM johnny_kb_documents") ?: [];
         json_response(['success' => true, 'data' => [
             'phase' => 6,
-            'johnnyAvatarUrl' => johnny_setting('johnny_avatar_url'),
+            'johnnyAvatarUrl' => available_upload_public_url(johnny_setting('johnny_avatar_url')),
             'geminiConfigured' => ((string) ($config['gemini_api_key'] ?? '')) !== '',
             'ragEnabled' => true,
             'systemDataEnabled' => !isset($config['johnny_system_data_enabled']) || !empty($config['johnny_system_data_enabled']),

@@ -34,6 +34,8 @@ require __DIR__ . '/handlers/safety_vote_planning.php';
 require __DIR__ . '/handlers/safety_vote_analytics.php';
 require __DIR__ . '/handlers/safety_vote_live_results.php';
 require __DIR__ . '/handlers/safety_vote_eligibility_amendments.php';
+require __DIR__ . '/handlers/safety_vote_company_visibility_remediation.php';
+require __DIR__ . '/handlers/safety_vote_gallery.php';
 require __DIR__ . '/handlers/bbs_smart_card.php';
 require __DIR__ . '/handlers/bbs_checklists.php';
 require __DIR__ . '/handlers/bbs_observations.php';
@@ -739,9 +741,13 @@ try {
     handle_safety_vote_analytics_routes($method, $path);
     handle_safety_vote_live_results_routes($method, $path);
     handle_safety_vote_eligibility_amendment_routes($method, $path);
+    handle_safety_vote_company_visibility_remediation_routes($method, $path);
+    handle_safety_vote_gallery_routes($method, $path);
+    sv104_guard_completed_campaign_activation($method, $path);
     handle_safety_vote_phase10_4_routes($method, $path);
     handle_safety_vote_phase7_routes($method, $path);
     handle_safety_vote_phase6_routes($method, $path);
+    handle_safety_vote_member_results_route($method, $path);
     handle_safety_vote_phase5_routes($method, $path);
     handle_safety_vote_phase4_routes($method, $path);
     handle_safety_vote_phase3_routes($method, $path);
@@ -766,7 +772,7 @@ try {
         $branding = is_array($branding) ? $branding : [];
         $safeBrandingUrl = static function ($value): string {
             $url = mb_substr(trim((string) $value), 0, 1024);
-            return $url === '' || str_starts_with($url, '/') || preg_match('/^https:\/\//i', $url) ? $url : '';
+            return $url === '' || strpos($url, '/') === 0 || preg_match('/^https:\/\//i', $url) ? $url : '';
         };
         $announcementTone = in_array((string) ($branding['loginAnnouncementTone'] ?? ''), ['info', 'warning', 'critical'], true)
             ? (string) $branding['loginAnnouncementTone']
@@ -776,8 +782,8 @@ try {
             'tagline' => mb_substr((string) ($branding['tagline'] ?? ''), 0, 80),
             'loginHeroTitle' => mb_substr((string) ($branding['loginHeroTitle'] ?? ''), 0, 140),
             'loginHeroSubtitle' => mb_substr((string) ($branding['loginHeroSubtitle'] ?? ''), 0, 180),
-            'logoUrl' => mb_substr((string) ($branding['logoUrl'] ?? ''), 0, 1024),
-            'loginBackgroundUrl' => mb_substr((string) ($branding['loginBackgroundUrl'] ?? ''), 0, 1024),
+            'logoUrl' => available_upload_public_url($branding['logoUrl'] ?? ''),
+            'loginBackgroundUrl' => available_upload_public_url($branding['loginBackgroundUrl'] ?? ''),
             'loginBackgroundFit' => ($branding['loginBackgroundFit'] ?? '') === 'contain' ? 'contain' : 'cover',
             'loginBackgroundFocusX' => max(0, min(100, is_numeric($branding['loginBackgroundFocusX'] ?? null) ? (float) $branding['loginBackgroundFocusX'] : 50)),
             'loginBackgroundFocusY' => max(0, min(100, is_numeric($branding['loginBackgroundFocusY'] ?? null) ? (float) $branding['loginBackgroundFocusY'] : 50)),

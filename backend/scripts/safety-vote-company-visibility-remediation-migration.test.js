@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),mysql=require('mysql2/promise');
+require('dotenv').config({path:path.join(__dirname,'..','.env'),quiet:true});
+const root=path.resolve(__dirname,'..','..'),name=`tsh_sv_visibility_remediation_${Date.now()}_${Math.floor(Math.random()*100000)}`,guard=/^tsh_sv_visibility_remediation_\d+_\d+$/;
+let admin;
+(async()=>{
+    assert(['localhost','127.0.0.1','::1'].includes(String(process.env.DB_HOST).toLowerCase()));assert(guard.test(name));
+    admin=await mysql.createConnection({host:process.env.DB_HOST,port:Number(process.env.DB_PORT||3306),user:process.env.DB_USER,password:process.env.DB_PASS});
+    await admin.query(`CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    const db=await mysql.createConnection({host:process.env.DB_HOST,port:Number(process.env.DB_PORT||3306),user:process.env.DB_USER,password:process.env.DB_PASS,database:name,multipleStatements:true});
+    await db.query('CREATE TABLE Admin_RolePermissions(role VARCHAR(50),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(role,permission));CREATE TABLE Admin_UserPermissions(employee_id VARCHAR(20),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(employee_id,permission));');
+    await db.query(fs.readFileSync(path.join(root,'backend','migrations','20261008_safety_vote_phase1_foundation.sql'),'utf8'));
+    const migration=fs.readFileSync(path.join(root,'backend','migrations','20261025_safety_vote_company_visibility_remediation.sql'),'utf8');
+    await db.query(migration);await db.query("UPDATE SafetyVote_Settings SET SettingValue='1' WHERE SettingKey='company_visibility_remediation_enabled'");await db.query(migration);
+    const[[tables]]=await db.query("SELECT COUNT(*) count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME IN ('SafetyVote_VisibilityRemediationBatches','SafetyVote_VisibilityRemediationItems')",[name]);assert.strictEqual(Number(tables.count),2);
+    const[[gate]]=await db.query("SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='company_visibility_remediation_enabled'");assert.strictEqual(gate.SettingValue,'1','idempotent migration must preserve explicit activation');
+    await db.query(fs.readFileSync(path.join(root,'backend','migrations','20261025_safety_vote_company_visibility_remediation_rollback.sql'),'utf8'));
+    const[[disabled]]=await db.query("SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='company_visibility_remediation_enabled'");assert.strictEqual(disabled.SettingValue,'0');
+    const[[retained]]=await db.query("SELECT COUNT(*) count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME IN ('SafetyVote_VisibilityRemediationBatches','SafetyVote_VisibilityRemediationItems')",[name]);assert.strictEqual(Number(retained.count),2);
+    await db.end();console.log('Safety Vote company visibility remediation migration: PASS (additive, idempotent activation preservation and data-preserving rollback)');
+})().catch(error=>{console.error(error.stack||error);process.exitCode=1;}).finally(async()=>{if(admin){if(guard.test(name))await admin.query(`DROP DATABASE IF EXISTS \`${name}\``).catch(()=>{});await admin.end().catch(()=>{});}});

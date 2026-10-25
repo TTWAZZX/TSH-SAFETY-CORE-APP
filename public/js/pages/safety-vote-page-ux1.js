@@ -4,17 +4,27 @@ import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
-import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261015-safety-vote-thai-time-r1';
+import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261024-safety-vote-gallery-r1';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-duplicate-media-r3';
+import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
 import {
-    CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignType, filterCampaigns,
+    CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignMatchesView, campaignType, filterCampaigns,
     isBallotCampaign, isChoiceQuestion, isQuestionVisible, participationState, privacyMode,
     privacyNotice, safeReceipt, validateParticipation, valueOf
-} from './safety-vote-participation-model.mjs?v=20261016-safety-vote-public-discovery-r1';
+} from './safety-vote-participation-model.mjs?v=20261025-company-user-ux-phase5-r1';
+
+const questionControlBase=questionControl;
+questionControl=function questionControlWithImage(question){
+    const fileId=Number(question.imageFileId||0),label=question.imageAltText||question.title||'ภาพประกอบคำถาม';
+    const image=fileId?`<button type="button" class="svp-gallery-trigger svp-question-image" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="question-cover-${Number(question.id)}" data-sv-gallery-label="${escHtml(label)}" aria-label="ขยายภาพ ${escHtml(label)}"><img data-svp-private-file="${fileId}" data-sv-auth-file="${fileId}" alt="${escHtml(label)}" decoding="async"></button>`:'';
+    return image+questionControlBase(question);
+};
 
 const VIEW_LABELS = { all: 'ทั้งหมด', open: 'เข้าร่วมได้', upcoming: 'เร็ว ๆ นี้', submitted: 'ส่งแล้ว', closed: 'สิ้นสุดแล้ว' };
-const STATUS_LABELS = { Draft: 'ประกาศล่วงหน้า · ยังไม่เปิดลงคะแนน', Scheduled: 'เผยแพร่แล้ว · ยังไม่เปิดลงคะแนน', Open: 'เปิดรับการเข้าร่วม', Closed: 'ปิดรับแล้ว', Published: 'ประกาศผลแล้ว' };
+VIEW_LABELS.read_only = 'ดูรายละเอียด';
+VIEW_LABELS.results = 'ดูผลกิจกรรม';
+const STATUS_LABELS = { Draft: 'ประกาศล่วงหน้า · ยังไม่เปิดลงคะแนน', Scheduled: 'เผยแพร่แล้ว · ยังไม่เปิดลงคะแนน', Open: 'เปิดรับการเข้าร่วม', Closed: 'ปิดรับแล้ว', Certified: 'รับรองผลแล้ว', Published: 'ประกาศผลแล้ว' };
 const ELIGIBILITY_LABELS = {
     initial_snapshot: ['มีสิทธิ์เข้าร่วม', 'รายชื่อผู้มีสิทธิ์ตั้งแต่เริ่มแคมเปญ'],
     automatic_rule_match: ['ได้รับสิทธิ์อัตโนมัติ', 'ระบบเพิ่มสิทธิ์ให้เมื่อข้อมูลตรงตามเงื่อนไข'],
@@ -25,9 +35,10 @@ const state = {
     page: null, campaigns: [], detail: null, assignments: [], nominations: [], notifications: [], notificationCenter: [], promotions: [], promotionHistory: [], promotionIndex: 0, submissions: [],
     view: 'all', query: '', screen: 'list', mode: 'edit', newAttempt: false, answers: {}, errors: [], receipt: null,
     loading: true, error: null, denied: false, moduleDisabled: false, inFlight: false, requestKey: '',
-    workflowDraftId: null, workflowReference: '', submitError: null, objectUrls: new Set(), trackedPromotionEvents: new Set(),
+    workflowDraftId: null, workflowReference: '', submissionGallery: [], submitError: null, objectUrls: new Set(), trackedPromotionEvents: new Set(),
     liveView: false, liveResults: null, liveError: null, liveInFlight: false, livePaused: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null,
-    discoveryRefreshing: false, discoveryRefreshHandler: null, notificationsExpanded: false
+    discoveryRefreshing: false, discoveryRefreshHandler: null, notificationsExpanded: false, catalogueMode: 'legacy_discovery',
+    peopleLabels: {}, peoplePickerCleanup: null, officialResults: null
 };
 
 function trackPromotionEvent(promotionId, eventType) {
@@ -95,8 +106,9 @@ function automaticEligibilityNoticeMarkup() {
     return `<section class="svp-eligibility-granted" role="status" aria-live="polite"><span class="svp-eligibility-granted__icon" aria-hidden="true">✓</span><div><p class="sv-eyebrow">ได้รับสิทธิ์ใหม่</p><h2>${escHtml(item.metadata?.title || 'คุณได้รับสิทธิ์เข้าร่วมแคมเปญแล้ว')}</h2><p>${escHtml(item.metadata?.message || 'ข้อมูลของคุณตรงตามเงื่อนไขของแคมเปญ ระบบเพิ่มสิทธิ์ให้โดยอัตโนมัติแล้ว')}</p><small>ระบบแจ้งเฉพาะผลการตรวจสิทธิ์ และไม่เปิดเผยรายละเอียดกฎหรือข้อมูลส่วนบุคคลที่ใช้ตรวจสอบ</small></div><button type="button" class="sv-button sv-button--primary" data-svp-notification="${Number(item.id)}" data-campaign-id="${Number(item.campaignId)}">${canParticipate ? 'เปิดแคมเปญและโหวต' : 'ดูรายละเอียดแคมเปญ'}</button></section>`;
 }
 
-function clearObjectUrls() {
+function clearObjectUrls(preserveSubmissionPreviews = false) {
     if (state.page) releaseSafetyVoteImages(state.page);
+    if (preserveSubmissionPreviews) return;
     state.objectUrls.forEach(url => URL.revokeObjectURL(url));
     state.objectUrls.clear();
 }
@@ -166,7 +178,7 @@ function campaignCard(campaign) {
     const discoveryOnly = Number(campaign.DiscoveryOnly || 0) === 1;
     const accessStatus = discoveryOnly ? 'ดูรายละเอียดได้ · ไม่มีสิทธิ์ลงคะแนน' : attemptStatus;
     const eligibilityBadge = eligibilityBadgeMarkup(campaign.EligibilityOrigin, { eligible: Number(campaign.Eligible || 0) === 1, discoveryOnly });
-    return `<button type="button" class="svp-campaign-card" data-svp-campaign="${Number(campaign.id)}">${fileId ? `<span class="svp-campaign-card__cover" data-svp-media-state="loading" aria-busy="true">${promotionImageMarkup(fileId, promotion.desktopFileId, promotion.altText)}</span>` : `<span class="svp-campaign-card__cover svp-campaign-card__cover--fallback" aria-hidden="true">${escHtml((CAMPAIGN_TYPE_LABELS[type] || 'Safety Vote').slice(0, 2))}</span>`}<span class="svp-campaign-card__top"><span class="sv-status-badge sv-status-badge--${stateKey === 'open' ? 'open' : stateKey === 'submitted' ? 'published' : 'closed'}"><span class="sv-status-dot"></span>${stateKey === 'submitted' ? 'ส่งแล้ว' : escHtml(STATUS_LABELS[campaign.Status] || campaign.Status)}</span><span>${closingSoon ? '<b class="svp-deadline-chip">ใกล้ปิด</b>' : escHtml(PRIVACY_LABELS[privacy] || privacy)}</span></span>${eligibilityBadge}<strong>${escHtml(campaign.TitleTh || 'ไม่มีชื่อกิจกรรม')}</strong><span>${escHtml(CAMPAIGN_TYPE_LABELS[type] || type)} · ${accessStatus}</span><p>${escHtml(campaign.Summary || 'เปิดดูรายละเอียดและเงื่อนไขก่อนเข้าร่วม')}</p><small>${campaign.CloseAt ? `ปิด ${dateTime(campaign.CloseAt)}` : 'ตรวจสอบกำหนดการในรายละเอียด'}</small></button>`;
+    return `<button type="button" class="svp-campaign-card" data-svp-campaign="${Number(campaign.id)}" data-svp-status="${escHtml(campaign.Status || '')}">${fileId ? `<span class="svp-campaign-card__cover" data-svp-media-state="loading" aria-busy="true">${promotionImageMarkup(fileId, promotion.desktopFileId, promotion.altText)}</span>` : `<span class="svp-campaign-card__cover svp-campaign-card__cover--fallback" aria-hidden="true">${escHtml((CAMPAIGN_TYPE_LABELS[type] || 'Safety Vote').slice(0, 2))}</span>`}<span class="svp-campaign-card__top"><span class="sv-status-badge sv-status-badge--${stateKey === 'open' ? 'open' : stateKey === 'submitted' ? 'published' : 'closed'}"><span class="sv-status-dot"></span>${stateKey === 'submitted' ? 'ส่งแล้ว' : escHtml(STATUS_LABELS[campaign.Status] || campaign.Status)}</span><span>${closingSoon ? '<b class="svp-deadline-chip">ใกล้ปิด</b>' : escHtml(PRIVACY_LABELS[privacy] || privacy)}</span></span>${eligibilityBadge}<strong>${escHtml(campaign.TitleTh || 'ไม่มีชื่อกิจกรรม')}</strong><span>${escHtml(CAMPAIGN_TYPE_LABELS[type] || type)} · ${accessStatus}</span><p>${escHtml(campaign.Summary || 'เปิดดูรายละเอียดและเงื่อนไขก่อนเข้าร่วม')}</p><small>${campaign.CloseAt ? `ปิด ${dateTime(campaign.CloseAt)}` : 'ตรวจสอบกำหนดการในรายละเอียด'}</small></button>`;
 }
 
 function optionMedia(option) {
@@ -189,8 +201,16 @@ function renderList() {
     clearObjectUrls();
     // Phase 1 regression contract: showJury: jury > 0 remains assignment-aware.
     const rows = filterCampaigns(state.campaigns, { view: state.view, query: state.query });
-    const counts = Object.fromEntries(Object.keys(VIEW_LABELS).map(key => [key, key === 'all' ? state.campaigns.length : state.campaigns.filter(campaign => participationState(campaign) === key).length]));
+    const counts = Object.fromEntries(Object.keys(VIEW_LABELS).map(key => [key, state.campaigns.filter(campaign => campaignMatchesView(campaign, key)).length]));
     state.page.innerHTML = `<div class="svp-shell" data-sv-participation="2026-10-16-safety-vote-public-discovery-r1">${safetyVoteRoleNav({ active: 'user', showJury: state.assignments.length > 0, juryCount: state.assignments.length })}<header class="svp-hero"><div><p class="sv-eyebrow">Safety Vote</p><h1>กิจกรรมของฉัน</h1><p>รวมกิจกรรมที่คุณมีสิทธิ์เข้าร่วม และกิจกรรมที่เปิดให้พนักงานทุกคนดูรายละเอียด</p></div><div class="svp-hero__count"><strong>${state.campaigns.length}</strong><span>กิจกรรม</span></div></header><section class="svp-toolbar" aria-label="ค้นหาและกรองกิจกรรม"><label><span class="sr-only">ค้นหากิจกรรม</span><input type="search" data-svp-search value="${escHtml(state.query)}" placeholder="ค้นหาชื่อ รหัส หรือประเภทกิจกรรม"></label><div class="svp-tabs" role="tablist" aria-label="สถานะการเข้าร่วม">${Object.entries(VIEW_LABELS).map(([key, label]) => `<button type="button" role="tab" data-svp-view="${key}" aria-selected="${state.view === key}">${label} <span>${counts[key]}</span></button>`).join('')}</div></section><main><section class="svp-card-grid" aria-label="รายการกิจกรรม">${rows.length ? rows.map(campaignCard).join('') : `<div class="svp-empty"><span aria-hidden="true">◌</span><h2>${state.query ? 'ไม่พบกิจกรรมที่ค้นหา' : `ยังไม่มีกิจกรรม${VIEW_LABELS[state.view]}`}</h2><p>${state.query ? 'ลองเปลี่ยนคำค้นหาหรือสถานะ' : 'เมื่อมีกิจกรรมในสถานะนี้ รายการจะแสดงที่นี่'}</p></div>`}</section>${auxiliaryMarkup()}</main><p class="sr-only" aria-live="polite">แสดง ${rows.length} กิจกรรม</p></div>`;
+    state.page.querySelector('.svp-shell')?.setAttribute('data-sv-company-user-ux', 'phase5');
+    if (state.catalogueMode === 'company_authenticated') {
+        state.page.querySelector('.svp-shell')?.setAttribute('data-sv-catalogue', 'company-wide-v1');
+        const title = state.page.querySelector('.svp-hero h1'), description = state.page.querySelector('.svp-hero h1 + p'), countLabel = state.page.querySelector('.svp-hero__count span');
+        if (title) title.textContent = 'แคมเปญทั้งหมด';
+        if (description) description.textContent = 'พนักงานทุกคนดูแคมเปญที่เผยแพร่และรายละเอียดได้ การเข้าร่วมยังขึ้นอยู่กับสิทธิ์ของแต่ละแคมเปญ';
+        if (countLabel) countLabel.textContent = 'แคมเปญที่เผยแพร่';
+    }
     state.page.querySelector('.svp-shell')?.setAttribute('data-sv-engagement-version', '2026-10-10-safety-vote-ux-phase9a-r1');
     state.page.querySelector('.svp-hero')?.insertAdjacentHTML('beforebegin', promotionBannerMarkup());
     state.page.querySelector('.svp-hero')?.insertAdjacentHTML('beforebegin', automaticEligibilityNoticeMarkup());
@@ -218,17 +238,30 @@ function questionControl(question) {
     const id = Number(question.id), raw = state.answers[String(id)], options = question.options || [];
     if (isChoiceQuestion(question)) {
         const inputType = question.questionType === 'single_choice' || question.questionType === 'yes_no_abstain' || Number(question.maxSelections) === 1 ? 'radio' : 'checkbox';
-        return `<div class="svp-options">${options.map(option => `<article class="svp-option">${option.fileId ? `<button type="button" class="svp-gallery-trigger" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="question-${id}" data-sv-gallery-label="${escHtml(option.label)}" data-svp-file="${Number(option.fileId)}" aria-label="ขยายภาพ ${escHtml(option.label)}"><img data-svp-private-file="${Number(option.fileId)}" data-sv-auth-file="${Number(option.fileId)}" alt="${escHtml(option.label)}" decoding="async"></button>` : ''}<label><input type="${inputType}" name="svp-q-${id}" value="${Number(option.id)}" data-svp-answer="${id}" ${(Array.isArray(raw) && raw.map(Number).includes(Number(option.id))) ? 'checked' : ''}><span><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${optionMedia(option)}</span></label></article>`).join('')}</div>`;
+        return `<div class="svp-options">${options.map(option => `<article class="svp-option">${candidateGalleryMarkup(option,id)}<label><input type="${inputType}" name="svp-q-${id}" value="${Number(option.id)}" data-svp-answer="${id}" ${(Array.isArray(raw) && raw.map(Number).includes(Number(option.id))) ? 'checked' : ''}><span><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${optionMedia(option)}</span></label></article>`).join('')}</div>`;
     }
     if (question.questionType === 'rating') return `<label class="svp-inline-input"><span>คะแนน ${Number(question.validation?.minNumber ?? 0)}–${Number(question.validation?.maxNumber ?? 10)}</span><input type="number" data-svp-answer="${id}" value="${escHtml(raw ?? '')}" min="${Number(question.validation?.minNumber ?? 0)}" max="${Number(question.validation?.maxNumber ?? 10)}"></label>`;
     if (question.questionType === 'long_text') return `<textarea data-svp-answer="${id}" rows="5" maxlength="${Number(question.validation?.maxLength || 10000)}" placeholder="กรอกคำตอบ">${escHtml(raw || '')}</textarea>`;
-    if (['short_text', 'employee_picker', 'organization_picker'].includes(question.questionType)) return `<input data-svp-answer="${id}" value="${escHtml(raw || '')}" maxlength="${Number(question.validation?.maxLength || 1000)}" placeholder="${question.questionType === 'employee_picker' ? 'รหัสพนักงาน' : 'กรอกคำตอบ'}">`;
+    if (question.questionType === 'employee_picker') return safetyVotePeoplePickerMarkup({ pickerId: `question-${id}`, key: `question:${id}`, label: 'เลือกพนักงาน', value: raw || '', selectedLabel: state.peopleLabels[`question:${id}`] || '' });
+    if (['short_text', 'organization_picker'].includes(question.questionType)) return `<input data-svp-answer="${id}" value="${escHtml(raw || '')}" maxlength="${Number(question.validation?.maxLength || 1000)}" placeholder="กรอกคำตอบ">`;
     if (question.questionType === 'date_time') return `<input type="datetime-local" data-svp-answer="${id}" value="${escHtml(raw || '')}">`;
     if (question.questionType === 'file_upload') return `<label class="svp-file-control"><span>${Number(raw) ? 'แนบไฟล์แล้ว' : 'เลือกไฟล์คำตอบ'}</span><input type="file" data-svp-answer-file="${id}" ${Number(raw) ? `data-file-id="${Number(raw)}"` : ''}></label>`;
     if (question.questionType === 'ranking') return `<div class="svp-ranking">${options.map(option => `<label><span>${escHtml(option.label)}</span><select data-svp-rank="${id}" data-option-id="${Number(option.id)}"><option value="">—</option>${options.map((_, rank) => `<option value="${rank + 1}" ${Array.isArray(raw) && raw.map(Number).indexOf(Number(option.id)) === rank ? 'selected' : ''}>${rank + 1}</option>`).join('')}</select></label>`).join('')}</div>`;
     if (['allocation', 'token'].includes(question.questionType)) return `<div class="svp-ranking">${options.map(option => `<label><span>${escHtml(option.label)}</span><input type="number" min="0" value="${Number(raw?.[option.id] || 0)}" data-svp-allocation="${id}" data-option-id="${Number(option.id)}"></label>`).join('')}</div>`;
     if (question.questionType === 'matrix') return `<div class="svp-ranking">${options.map(option => `<label><span>${escHtml(option.label)}</span><input value="${escHtml(raw?.[option.id] || '')}" data-svp-matrix="${id}" data-option-id="${Number(option.id)}"></label>`).join('')}</div>`;
     return '<p class="svp-note">รูปแบบคำถามนี้ยังไม่มีตัวควบคุมในหน้าเข้าร่วม</p>';
+}
+
+function candidateGalleryMarkup(option, questionId) {
+    const gallery = Array.isArray(option.gallery) && option.gallery.length ? option.gallery : option.fileId ? [{ fileId: option.fileId, altText: option.label, caption: null, isCover: true }] : [];
+    if (!gallery.length) return '';
+    const group = `candidate-${Number(option.candidateId || option.id)}-question-${Number(questionId)}`;
+    return `<div class="sv-work-gallery sv-work-gallery--candidate" aria-label="ภาพผลงาน ${escHtml(option.label)}">${gallery.map((item,index)=>`<figure class="sv-work-gallery__item ${item.isCover?'is-cover':''}"><button type="button" class="svp-gallery-trigger" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="${group}" data-sv-gallery-label="${escHtml(item.altText||option.label)}" aria-label="เปิดภาพที่ ${index+1} ของ ${escHtml(option.label)}"><img data-svp-private-file="${Number(item.fileId)}" data-sv-auth-file="${Number(item.fileId)}" alt="${escHtml(item.altText||option.label)}" decoding="async"></button>${item.caption?`<figcaption>${escHtml(item.caption)}</figcaption>`:''}</figure>`).join('')}</div>`;
+}
+
+function submissionGalleryEditor() {
+    const rows = state.submissionGallery || [];
+    return `<section class="sv-work-gallery-editor" aria-labelledby="svp-submission-gallery-title"><div><h3 id="svp-submission-gallery-title">รูปผลงาน</h3><p>เพิ่มได้สูงสุด 12 รูป · JPG, PNG หรือ WebP รูปละไม่เกิน 10 MB</p></div><label class="sv-button sv-button--secondary"><span>เพิ่มรูปผลงาน</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple data-svp-submission-gallery ${rows.length>=12?'disabled':''}></label>${rows.length?`<div class="sv-work-gallery-editor__grid">${rows.map((item,index)=>`<article><img src="${escHtml(item.previewUrl||'')}" alt=""><label class="svp-field"><span>คำอธิบายภาพ</span><input maxlength="300" value="${escHtml(item.altText||'')}" data-svp-gallery-alt="${index}" required></label><label class="svp-field"><span>คำบรรยาย (ถ้ามี)</span><input maxlength="500" value="${escHtml(item.caption||'')}" data-svp-gallery-caption="${index}"></label><button type="button" class="sv-button sv-button--secondary" data-svp-gallery-remove="${index}">ลบรูป</button></article>`).join('')}</div>`:'<p class="svp-note">ยังไม่มีรูปผลงาน</p>'}</section>`;
 }
 
 function ballotForm(detail) {
@@ -238,8 +271,8 @@ function ballotForm(detail) {
 
 function workflowForm(campaign) {
     const validation = state.errors.length ? `<section class="svp-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบข้อมูล</h2><ul>${state.errors.map(error => `<li><a href="#svp-question-${Number(error.questionId)}">${escHtml(error.message)}</a></li>`).join('')}</ul></section>` : '';
-    if (campaignType(campaign) === 'submission_challenge') return `<form class="svp-form" data-svp-form novalidate>${validation}<section id="svp-question-0" class="svp-question" data-svp-question="0"><h2>ข้อมูลผลงาน</h2><label class="svp-field"><span>ชื่อผลงาน</span><input data-svp-workflow="title" value="${escHtml(state.answers.title || '')}" maxlength="300"></label><label class="svp-field"><span>รายละเอียด</span><textarea data-svp-workflow="description" rows="6" maxlength="10000">${escHtml(state.answers.description || '')}</textarea></label>${state.submissions.length ? `<p class="svp-note">คุณมีผลงานในกิจกรรมนี้ ${state.submissions.length} รายการ ระบบจะไม่สร้างรายการซ้ำระหว่างที่กำลังส่ง</p>` : ''}</section></form>`;
-    return `<form class="svp-form" data-svp-form novalidate>${validation}<section id="svp-question-0" class="svp-question" data-svp-question="0"><h2>ข้อมูลการเสนอชื่อ</h2><label class="svp-field"><span>รหัสพนักงานของผู้ถูกเสนอชื่อ</span><input data-svp-workflow="nomineeEmployeeId" value="${escHtml(state.answers.nomineeEmployeeId || '')}" maxlength="20"></label><label class="svp-field"><span>เหตุผลประกอบการเสนอชื่อ</span><textarea data-svp-workflow="statement" rows="6" maxlength="5000">${escHtml(state.answers.statement || '')}</textarea></label></section></form>`;
+    if (campaignType(campaign) === 'submission_challenge') return `<form class="svp-form" data-svp-form novalidate>${validation}<section id="svp-question-0" class="svp-question" data-svp-question="0"><h2>ข้อมูลผลงาน</h2><label class="svp-field"><span>ชื่อผลงาน</span><input data-svp-workflow="title" value="${escHtml(state.answers.title || '')}" maxlength="300"></label><label class="svp-field"><span>รายละเอียด</span><textarea data-svp-workflow="description" rows="6" maxlength="10000">${escHtml(state.answers.description || '')}</textarea></label>${submissionGalleryEditor()}${state.submissions.length ? `<p class="svp-note">คุณมีผลงานในกิจกรรมนี้ ${state.submissions.length} รายการ ระบบจะไม่สร้างรายการซ้ำระหว่างที่กำลังส่ง</p>` : ''}</section></form>`;
+    return `<form class="svp-form" data-svp-form novalidate>${validation}<section id="svp-question-0" class="svp-question" data-svp-question="0"><h2>ข้อมูลการเสนอชื่อ</h2>${safetyVotePeoplePickerMarkup({pickerId:'nominee',key:'nomineeEmployeeId',label:'ผู้ถูกเสนอชื่อ',value:state.answers.nomineeEmployeeId||'',selectedLabel:state.peopleLabels.nomineeEmployeeId||'',help:'ค้นหาจากชื่อ รหัสพนักงาน แผนก หน่วยงาน หรือตำแหน่ง'})}<label class="svp-field"><span>เหตุผลประกอบการเสนอชื่อ</span><textarea data-svp-workflow="statement" rows="6" maxlength="5000">${escHtml(state.answers.statement || '')}</textarea></label></section></form>`;
 }
 
 function collectAnswers() {
@@ -251,9 +284,11 @@ function collectAnswers() {
         else if (['allocation', 'token'].includes(question.questionType)) state.answers[id] = Object.fromEntries([...state.page.querySelectorAll(`[data-svp-allocation="${id}"]`)].map(input => [input.dataset.optionId, Number(input.value || 0)]));
         else if (question.questionType === 'matrix') state.answers[id] = Object.fromEntries([...state.page.querySelectorAll(`[data-svp-matrix="${id}"]`)].map(input => [input.dataset.optionId, input.value]));
         else if (question.questionType === 'file_upload') state.answers[id] = Number(state.page.querySelector(`[data-svp-answer-file="${id}"]`)?.dataset.fileId || state.answers[id] || 0);
+        else if (question.questionType === 'employee_picker') state.answers[id] = state.page.querySelector(`[data-sv-people-key="question:${id}"] [data-sv-people-value]`)?.value ?? state.answers[id] ?? '';
         else state.answers[id] = state.page.querySelector(`[data-svp-answer="${id}"]`)?.value ?? state.answers[id] ?? '';
     }
     state.page.querySelectorAll('[data-svp-workflow]').forEach(input => { state.answers[input.dataset.svpWorkflow] = input.value; });
+    const nominee=state.page.querySelector('[data-sv-people-key="nomineeEmployeeId"] [data-sv-people-value]');if(nominee)state.answers.nomineeEmployeeId=nominee.value;
 }
 
 function answerSummary(question) {
@@ -262,6 +297,7 @@ function answerSummary(question) {
     if (question.questionType === 'ranking') return (raw || []).map(id => question.options.find(option => Number(option.id) === Number(id))?.label).filter(Boolean).join(' → ') || 'ยังไม่ได้จัดลำดับ';
     if (['allocation', 'token', 'matrix'].includes(question.questionType)) return Object.entries(raw || {}).map(([id, value]) => `${question.options.find(option => Number(option.id) === Number(id))?.label || id}: ${value}`).join(', ') || 'ยังไม่ได้ตอบ';
     if (question.questionType === 'file_upload') return Number(raw) ? 'แนบไฟล์แล้ว' : 'ยังไม่ได้แนบไฟล์';
+    if(question.questionType==='employee_picker')return state.peopleLabels[`question:${Number(question.id)}`]?`${state.peopleLabels[`question:${Number(question.id)}`]} (${String(raw||'')})`:String(raw||'').trim()||'ยังไม่ได้ตอบ';
     return String(raw ?? '').trim() || 'ยังไม่ได้ตอบ';
 }
 
@@ -270,8 +306,8 @@ function reviewMarkup() {
     const rows = isBallotCampaign(campaign)
         ? state.detail.questions.filter(question => isQuestionVisible(question, state.detail.questions, state.answers)).map(question => `<li><strong>${escHtml(question.title)}</strong><span>${escHtml(answerSummary(question))}</span></li>`).join('')
         : type === 'submission_challenge'
-            ? `<li><strong>ชื่อผลงาน</strong><span>${escHtml(state.answers.title)}</span></li><li><strong>รายละเอียด</strong><span>${escHtml(state.answers.description)}</span></li>`
-            : `<li><strong>รหัสพนักงาน</strong><span>${escHtml(state.answers.nomineeEmployeeId)}</span></li><li><strong>เหตุผล</strong><span>${escHtml(state.answers.statement)}</span></li>`;
+            ? `<li><strong>ชื่อผลงาน</strong><span>${escHtml(state.answers.title)}</span></li><li><strong>รายละเอียด</strong><span>${escHtml(state.answers.description)}</span></li><li><strong>รูปผลงาน</strong><span>${state.submissionGallery.length} รูป</span></li>${state.submissionGallery.length?`<li class="sv-work-gallery sv-work-gallery--review">${state.submissionGallery.map((item,index)=>`<figure class="sv-work-gallery__item"><button type="button" class="svp-gallery-trigger" data-sv-image-gallery data-sv-gallery-group="submission-review" data-sv-gallery-label="${escHtml(item.altText)}"><img src="${escHtml(item.previewUrl)}" alt="${escHtml(item.altText)}"></button>${item.caption?`<figcaption>${escHtml(item.caption)}</figcaption>`:''}</figure>`).join('')}</li>`:''}`
+            : `<li><strong>ผู้ถูกเสนอชื่อ</strong><span>${escHtml(state.peopleLabels.nomineeEmployeeId?`${state.peopleLabels.nomineeEmployeeId} (${state.answers.nomineeEmployeeId})`:state.answers.nomineeEmployeeId)}</span></li><li><strong>เหตุผล</strong><span>${escHtml(state.answers.statement)}</span></li>`;
     return `<section class="svp-review" aria-labelledby="svp-review-title"><p class="sv-eyebrow">ตรวจสอบก่อนส่ง</p><h2 id="svp-review-title">ตรวจคำตอบของคุณอีกครั้ง</h2><ul>${rows}</ul><div class="svp-immutable-warning" role="note"><strong>เมื่อยืนยันแล้วจะแก้ไขไม่ได้</strong><span>${privacyMode(campaign) === 'secret_ballot' ? 'ระบบจะไม่แสดงตัวเลือกในใบรับและไม่สามารถเชื่อมใบรับกลับไปยังบัตรลงคะแนน' : 'ระบบจะบันทึกการเข้าร่วมตามกติกาและสิทธิ์เดิมของกิจกรรม'}</span></div>${state.submitError ? `<div class="svp-submit-error" role="alert"><strong>ยังยืนยันการส่งไม่ได้</strong><span>${escHtml(state.submitError)}</span><small>ระบบไม่ส่งซ้ำอัตโนมัติ คุณสามารถลองส่งซ้ำด้วยรหัสคำขอเดิมหรือกลับไปตรวจสอบรายการ</small></div>` : ''}</section>`;
 }
 
@@ -313,8 +349,18 @@ function stickyActionMarkup() {
     return `<footer class="svp-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svp-action="back-list">กลับกิจกรรมของฉัน</button>${state.detail.canSubmit && (!submitted || state.newAttempt) ? '<button type="button" class="sv-button sv-button--primary" data-svp-action="review">ตรวจคำตอบ</button>' : ''}</footer>`;
 }
 
+function officialResultsMarkup(results, campaign) {
+    if (!['Closed', 'Certified', 'Published'].includes(String(campaign?.Status || ''))) return '';
+    if (!results) return `<section class="svp-official-results svp-official-results--pending" data-svp-official-results="pending"><p class="sv-eyebrow">ผลกิจกรรม</p><h2>ยังไม่มีผลที่เปิดเผยได้</h2><p>กิจกรรมปิดรับรายการแล้ว ระบบจะแสดงผลจาก Result Snapshot ที่ตรึงและผ่านนโยบายการเปิดเผยของแคมเปญเท่านั้น</p></section>`;
+    const snapshot = results.snapshot || {}, kpis = results.kpis || {}, groups = Array.isArray(results.officialGroups) ? results.officialGroups : (Array.isArray(results.groups) ? results.groups : []);
+    const stateLabel = results.officialState === 'published' ? 'ประกาศผลแล้ว' : results.officialState === 'certified' ? 'รับรองผลแล้ว' : 'ตรึงผลแล้ว';
+    const noResult = results.noResult === true;
+    const groupMarkup = noResult ? '' : groups.map(group => `<article class="svp-official-results__question"><h3>${escHtml(group.title || 'ผลจัดอันดับรวม')}</h3><div class="svp-official-results__ranking">${(group.rows || []).map(row => { const value = Number(row.value || 0), rank = row.rank == null ? '–' : Number(row.rank).toLocaleString('th-TH'); return `<div class="svp-official-results__rank" data-result-state="${escHtml(row.state || 'normal')}"><span class="svp-official-results__rank-no" aria-label="อันดับ ${rank}">${rank}</span><div><strong>${escHtml(row.label || row.code || 'รายการผล')}</strong><span>${value.toLocaleString('th-TH',{maximumFractionDigits:2})} คะแนน${row.code ? ` · ${escHtml(row.code)}` : ''}</span><span class="svp-official-results__bar" aria-hidden="true"><i style="width:${Math.max(0,Math.min(100,Number(row.barPercentage||0)))}%"></i></span></div></div>`; }).join('')}</div></article>`).join('');
+    return `<section class="svp-official-results ${noResult ? 'is-empty' : ''}" data-svp-official-results="${noResult ? 'no-result' : 'available'}" data-svp-result-source="immutable-snapshot"><div class="svp-official-results__header"><div><p class="sv-eyebrow">ผลกิจกรรมอย่างเป็นทางการ</p><div class="svp-official-results__title-line"><h2>${noResult ? 'สิ้นสุดกิจกรรม · ไม่มีคะแนน' : 'ผลจาก Snapshot ที่ตรวจสอบย้อนกลับได้'}</h2><span class="svp-official-results__state">${stateLabel}</span></div><p>${noResult ? 'ไม่มีบัตรที่ระบบรับรอง จึงไม่มีการจัดอันดับหรือสร้างผู้ชนะ' : 'แสดงเฉพาะผลรวมจาก Snapshot แบบอ่านอย่างเดียว โดยไม่เปิดเผยตัวตนหรือคำตอบรายบุคคล'}</p></div><dl><div><dt>ผู้มีสิทธิ์</dt><dd>${Number(kpis.eligible || 0).toLocaleString('th-TH')}</dd></div><div><dt>เข้าร่วม</dt><dd>${Number(kpis.participation || 0).toLocaleString('th-TH')}</dd></div><div><dt>อัตราเข้าร่วม</dt><dd>${Number(kpis.turnoutPercentage || 0).toLocaleString('th-TH',{maximumFractionDigits:2})}%</dd></div></dl></div>${groupMarkup}<details class="svp-result-integrity"><summary>ข้อมูลยืนยันผล Snapshot #${Number(snapshot.snapshotNo || 0)}</summary><dl><div><dt>สถานะ</dt><dd>${escHtml(snapshot.status || '')}</dd></div><div><dt>คำนวณเมื่อ</dt><dd>${dateTime(snapshot.calculatedAt)}</dd></div><div><dt>Result SHA-256</dt><dd><code>${escHtml(snapshot.resultHash || '')}</code></dd></div></dl></details></section>`;
+}
+
 function renderDetail() {
-    clearObjectUrls();
+    clearObjectUrls(true);
     const detail = state.detail, campaign = detail.campaign, privacy = privacyNotice(campaign), submitted = String(valueOf(detail.participation, 'State', 'state')).toLowerCase() === 'submitted';
     const preOpen = Boolean(detail.preOpen || detail.accessMode === 'pre_open_promotion');
     const previewOnly = Boolean(detail.eligibility?.previewOnly);
@@ -324,11 +370,12 @@ function renderDetail() {
     const waitingForWindow = preOpen || ['Draft', 'Scheduled', 'Open'].includes(campaign.Status) && Number(campaign.VotingWindowOpen) !== 1;
     const opensAt = detail.opensAt || campaign.OpenAt || campaign.ScheduledOpenAt;
     const normalBody = state.mode === 'receipt' ? receiptMarkup() : state.mode === 'review' ? reviewMarkup() : submitted && !state.newAttempt ? participationHistoryMarkup() : previewOnly ? `<section class="svp-state svp-state--warning" role="status"><h2>โหมดตรวจสอบของผู้ดูแลระบบ</h2><p>คุณกำลังดูตัวอย่างป้ายและรายละเอียดกิจกรรม บัญชีนี้ไม่ได้อยู่ในรายชื่อผู้มีสิทธิ์ จึงไม่สามารถลงคะแนนหรือส่งรายการแทนผู้ใช้ได้</p></section>` : discoveryOnly ? `<section class="svp-state svp-state--warning" role="status"><h2>เปิดดูรายละเอียดได้ · ไม่มีสิทธิ์ลงคะแนน</h2><p>แคมเปญนี้แสดงในรายการสำหรับพนักงานทุกคน แต่บัญชีของคุณไม่อยู่ในรายชื่อผู้มีสิทธิ์ คุณจึงดูรายละเอียด กติกา และกำหนดการได้ โดยระบบจะไม่แสดงคำถามหรือปุ่มส่งคะแนน</p></section>` : detail.canSubmit ? (isBallotCampaign(campaign) ? ballotForm(detail) : workflowForm(campaign)) : waitingForWindow ? `<section class="svp-state svp-state--warning" role="status"><h2>ดูรายละเอียดได้แล้ว · ยังไม่เปิดลงคะแนน</h2><p>ป้ายนี้เปิดให้คุณดูรายละเอียด กติกา และกำหนดการล่วงหน้าได้ แต่ระบบยังปิดคำถามและปุ่มส่งคะแนน${opensAt ? ` จนถึง ${dateTime(opensAt)}` : ' จนกว่าผู้ดูแลระบบจะเปิดแคมเปญ'}</p></section>` : `<section class="svp-state svp-state--warning" role="status"><h2>กิจกรรมนี้ไม่เปิดรับรายการแล้ว</h2><p>คุณยังดูรายละเอียดและข้อกำหนดความเป็นส่วนตัวได้ แต่ไม่สามารถส่งรายการใหม่</p></section>`;
-    const body = state.liveView ? `<section class="svp-live-workspace"><div class="svp-live-actions"><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div><div data-svp-live-panel>${liveResultsMarkup(state.liveResults,{error:state.liveError,loading:state.liveInFlight,paused:state.livePaused})}</div></section>` : normalBody;
+    const body = state.liveView ? `<section class="svp-live-workspace"><div class="svp-live-actions"><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div><div data-svp-live-panel>${liveResultsMarkup(state.liveResults,{error:state.liveError,loading:state.liveInFlight,paused:state.livePaused})}</div></section>` : `${normalBody}${officialResultsMarkup(state.officialResults,campaign)}`;
     const tabs = liveEnabled ? `<nav class="svp-detail-tabs" aria-label="กิจกรรม"><button type="button" data-svp-action="participation" aria-current="${!state.liveView?'page':'false'}">ลงคะแนน</button><button type="button" data-svp-action="live" aria-current="${state.liveView?'page':'false'}" ${!liveAllowed?'disabled':''}>ผลโหวตสด</button>${!liveAllowed?'<span>ส่งคะแนนก่อนจึงดูได้</span>':''}</nav>` : '';
     const promotion = detail.promotion || promotionForCampaign(campaign.id), promotionFileId = promotion?.mobileFileId || promotion?.desktopFileId;
     const promotionCover = preOpen && promotionFileId ? `<figure class="svp-preopen-cover" data-svp-media-state="loading" aria-busy="true">${promotionImageMarkup(promotionFileId, promotion.desktopFileId, promotion.altText || promotion.titleTh || campaign.TitleTh)}<figcaption>${escHtml(promotion.titleTh || campaign.TitleTh || '')}</figcaption></figure>` : '';
     state.page.innerHTML = `<div class="svp-shell svp-shell--detail" data-sv-participation="2026-10-16-safety-vote-preopen-detail-r1">${safetyVoteRoleNav({ active: 'user', showJury: state.assignments.length > 0, juryCount: state.assignments.length })}<header class="svp-detail-header"><button type="button" class="sv-icon-button" data-svp-action="back-list" aria-label="กลับกิจกรรมของฉัน">←</button><div><p class="sv-eyebrow">${escHtml(campaign.CampaignCode)}</p><h1>${escHtml(campaign.TitleTh)}</h1><p>${escHtml(campaign.Summary || campaign.Description || '')}</p></div><div class="svp-detail-header__badges"><span class="sv-status-badge sv-status-badge--${campaign.Status === 'Open' && !preOpen ? 'open' : 'closed'}"><span class="sv-status-dot"></span>${escHtml(STATUS_LABELS[campaign.Status] || campaign.Status)}</span>${eligibilityBadge}</div></header>${promotionCover}<section class="svp-meta"><div><strong>${escHtml(CAMPAIGN_TYPE_LABELS[campaignType(campaign)] || campaignType(campaign))}</strong><span>${campaign.CloseAt ? `ปิด ${dateTime(campaign.CloseAt)}` : 'ไม่ระบุเวลาปิด'}</span></div><div class="svp-privacy-notice" role="note"><strong>${escHtml(privacy.title)}</strong><span>${escHtml(privacy.description)}</span></div></section>${tabs}<main class="svp-detail-main" aria-live="polite">${body}</main>${state.liveView?'':stickyActionMarkup()}</div>`;
+    state.page.querySelector('.svp-shell')?.setAttribute('data-sv-company-user-ux', 'phase5');
     if (isSafetyVoteEngagementV1Enabled() && state.mode === 'edit' && !submitted && !state.liveView) state.page.querySelector('.svp-detail-main')?.insertAdjacentHTML('afterbegin', `<section class="svp-campaign-intro" aria-labelledby="svp-campaign-intro-title"><div><p class="sv-eyebrow">ก่อนเข้าร่วม</p><h2 id="svp-campaign-intro-title">รายละเอียดกิจกรรม</h2><p>${escHtml(campaign.Description || campaign.Summary || 'ตรวจสอบข้อมูลและเงื่อนไขก่อนส่งรายการ')}</p></div><dl><div><dt>ผู้จัดกิจกรรม</dt><dd>${escHtml(campaign.OwnerEmployeeID || 'Safety / Admin')}</dd></div><div><dt>ระยะเวลาโดยประมาณ</dt><dd>3–5 นาที</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${dateTime(campaign.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${dateTime(campaign.CloseAt)}</dd></div></dl>${campaign.RulesText ? `<details><summary>กติกาและข้อกำหนด</summary><p>${escHtml(campaign.RulesText)}</p></details>` : ''}</section>`);
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'user', current: 'participation', campaign, onPage: true }));
     preparePromotionImages();
@@ -345,6 +392,7 @@ function validateWorkflow() {
     if (type === 'submission_challenge') {
         if (!String(state.answers.title || '').trim()) errors.push({ questionId: 0, message: 'กรุณาระบุชื่อผลงาน' });
         if (!String(state.answers.description || '').trim()) errors.push({ questionId: 0, message: 'กรุณาระบุรายละเอียดผลงาน' });
+        if (state.submissionGallery.some(item => !String(item.altText || '').trim())) errors.push({ questionId: 0, message: 'กรุณาระบุคำอธิบายสำหรับรูปผลงานทุกภาพ' });
     } else {
         if (!String(state.answers.nomineeEmployeeId || '').trim()) errors.push({ questionId: 0, message: 'กรุณาระบุรหัสพนักงานของผู้ถูกเสนอชื่อ' });
         if (!String(state.answers.statement || '').trim()) errors.push({ questionId: 0, message: 'กรุณาระบุเหตุผลประกอบการเสนอชื่อ' });
@@ -373,6 +421,7 @@ async function submitParticipation() {
             state.receipt = safeReceipt({ campaign, receiptCode: response.data.receiptCode, replayed: response.data.replayed });
         } else if (type === 'submission_challenge') {
             if (!state.workflowDraftId) { const created = await API.post(`/safety-vote/campaigns/${id}/submissions`, { title: state.answers.title, description: state.answers.description }); state.workflowDraftId = Number(created.data.id); state.workflowReference = created.data.submissionCode; }
+            for (const item of state.submissionGallery.filter(row=>!row.id)) { const form=new FormData();form.append('file',item.file);form.append('altText',item.altText);form.append('caption',item.caption||'');const uploaded=await API.upload(`/safety-vote/submissions/${state.workflowDraftId}/gallery`,form);item.id=Number(uploaded.data.id);item.fileId=Number(uploaded.data.fileId); }
             await API.post(`/safety-vote/campaigns/${id}/submissions/${state.workflowDraftId}/submit`, {});
             state.receipt = safeReceipt({ campaign, receiptCode: state.workflowReference || `SUBMISSION-${state.workflowDraftId}` });
         } else {
@@ -415,20 +464,26 @@ function bindList() {
 }
 
 function bindDetail() {
+    state.peoplePickerCleanup?.();
+    state.peoplePickerCleanup=bindSafetyVotePeoplePickers(state.page,{onChange:detail=>{state.answers[detail.key.startsWith('question:')?detail.key.split(':')[1]:detail.key]=detail.employeeId;if(detail.person)state.peopleLabels[detail.key]=detail.person.employeeName||detail.employeeId;else delete state.peopleLabels[detail.key];collectAnswers();state.page.querySelectorAll('[data-svp-question]').forEach(fieldset=>{const question=state.detail.questions.find(item=>Number(item.id)===Number(fieldset.dataset.svpQuestion));fieldset.classList.toggle('is-hidden',!isQuestionVisible(question,state.detail.questions,state.answers));});}});
     bindRoleNavigation();
     state.page.querySelectorAll('[data-svp-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svpAction;
-        if (action === 'back-list') { stopLivePolling(); if (/^#safety-vote=/.test(location.hash)) history.replaceState(null, '', `${location.pathname}${location.search}#safety-vote`); state.screen = 'list'; state.detail = null; state.newAttempt = false; state.answers = {}; state.receipt = null; state.requestKey = ''; renderList(); }
+        if (action === 'back-list') { stopLivePolling(); if (/^#safety-vote=/.test(location.hash)) history.replaceState(null, '', `${location.pathname}${location.search}#safety-vote`); state.screen = 'list'; state.detail = null; state.newAttempt = false; state.answers = {}; state.peopleLabels={}; state.receipt = null; state.requestKey = ''; renderList(); }
         else if (action === 'review') requestReview();
         else if (action === 'edit') { state.mode = 'edit'; state.submitError = null; if (isBallotCampaign(state.detail.campaign)) state.requestKey = ''; renderDetail(); }
         else if (action === 'confirm') confirmSubmit();
-        else if (action === 'new-attempt') { state.newAttempt = true; state.mode = 'edit'; state.answers = {}; state.errors = []; state.receipt = null; state.requestKey = ''; state.submitError = null; renderDetail(); }
+        else if (action === 'new-attempt') { state.newAttempt = true; state.mode = 'edit'; state.answers = {}; state.peopleLabels={}; state.errors = []; state.receipt = null; state.requestKey = ''; state.submitError = null; renderDetail(); }
         else if (action === 'participation') { stopLivePolling(); state.liveView = false; renderDetail(); }
         else if (action === 'live') { state.liveView = true; renderDetail(); startUserLivePolling(); }
         else if (action === 'live-refresh') loadLiveResults(true);
         else if (action === 'live-toggle') { state.livePaused = !state.livePaused; renderDetail(); if (!state.livePaused) loadLiveResults(true); else scheduleLivePolling(); }
     }));
     state.page.querySelectorAll('[data-svp-answer],[data-svp-rank],[data-svp-allocation],[data-svp-matrix],[data-svp-workflow]').forEach(input => input.addEventListener('change', () => { collectAnswers(); state.page.querySelectorAll('[data-svp-question]').forEach(fieldset => { const question = state.detail.questions.find(item => Number(item.id) === Number(fieldset.dataset.svpQuestion)); fieldset.classList.toggle('is-hidden', !isQuestionVisible(question, state.detail.questions, state.answers)); }); }));
+    state.page.querySelector('[data-svp-submission-gallery]')?.addEventListener('change',event=>{for(const file of [...(event.target.files||[])].slice(0,Math.max(0,12-state.submissionGallery.length))){if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024){showToast(`${file.name}: รองรับเฉพาะ JPG, PNG หรือ WebP ไม่เกิน 10 MB`,'error');continue;}const previewUrl=URL.createObjectURL(file);state.objectUrls.add(previewUrl);state.submissionGallery.push({file,previewUrl,altText:file.name.replace(/\.[^.]+$/,''),caption:''});}renderDetail();});
+    state.page.querySelectorAll('[data-svp-gallery-alt]').forEach(input=>input.addEventListener('input',()=>{state.submissionGallery[Number(input.dataset.svpGalleryAlt)].altText=input.value;}));
+    state.page.querySelectorAll('[data-svp-gallery-caption]').forEach(input=>input.addEventListener('input',()=>{state.submissionGallery[Number(input.dataset.svpGalleryCaption)].caption=input.value;}));
+    state.page.querySelectorAll('[data-svp-gallery-remove]').forEach(button=>button.addEventListener('click',async()=>{const index=Number(button.dataset.svpGalleryRemove),item=state.submissionGallery[index];if(item?.id)await API.delete(`/safety-vote/gallery/items/${item.id}`).catch(error=>showToast(error?.message||'ลบรูปไม่สำเร็จ','error'));if(item?.previewUrl){URL.revokeObjectURL(item.previewUrl);state.objectUrls.delete(item.previewUrl);}state.submissionGallery.splice(index,1);renderDetail();}));
     state.page.querySelectorAll('[data-svp-answer-file]').forEach(input => input.addEventListener('change', async () => {
         const file = input.files?.[0]; if (!file || state.inFlight) return; input.disabled = true;
         try { const form = new FormData(); form.append('file', file); const response = await API.upload(`/safety-vote/campaigns/${Number(state.detail.campaign.id)}/questions/${Number(input.dataset.svpAnswerFile)}/files`, form); input.dataset.fileId = String(response.data.id); state.answers[input.dataset.svpAnswerFile] = Number(response.data.id); showToast('แนบไฟล์คำตอบแล้ว', 'success'); }
@@ -439,11 +494,18 @@ function bindDetail() {
 
 async function openCampaign(id) {
     stopLivePolling();
-    state.screen = 'detail'; state.loading = true; state.error = null; state.denied = false; state.moduleDisabled = false; state.errors = []; state.answers = {}; state.receipt = null; state.requestKey = ''; state.workflowDraftId = null; state.workflowReference = ''; state.submitError = null;
+    clearObjectUrls();
+    state.screen = 'detail'; state.loading = true; state.error = null; state.denied = false; state.moduleDisabled = false; state.errors = []; state.answers = {}; state.peopleLabels={}; state.receipt = null; state.requestKey = ''; state.workflowDraftId = null; state.workflowReference = ''; state.submissionGallery = []; state.submitError = null; state.officialResults = null;
     state.page.innerHTML = loadingMarkup();
     try {
         const response = await API.get(`/safety-vote/campaigns/${id}`);
         state.detail = response.data; state.mode = 'edit'; state.newAttempt = false; state.loading = false; state.liveView = false; state.liveResults = null; state.liveError = null; state.livePaused = false; state.liveFailures = 0;
+        if (['Closed', 'Certified', 'Published'].includes(String(state.detail.campaign?.Status || ''))) {
+            const official = await API.get(`/safety-vote/campaigns/${id}/official-results`, { suppressErrorLog: true }).catch(() => null);
+            state.officialResults = official?.data || null;
+        }
+        const candidateOptions=(state.detail.questions||[]).flatMap(question=>question.options||[]);
+        await Promise.all(candidateOptions.map(async option=>{const response=await API.get(`/safety-vote/gallery/options/${Number(option.id)}`,{suppressErrorLog:true}).catch(()=>null);if(response){option.candidateId=Number(response.data.ownerId);option.gallery=response.data.items||[];}}));
         if (campaignType(state.detail.campaign) === 'submission_challenge') { const submissions = await API.get(`/safety-vote/campaigns/${id}/my-submissions`, { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } })); state.submissions = submissions.data.rows || []; }
         renderDetail();
     } catch (error) {
@@ -463,6 +525,7 @@ async function refreshDiscoveryFromLatestSnapshot() {
     try {
         const response = await API.get('/safety-vote/me/campaigns', { suppressErrorLog: true });
         state.campaigns = response.data.rows || [];
+        state.catalogueMode = response.data.catalogueMode || 'legacy_discovery';
         if (state.screen === 'list') renderList();
     } catch (_) {
         // Preserve the last successful discovery view; the normal page load still surfaces hard failures.
@@ -494,12 +557,12 @@ async function load() {
             API.get('/safety-vote/jury/assignments', { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } })),
             API.get('/safety-vote/notifications', { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } }))
         ]);
-        state.campaigns = campaigns.data.rows || []; state.nominations = nominations.data.rows || []; state.assignments = assignments.data.rows || []; state.notifications = notifications.data.rows || [];
+        state.campaigns = campaigns.data.rows || []; state.catalogueMode = campaigns.data.catalogueMode || 'legacy_discovery'; state.nominations = nominations.data.rows || []; state.assignments = assignments.data.rows || []; state.notifications = notifications.data.rows || [];
         state.promotions = []; state.promotionHistory = []; state.notificationCenter = []; state.promotionIndex = 0;
         if (isSafetyVoteEngagementV1Enabled()) {
             const [promotions, center] = await Promise.all([
-                API.get('/safety-vote/me/promotions', { suppressErrorLog: true }).catch(error => ['SAFETY_VOTE_ENGAGEMENT_DISABLED', 'SAFETY_VOTE_ENGAGEMENT_SETUP_REQUIRED'].includes(error?.code) ? ({ data: { rows: [] } }) : Promise.reject(error)),
-                API.get('/safety-vote/notification-center', { suppressErrorLog: true }).catch(error => ['SAFETY_VOTE_ENGAGEMENT_DISABLED', 'SAFETY_VOTE_ENGAGEMENT_SETUP_REQUIRED'].includes(error?.code) ? ({ data: { rows: [] } }) : Promise.reject(error))
+                API.get('/safety-vote/me/promotions', { suppressErrorLog: true }).catch(() => ({ data: { rows: [], history: [] } })),
+                API.get('/safety-vote/notification-center', { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } }))
             ]);
             state.promotions = promotions.data?.rows || [];
             state.promotionHistory = promotions.data?.history || [];

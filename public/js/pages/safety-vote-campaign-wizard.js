@@ -3,12 +3,13 @@ import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { openSafetyVoteConfirmDialog, safetyVoteCampaignPreview, safetyVoteJourneyNav } from './safety-vote-ux-components.js?v=20261019-safety-vote-account-advisory-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 import { formatThaiDateTime, formatThaiTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
+import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
 import {
     WIZARD_STEPS, CORE_TEMPLATES, applyTemplate, builderPayload, campaignPayload, contentValid,
-    createWizardDraft, defaultOptionsForType, defaultQuestion, defaultValidationForType, hasOptions,
+    createWizardDraft, defaultOptionsForType, defaultQuestion, defaultValidationForType, hasOptions, juryValidationErrors,
     questionTypeAllowedForPrivacy, questionTypesFor, questionValidationErrors, readinessItems, scheduleValid,
     templateFor, validateStep
-} from './safety-vote-wizard-model.mjs?v=20261016-safety-vote-privacy-permissions-r1';
+} from './safety-vote-wizard-model.mjs?v=20261025-result-release-policy-r1';
 
 const TYPE_LABELS = Object.fromEntries(CORE_TEMPLATES.map(item => [item.key, item.label]));
 const QUESTION_LABELS = { single_choice: 'เลือกหนึ่งตัวเลือก', multiple_choice: 'เลือกหลายตัวเลือก', yes_no_abstain: 'ใช่/ไม่ใช่/งดออกเสียง', rating: 'ให้คะแนน', likert: 'ระดับความคิดเห็น', ranking: 'จัดอันดับ', matrix: 'ตารางคำตอบรายแถว', allocation: 'แบ่งคะแนน', token: 'จัดสรรโทเคน', short_text: 'ข้อความสั้น', long_text: 'ข้อความยาว', date_time: 'วันและเวลา', employee_picker: 'เลือกพนักงาน', organization_picker: 'เลือกหน่วยงาน', file_upload: 'แนบไฟล์คำตอบ' };
@@ -137,6 +138,25 @@ function participantPreview(draft, previewUserView, previewSubmitted) {
     return `${scenario}${preview}`;
 }
 
+function stepJury(draft, persisted) {
+    if (draft.campaignType !== 'jury_scoring') return `<section class="svw-inline-note" role="status"><strong>แคมเปญนี้ไม่ใช้คณะกรรมการตัดสิน</strong><p>ขั้นตอนนี้ผ่านอัตโนมัติ คุณสามารถดำเนินการกำหนดผู้มีสิทธิ์ต่อได้</p></section>`;
+    const locked = persisted.campaignStatus && persisted.campaignStatus !== 'Draft';
+    const criteria = draft.juryCriteria || [], total = criteria.reduce((sum, item) => sum + Number(item.weight || 0), 0);
+    const active = (draft.juryAssignments || []).filter(item => !['Revoked','Recused'].includes(item.Status || item.status));
+    const history = (draft.juryAssignments || []).filter(item => ['Revoked','Recused'].includes(item.Status || item.status));
+    return `<div class="svw-jury-builder">
+        <section class="svw-privacy-scope" role="note"><strong>${locked ? 'แคมเปญเปิดแล้ว: แก้ไขรายชื่อกรรมการได้ โดยเกณฑ์ยังคงล็อก' : 'กำหนดเกณฑ์ให้ชัดเจนก่อนมอบหมายกรรมการ'}</strong><span>กรรมการถูกเลือกเป็นรายบุคคลจาก Employee Master ทุกการเพิ่ม–ถอนบันทึก Audit และงานที่ส่งคะแนนแล้วจะถอนไม่ได้</span></section>
+        <section class="svw-jury-section" aria-labelledby="svw-jury-criteria-title"><div class="svw-section-heading"><div><p class="sv-eyebrow">Scoring criteria</p><h3 id="svw-jury-criteria-title">เกณฑ์การให้คะแนน</h3></div><div class="svw-jury-weight ${Math.abs(total-100)<=0.01?'is-valid':'is-invalid'}">รวมน้ำหนัก ${total.toLocaleString('th-TH')}%</div></div>
+        <div class="svw-jury-criteria">${criteria.map((item,index)=>`<article class="svw-jury-criterion"><div class="svw-jury-criterion__head"><strong>เกณฑ์ ${index+1}</strong><div><button type="button" class="sv-icon-button" data-svw-move-criterion="up" data-index="${index}" ${locked||index===0?'disabled':''} aria-label="เลื่อนเกณฑ์ขึ้น">↑</button><button type="button" class="sv-icon-button" data-svw-move-criterion="down" data-index="${index}" ${locked||index===criteria.length-1?'disabled':''} aria-label="เลื่อนเกณฑ์ลง">↓</button><button type="button" class="sv-icon-button sv-icon-button--danger" data-svw-remove-criterion="${index}" ${locked||criteria.length<=1?'disabled':''} aria-label="ลบเกณฑ์">×</button></div></div><div class="svw-form-grid"><label class="svw-field"><span>ชื่อเกณฑ์</span><input data-svw-criterion-field="title" data-index="${index}" maxlength="200" value="${escHtml(item.title||item.Title||'')}" ${locked?'readonly':''}></label><label class="svw-field"><span>คะแนนต่ำสุด</span><input type="number" data-svw-criterion-field="minScore" data-index="${index}" value="${Number(item.minScore??item.MinScore??1)}" ${locked?'readonly':''}></label><label class="svw-field"><span>คะแนนสูงสุด</span><input type="number" data-svw-criterion-field="maxScore" data-index="${index}" value="${Number(item.maxScore??item.MaxScore??5)}" ${locked?'readonly':''}></label><label class="svw-field"><span>น้ำหนัก (%)</span><input type="number" min="0.01" max="100" step="0.01" data-svw-criterion-field="weight" data-index="${index}" value="${Number(item.weight??item.Weight??0)}" ${locked?'readonly':''}></label></div><label class="svw-field"><span>คำอธิบาย (ถ้ามี)</span><textarea rows="2" maxlength="1000" data-svw-criterion-field="description" data-index="${index}" ${locked?'readonly':''}>${escHtml(item.description||item.Description||'')}</textarea></label></article>`).join('')}</div>
+        ${locked?'':`<button type="button" class="sv-button sv-button--secondary" data-svw-action="add-criterion" ${criteria.length>=50?'disabled':''}>เพิ่มเกณฑ์</button>`}
+        <div class="svw-form-grid"><label class="svw-field"><span>จำนวนกรรมการขั้นต่ำ</span><input type="number" min="1" max="100" data-svw-jury-field="minJurors" value="${Number(draft.juryScoring?.minJurors||1)}" ${locked?'readonly':''}></label><label class="svw-choice"><input type="checkbox" data-svw-jury-field="juryBlind" ${draft.juryBlind?'checked':''} ${locked||active.length?'disabled':''}><strong>Blind judging</strong><span>${active.length?'ล็อกหลังมอบหมายกรรมการคนแรก เพื่อไม่ให้บริบทการประเมินเปลี่ยน':'ซ่อนชื่อเจ้าของผลงานจากกรรมการในหน้าประเมิน'}</span></label></div></section>
+        <section class="svw-jury-section" aria-labelledby="svw-jurors-title"><div class="svw-section-heading"><div><p class="sv-eyebrow">Employee master</p><h3 id="svw-jurors-title">มอบหมายกรรมการรายบุคคล</h3></div><span class="sv-status-badge">${active.length.toLocaleString('th-TH')} คน</span></div>
+        ${safetyVotePeoplePickerMarkup({pickerId:'jury-assignment',key:'juryAssignment',label:'ค้นหาและเลือกกรรมการ',help:'ค้นหาจากชื่อ รหัสพนักงาน แผนก หน่วยงาน หรือตำแหน่ง',excludedIds:active.map(item=>item.JurorEmployeeID||item.jurorEmployeeId)})}
+        <div class="svw-jury-assigned">${active.map(item=>`<article><span><strong>${escHtml(item.JurorName||item.jurorName||item.JurorEmployeeID||item.jurorEmployeeId)}</strong><small>${escHtml(item.JurorEmployeeID||item.jurorEmployeeId)}${item.JurorDepartment?` · ${escHtml(item.JurorDepartment)}`:''}</small></span><span class="sv-status-badge">${escHtml(item.Status||item.status||'Draft')}</span><button type="button" class="sv-button sv-button--secondary" data-svw-revoke-juror="${Number(item.id)}" ${(item.Status||item.status)==='Submitted'?'disabled':''}>ถอนสิทธิ์</button></article>`).join('')||'<p class="svw-empty-copy">ยังไม่ได้เลือกกรรมการ</p>'}</div>
+        ${history.length?`<details><summary>ประวัติที่ถอนหรือปฏิเสธงาน (${history.length})</summary><ul>${history.map(item=>`<li>${escHtml(item.JurorName||item.JurorEmployeeID||'')} — ${escHtml(item.Status||item.status)}</li>`).join('')}</ul></details>`:''}</section>
+    </div>`;
+}
+
 function stepReview(draft, persisted, previewMode, previewUserView, previewSubmitted) {
     const items = readinessItems(draft, persisted), ready = items.every(item => item.pass), advanced = templateFor(draft.campaignType).advancedRequired;
     const preview = previewMode === 'user'
@@ -146,12 +166,12 @@ function stepReview(draft, persisted, previewMode, previewUserView, previewSubmi
 }
 
 function stepMarkup(step, draft, persisted, previewMode, previewUserView, previewSubmitted) {
-    return [stepType, stepDetails, stepPrivacy, stepContent, stepEligibility, stepSchedule, stepResults][step]?.(draft) || stepReview(draft, persisted, previewMode, previewUserView, previewSubmitted);
+    return [stepType, stepDetails, stepPrivacy, stepContent, value=>stepJury(value,persisted), stepEligibility, stepSchedule, stepResults][step]?.(draft) || stepReview(draft, persisted, previewMode, previewUserView, previewSubmitted);
 }
 
 export function renderSafetyVoteCampaignWizard(container, { campaignId = null, initialTemplateKey = null, initialConfig = null, sourceLabel = '', onClose = () => {}, onComplete = () => {}, onOpenAdvanced = () => {}, onNavigate = null } = {}) {
     let recoveryKey = `safetyVoteAdminDraft:v1:${campaignId ? Number(campaignId) : 'new'}`;
-    const state = { step: 0, maxStep: 0, draft: createWizardDraft(), persisted: { campaignId: null, versionId: null, rowVersion: null, builderSaved: false, preservedMedia: [], serverUpdatedAt: null }, saveState: 'idle', saveMessage: 'ยังไม่ได้บันทึก', errors: [], previewMode: 'user', previewUserView: 'participation', previewSubmitted: false, dirty: false, timer: null, saveChain: Promise.resolve(), objectUrls: new Set(), hydratingFiles: new Set(), recovery: null };
+    const state = { step: 0, maxStep: 0, draft: createWizardDraft(), persisted: { campaignId: null, versionId: null, rowVersion: null, campaignStatus: 'Draft', builderSaved: false, preservedMedia: [], serverUpdatedAt: null }, liveJuryMode: false, saveState: 'idle', saveMessage: 'ยังไม่ได้บันทึก', errors: [], previewMode: 'user', previewUserView: 'participation', previewSubmitted: false, dirty: false, timer: null, saveChain: Promise.resolve(), objectUrls: new Set(), hydratingFiles: new Set(), recovery: null, peoplePickerCleanup: null };
 
     const clone = value => JSON.parse(JSON.stringify(value));
     const configDraft = config => {
@@ -171,6 +191,8 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
             maxParticipationAttempts: Number(version.maxParticipationAttempts || version.MaxParticipationAttempts || 1),
             discoveryMode: version.discoveryMode || version.DiscoveryMode || base.discoveryMode,
             resultVisibility: version.resultVisibility || version.ResultVisibility || base.resultVisibility,
+            officialResultTopN: Number(version.officialResultTopN || version.OfficialResultTopN || base.officialResultTopN || 5),
+            resultReleasePolicy: version.resultReleasePolicy || version.ResultReleasePolicy || base.resultReleasePolicy || 'automatic',
             liveLeaderboardEnabled: false,
             campaignCode: '', openAt: '', closeAt: '',
             questions: Array.isArray(config?.questions) && config.questions.length ? clone(config.questions) : base.questions,
@@ -196,10 +218,19 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         container.innerHTML = '<div class="svw-shell" aria-busy="true" aria-live="polite"><div class="sv-state-panel"><h1>กำลังเปิดแคมเปญฉบับร่าง…</h1><p>ระบบกำลังโหลดข้อมูลล่าสุดก่อนอนุญาตให้แก้ไข</p></div></div>';
         try {
             const detail = await API.get(`/safety-vote/admin/campaigns/${Number(id)}`), row = detail.data?.campaign || {};
-            if (String(row.Status || '').toLowerCase() !== 'draft') throw new Error('แก้ไขได้เฉพาะแคมเปญฉบับร่าง');
-            const [builder, media] = await Promise.all([
+            const campaignStatus = String(row.Status || '');
+            const liveJuryMode = ['Scheduled','Open'].includes(campaignStatus) && row.CampaignType === 'jury_scoring';
+            if (campaignStatus !== 'Draft' && !liveJuryMode) throw new Error('แก้ไขได้เฉพาะแคมเปญฉบับร่าง หรือรายชื่อกรรมการของแคมเปญที่กำลังใช้งาน');
+            const juryRequests = row.CampaignType === 'jury_scoring' ? [
+                API.get(`/safety-vote/admin/campaigns/${Number(id)}/stages`),
+                API.get(`/safety-vote/admin/campaigns/${Number(id)}/scoring`),
+                API.get(`/safety-vote/admin/campaigns/${Number(id)}/jury/criteria`),
+                API.get(`/safety-vote/admin/campaigns/${Number(id)}/jury/assignments`)
+            ] : [];
+            const [builder, media, ...juryData] = await Promise.all([
                 API.get(`/safety-vote/admin/campaigns/${Number(id)}/builder`),
-                API.get(`/safety-vote/admin/campaigns/${Number(id)}/versions/${Number(row.CurrentVersionID)}/media`)
+                API.get(`/safety-vote/admin/campaigns/${Number(id)}/versions/${Number(row.CurrentVersionID)}/media`),
+                ...juryRequests
             ]);
             const questions = builder.data?.questions || [], mediaItems = media.data?.items || [], optionMediaKeys = new Set();
             for (const item of mediaItems) {
@@ -218,10 +249,12 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
                 privacyMode: row.PrivacyMode || state.draft.privacyMode,
                 privacyThreshold: Number(row.PrivacyThreshold || 5),
                 maxParticipationAttempts: Number(row.MaxParticipationAttempts || 1),
-                discoveryMode: row.DiscoveryMode || 'eligible_only',
+                discoveryMode: row.DiscoveryMode || 'public_listing',
                 openAt: localInputDate(row.OpenAt || row.ScheduledOpenAt),
                 closeAt: localInputDate(row.CloseAt || row.ScheduledCloseAt),
                 resultVisibility: row.ResultVisibility || 'hidden_until_close',
+                officialResultTopN: Number(row.OfficialResultTopN || 5),
+                resultReleasePolicy: row.ResultReleasePolicy || 'manual',
                 liveLeaderboardEnabled: Boolean(Number(row.LiveLeaderboardEnabled || 0)),
                 liveLeaderboardTopN: Number(row.LiveLeaderboardTopN || 5),
                 liveLeaderboardScoreMode: row.LiveLeaderboardScoreMode || 'count_percentage',
@@ -236,12 +269,21 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
                     attributeKey: rule.AttributeKey || rule.attributeKey || 'all',
                     operator: rule.Operator || rule.operator || 'EQUALS',
                     values: rule.values || [], reason: rule.Reason || rule.reason || ''
-                }))
+                })),
+                juryStages: juryData[0]?.data?.rows || [],
+                juryScoring: juryData[1]?.data?.config || state.draft.juryScoring,
+                juryCriteria: (juryData[2]?.data?.rows || []).map((item,index)=>({criterionCode:item.CriterionCode||item.criterionCode||`CRITERION_${index+1}`,title:item.Title||item.title||'',description:item.Description||item.description||'',minScore:Number(item.MinScore??item.minScore??1),maxScore:Number(item.MaxScore??item.maxScore??5),weight:Number(item.Weight??item.weight??0)})),
+                juryAssignments: juryData[3]?.data?.rows || [],
+                juryBlind: Boolean(juryData[0]?.data?.rows?.[0]?.advanceRule?.blind ?? true),
+                juryConfigured: row.CampaignType !== 'jury_scoring' || Boolean((juryData[2]?.data?.rows||[]).length && (juryData[3]?.data?.rows||[]).some(item=>!['Revoked','Recused'].includes(item.Status||item.status)))
             };
+            if (row.CampaignType === 'jury_scoring' && !state.draft.juryCriteria.length) state.draft.juryCriteria = createWizardDraft().juryCriteria;
             if (!state.draft.rules.length) state.draft.rules = createWizardDraft().rules;
-            state.persisted = { campaignId: Number(row.id), versionId: Number(row.CurrentVersionID), rowVersion: Number(row.RowVersion), builderSaved: questions.length > 0, preservedMedia: mediaItems.filter(item => !optionMediaKeys.has(`${item.scopeType}|${item.questionCode || ''}|${item.optionCode || ''}|${item.mediaType || ''}|${item.url || ''}`)), serverUpdatedAt: row.UpdatedAt || null };
-            state.maxStep = WIZARD_STEPS.length - 1;
-            state.saveState = 'saved'; state.saveMessage = 'โหลดฉบับร่างล่าสุดแล้ว';
+            state.persisted = { campaignId: Number(row.id), versionId: Number(row.CurrentVersionID), rowVersion: Number(row.RowVersion), campaignStatus, builderSaved: questions.length > 0, preservedMedia: mediaItems.filter(item => !optionMediaKeys.has(`${item.scopeType}|${item.questionCode || ''}|${item.optionCode || ''}|${item.mediaType || ''}|${item.url || ''}`)), serverUpdatedAt: row.UpdatedAt || null };
+            state.liveJuryMode = liveJuryMode;
+            state.step = liveJuryMode ? 4 : state.step;
+            state.maxStep = liveJuryMode ? 4 : WIZARD_STEPS.length - 1;
+            state.saveState = 'saved'; state.saveMessage = liveJuryMode ? 'โหลดรายชื่อกรรมการล่าสุดแล้ว · เกณฑ์ถูกล็อก' : 'โหลดฉบับร่างล่าสุดแล้ว';
             const recovery = readRecovery(), serverTime = new Date(row.UpdatedAt || 0).getTime();
             state.recovery = recovery && Number(recovery.savedAt) > serverTime ? recovery : null;
             if (recovery && !state.recovery) clearRecovery();
@@ -285,6 +327,8 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
             question.displayCondition={questionCode,operator:container.querySelector(`[data-svw-condition-field="operator"][data-question-index="${input.dataset.questionIndex}"]`)?.value||'answered',value:container.querySelector(`[data-svw-condition-field="value"][data-question-index="${input.dataset.questionIndex}"]`)?.value||''};
         });
         container.querySelectorAll('[data-svw-rule-field]').forEach(input=>{const rule=state.draft.rules[Number(input.dataset.index)];if(!rule)return;rule[input.dataset.svwRuleField]=input.dataset.svwRuleField==='values'?input.value.split(',').map(x=>x.trim()).filter(Boolean):input.value;if(rule.attributeKey==='all')rule.values=[];});
+        container.querySelectorAll('[data-svw-criterion-field]').forEach(input=>{const criterion=state.draft.juryCriteria[Number(input.dataset.index)];if(!criterion)return;criterion[input.dataset.svwCriterionField]=input.type==='number'?Number(input.value):input.value;});
+        container.querySelectorAll('[data-svw-jury-field]').forEach(input=>{if(input.dataset.svwJuryField==='juryBlind')state.draft.juryBlind=input.checked;else state.draft.juryScoring[input.dataset.svwJuryField]=Number(input.value);});
     };
 
     const persistCampaign = async () => {
@@ -299,12 +343,15 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
             const row = response.data?.campaign || response.data;
             const previousRecoveryKey = recoveryKey;
             state.persisted.campaignId = Number(row.id);
+            await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/official-result-topn`, { officialResultTopN: Number(state.draft.officialResultTopN || 5) });
+            await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/result-release-policy`, { resultReleasePolicy: String(state.draft.resultReleasePolicy || 'automatic') });
             recoveryKey = `safetyVoteAdminDraft:v1:${state.persisted.campaignId}`;
             if (previousRecoveryKey !== recoveryKey) { try { sessionStorage.removeItem(previousRecoveryKey); } catch (_) {} }
             state.persisted.versionId = Number(row.CurrentVersionID || row.currentVersionId || state.persisted.versionId || 0);
             state.persisted.rowVersion = Number(row.RowVersion || row.rowVersion || 1);
             state.persisted.serverUpdatedAt = row.UpdatedAt || row.updatedAt || new Date().toISOString();
             state.draft.campaignCode = row.CampaignCode || row.campaignCode || state.draft.campaignCode;
+            state.draft.discoveryMode = row.DiscoveryMode || row.discoveryMode || state.draft.discoveryMode;
             const codeField = container.querySelector('#svw-campaignCode');
             if (codeField && state.draft.campaignCode) codeField.value = state.draft.campaignCode;
             state.dirty = false;
@@ -320,11 +367,12 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
 
     const preserveOptionPreviews = questions => {
         const previews = new Map();
+        const questionPreviews = new Map(state.draft.questions.map((question,index)=>[question.questionCode||`Q${index+1}`,{previewUrl:question.previewUrl,imageUnavailable:question.imageUnavailable}]));
         state.draft.questions.forEach((question,questionIndex) => (question.options || []).forEach((option,optionIndex) => {
             const key=`${question.questionCode||`Q${questionIndex+1}`}|${option.optionCode||`O${optionIndex+1}`}`;
             previews.set(key, { previewUrl: option.previewUrl, imageUnavailable: option.imageUnavailable, mediaType:option.mediaType||'', mediaUrl:option.mediaUrl||'', mediaTitle:option.mediaTitle||'' });
         }));
-        return questions.map((question,questionIndex) => ({ ...question, options: (question.options || []).map((option,optionIndex) => ({ ...option, ...(previews.get(`${question.questionCode||`Q${questionIndex+1}`}|${option.optionCode||`O${optionIndex+1}`}`) || {}) })) }));
+        return questions.map((question,questionIndex) => ({ ...question, ...(questionPreviews.get(question.questionCode||`Q${questionIndex+1}`)||{}), options: (question.options || []).map((option,optionIndex) => ({ ...option, ...(previews.get(`${question.questionCode||`Q${questionIndex+1}`}|${option.optionCode||`O${optionIndex+1}`}`) || {}) })) }));
     };
 
     const mediaPayload = () => [...(state.persisted.preservedMedia || []), ...state.draft.questions.flatMap((question,questionIndex)=>(question.options||[]).map((option,optionIndex)=>({
@@ -335,10 +383,12 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         if (!contentValid(state.draft) || !await persistCampaign()) return false;
         setSaveState('saving', 'กำลังบันทึกเนื้อหา…');
         try {
-            const response = await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/builder`, { questions: builderPayload(state.draft) });
+            await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/builder`, { questions: builderPayload(state.draft) });
+            await Promise.all(state.draft.questions.map((question,index)=>API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/questions/${encodeURIComponent(question.questionCode||`Q${index+1}`)}/image`,{fileId:Number(question.imageFileId||0)||null,altText:question.imageFileId?String(question.imageAltText||'').trim():null})));
             await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/versions/${state.persisted.versionId}/media`, { items: mediaPayload() });
+            const refreshed = await API.get(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/builder`);
             state.persisted.builderSaved = true;
-            if (response.data?.questions?.length) state.draft.questions = preserveOptionPreviews(response.data.questions);
+            if (refreshed.data?.questions?.length) state.draft.questions = preserveOptionPreviews(refreshed.data.questions);
             state.dirty = false; clearRecovery(); setSaveState('saved', 'บันทึกเนื้อหาแล้ว'); return true;
         } catch (error) { state.persisted.builderSaved = false; writeRecovery(); setSaveState('error', 'บันทึกเนื้อหาไม่สำเร็จ — ลองอีกครั้ง'); throw error; }
     };
@@ -349,21 +399,42 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         return true;
     };
 
+    const ensureJuryStage = async () => {
+        if (!await persistCampaign()) return null;
+        let stage = (state.draft.juryStages || [])[0];
+        if (stage?.id) return stage;
+        const response = await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/stages`, { stages: [{ stageKey: 'JURY_FINAL', stageName: 'รอบตัดสินโดยคณะกรรมการ', stageType: 'jury', sequenceNo: 1, advanceRule: { blind: Boolean(state.draft.juryBlind) }, resultVisibility: 'admin_only', status: 'Draft' }] });
+        state.draft.juryStages = response.data?.rows || [];
+        return state.draft.juryStages[0] || null;
+    };
+
+    const saveJuryConfiguration = async () => {
+        if (state.draft.campaignType !== 'jury_scoring') { state.draft.juryConfigured = true; return true; }
+        if (state.liveJuryMode) return true;
+        const errors = juryValidationErrors(state.draft), configurationErrors = errors.filter(error => !error.includes('กรรมการ')); if (configurationErrors.length) return false;
+        setSaveState('saving','กำลังบันทึกเกณฑ์และกรรมการ…');
+        const stage = await ensureJuryStage(); if (!stage?.id) throw new Error('สร้างรอบการตัดสินไม่สำเร็จ');
+        await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/scoring`, { config: { ...state.draft.juryScoring, method: 'weighted_jury', tieBreak: state.draft.juryScoring?.tieBreak || 'candidate_id' } });
+        await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/jury/criteria`, { stageId: Number(stage.id), criteria: state.draft.juryCriteria.map((item,index)=>({ ...item, criterionCode: item.criterionCode || `CRITERION_${index+1}`, sortOrder: index + 1 })) });
+        state.draft.juryConfigured = !juryValidationErrors(state.draft).length; state.dirty = false; clearRecovery(); setSaveState('saved','บันทึกเกณฑ์และกรรมการแล้ว'); return true;
+    };
+
     const persistForStep = async step => {
         if (step === 0) return true;
-        if ([1,2,5,6].includes(step)) return persistCampaign();
+        if ([1,2,6,7].includes(step)) return persistCampaign();
         if (step === 3) return saveBuilder();
+        if (step === 4) return saveJuryConfiguration();
         // Once the server has frozen the eligibility snapshot, moving forward must
         // not rewrite the rules behind that snapshot. Rule edits explicitly clear
         // the local frozen state and require a fresh preview/freeze cycle.
-        if (step === 4) return state.draft.eligibilityFrozen ? true : saveRules();
+        if (step === 5) return state.draft.eligibilityFrozen ? true : saveRules();
         return true;
     };
 
     const enqueueSave = () => {
         clearTimeout(state.timer); state.dirty = true; setSaveState('dirty', 'ยังไม่ได้บันทึก');
         writeRecovery();
-        if (![1,2,3,5,6].includes(state.step)) return;
+        if (![1,2,3,4,6,7].includes(state.step) || state.liveJuryMode) return;
         state.timer = setTimeout(() => { state.saveChain = state.saveChain.then(() => persistForStep(state.step)).catch(()=>{}); }, 800);
     };
 
@@ -387,7 +458,33 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
             catch (_) { option.imageUnavailable = true; }
             finally { state.hydratingFiles.delete(fileId); }
         }));
-        if ([3, 7].includes(state.step)) render();
+        if ([3, 8].includes(state.step)) render();
+    };
+
+    const hydrateQuestionImages = async () => {
+        const questions=state.draft.questions.filter(question=>question.imageFileId&&!question.previewUrl&&!question.imageUnavailable&&!state.hydratingFiles.has(Number(question.imageFileId)));
+        if(!questions.length)return;
+        await Promise.all(questions.map(async question=>{const fileId=Number(question.imageFileId);state.hydratingFiles.add(fileId);try{const response=await API.get(`/safety-vote/files/${fileId}`);const url=URL.createObjectURL(await response.blob());state.objectUrls.add(url);question.previewUrl=url;}catch(_){question.imageUnavailable=true;}finally{state.hydratingFiles.delete(fileId);}}));
+        if([3,8].includes(state.step))render();
+    };
+
+    const renderQuestionImageEditors = () => {
+        if(state.step!==3)return;
+        container.querySelectorAll('.svw-question').forEach((fieldset,index)=>{const question=state.draft.questions[index];if(!question)return;const host=document.createElement('section');host.className='svw-question-media';host.innerHTML=`<div class="svw-question-media__preview">${question.previewUrl?`<button type="button" class="svp-gallery-trigger" data-sv-image-gallery data-sv-gallery-group="question-cover-${index}" data-sv-gallery-label="${escHtml(question.imageAltText||question.title||`ภาพประกอบข้อ ${index+1}`)}" aria-label="ขยายภาพประกอบข้อ ${index+1}"><img src="${escHtml(question.previewUrl)}" alt="${escHtml(question.imageAltText||'')}" decoding="async"></button>`:'<span>ยังไม่มีรูปประกอบคำถาม</span>'}</div><div class="svw-question-media__controls"><label class="sv-button sv-button--secondary"><span>${question.imageFileId?'เปลี่ยนรูป':'เพิ่มรูปประจำคำถาม'}</span><input type="file" accept="image/jpeg,image/png,image/webp" data-svw-question-image="${index}"></label>${question.imageFileId?`<label class="svw-field"><span>คำอธิบายภาพสำหรับผู้ใช้โปรแกรมอ่านหน้าจอ</span><input maxlength="300" value="${escHtml(question.imageAltText||'')}" data-svw-question-image-alt="${index}" required></label><button type="button" class="sv-button sv-button--secondary" data-svw-remove-question-image="${index}">ลบรูป</button>`:''}<small>JPG, PNG หรือ WebP ไม่เกิน 10 MB · ระบบเก็บเป็นไฟล์ส่วนตัวและเปิดดูภาพใหญ่ได้</small></div>`;fieldset.querySelector('.svw-question-grid > div')?.prepend(host);});
+    };
+
+    const deleteQuestionFile = async question => {
+        if(!question?.imageFileId||!state.persisted.campaignId)return;
+        const code=question.questionCode||`Q${state.draft.questions.indexOf(question)+1}`,fileId=Number(question.imageFileId);
+        await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/questions/${encodeURIComponent(code)}/image`,{fileId:null,altText:null}).catch(error=>{if(error?.status!==404)throw error;});
+        await API.delete(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/files/${fileId}`,{body:JSON.stringify({reason:'Removed from question image builder'})});
+        revokePreview(question);question.imageFileId=null;question.imageAltText='';delete question.fileName;
+    };
+
+    const uploadQuestionImage = async input => {
+        const file=input.files?.[0],question=state.draft.questions[Number(input.dataset.svwQuestionImage)];if(!file||!question)return;
+        if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024){showToast('รองรับเฉพาะ JPG, PNG หรือ WebP ขนาดไม่เกิน 10 MB','error');input.value='';return;}
+        let uploadedFileId=null;try{if(!state.persisted.campaignId&&!await persistCampaign())return;const old={...question};const form=new FormData();form.append('file',file);form.append('filePurpose','question_image');const response=await API.upload(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/files`,form);uploadedFileId=Number(response.data.id);if(old.imageFileId)await deleteQuestionFile(old);revokePreview(question);question.imageFileId=uploadedFileId;question.imageAltText=question.imageAltText||question.title||`ภาพประกอบคำถามข้อ ${Number(input.dataset.svwQuestionImage)+1}`;question.fileName=response.data.originalName||file.name;question.previewUrl=URL.createObjectURL(file);state.objectUrls.add(question.previewUrl);state.persisted.builderSaved=false;enqueueSave();render();}catch(error){if(uploadedFileId)await API.delete(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/files/${uploadedFileId}`,{body:JSON.stringify({reason:'Rollback incomplete question image replacement'})}).catch(()=>{});showToast(error?.message||'อัปโหลดรูปประจำคำถามไม่สำเร็จ','error');}
     };
 
     const uploadOptionImage = async input => {
@@ -426,23 +523,41 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         } catch(error) { showToast(error?.message||'นำเข้าตัวเลือกไม่สำเร็จ','error'); render(); }
     };
 
+    const refreshJuryAssignments = async () => {
+        const response=await API.get(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/jury/assignments`);
+        state.draft.juryAssignments=response.data?.rows||[];
+        state.draft.juryConfigured=Boolean(state.draft.juryCriteria?.length&&state.draft.juryAssignments.some(item=>!['Revoked','Recused'].includes(item.Status||item.status)));
+    };
+
+    const assignJuror = async employeeId => {
+        try{clearTimeout(state.timer);readFields();const stage=await ensureJuryStage();if(!stage?.id)throw new Error('ยังไม่มีรอบการตัดสิน');setSaveState('saving','กำลังมอบหมายกรรมการ…');await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/jury/assignments`,{stageId:Number(stage.id),jurorEmployeeId:employeeId});await refreshJuryAssignments();if(!state.liveJuryMode)await saveJuryConfiguration();state.dirty=false;clearRecovery();setSaveState('saved','เพิ่มกรรมการและบันทึกเกณฑ์แล้ว');render();}
+        catch(error){showToast(error?.message||'เพิ่มกรรมการไม่สำเร็จ','error');setSaveState('error','เพิ่มกรรมการไม่สำเร็จ');}
+    };
+
+    const revokeJuror = assignmentId => openSafetyVoteConfirmDialog({title:'ยืนยันการถอนกรรมการ',description:'กรรมการที่ยังไม่ส่งคะแนนจะถูกถอนสิทธิ์ทันทีและระบบบันทึก Audit หากมีคะแนนแล้วระบบจะไม่อนุญาตให้ถอน',confirmLabel:'ถอนกรรมการ',tone:'danger',onConfirm:async()=>{await API.delete(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/jury/assignments/${assignmentId}`);await refreshJuryAssignments();state.dirty=false;clearRecovery();setSaveState('saved','ถอนกรรมการแล้ว');render();}});
+
     const render = () => {
         const [stepKey, stepTitle] = WIZARD_STEPS[state.step];
         const editing = Boolean(state.persisted.campaignId);
         const readiness = readinessItems(state.draft, state.persisted), readyCount = readiness.filter(item => item.pass).length;
         const recovery = state.recovery ? `<section class="svw-recovery" role="status"><div><strong>พบข้อมูลล่าสุดที่ยังไม่ได้บันทึก</strong><span>บันทึกชั่วคราวในเบราว์เซอร์เมื่อ ${formatThaiDateTime(state.recovery.savedAt)}</span></div><div><button type="button" class="sv-button sv-button--primary" data-svw-recovery="restore">กู้คืนข้อมูล</button><button type="button" class="sv-button sv-button--secondary" data-svw-recovery="discard">ไม่ใช้ข้อมูลที่กู้คืน</button></div></section>` : '';
-        container.innerHTML = `<div class="svw-shell" data-sv-wizard="2026-10-16-preview-parity-r1"><header class="svw-header"><button type="button" class="sv-icon-button" data-svw-action="close" aria-label="กลับศูนย์จัดการ">←</button><div><p class="sv-eyebrow">${editing ? 'แก้ไขแคมเปญฉบับร่าง' : 'สร้างแคมเปญ'}${sourceLabel ? ` · ${escHtml(sourceLabel)}` : ''}</p><h1>${escHtml(stepTitle)}</h1>${state.persisted.serverUpdatedAt ? `<small>แก้ไขล่าสุด ${formatThaiDateTime(state.persisted.serverUpdatedAt)}</small>` : ''}</div><div class="svw-progress-copy">ขั้น ${state.step + 1} จาก ${WIZARD_STEPS.length}</div></header><div class="svw-progress" role="progressbar" aria-label="ความคืบหน้าการสร้างแคมเปญ" aria-valuemin="1" aria-valuemax="8" aria-valuenow="${state.step + 1}"><span style="width:${(state.step + 1) / WIZARD_STEPS.length * 100}%"></span></div>${recovery}<section class="svw-readiness-summary" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อม ${readyCount}/${readiness.length}</strong><span>${readyCount === readiness.length ? 'พร้อมตรวจสอบขั้นสุดท้าย' : 'ระบบจะอัปเดตตามข้อมูลที่กรอก'}</span></div><div class="sv-readiness-meter" role="progressbar" aria-label="ความพร้อมของแคมเปญ" aria-valuemin="0" aria-valuemax="${readiness.length}" aria-valuenow="${readyCount}"><span style="width:${readiness.length ? readyCount/readiness.length*100 : 0}%"></span></div></section><div class="svw-layout"><nav class="svw-step-nav" aria-label="ขั้นตอนสร้างแคมเปญ">${WIZARD_STEPS.map(([key,label],index)=>`<button type="button" data-svw-step="${index}" ${index===state.step?'aria-current="step"':''} ${index>state.maxStep?'disabled':''}><span>${index+1}</span><span>${escHtml(label)}</span></button>`).join('')}</nav><main class="svw-main" data-step="${stepKey}">${state.errors.length?`<section class="svw-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบข้อมูล</h2><ul>${state.errors.map(error=>`<li>${escHtml(error)}</li>`).join('')}</ul></section>`:''}<section class="svw-card">${stepMarkup(state.step,state.draft,state.persisted,state.previewMode,state.previewUserView,state.previewSubmitted)}</section></main></div><div class="svw-save-status" data-svw-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage)}</div><footer class="svw-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svw-action="back" ${state.step===0?'disabled':''}>ย้อนกลับ</button><div>${state.saveState==='error'?'<button type="button" class="sv-button sv-button--secondary" data-svw-action="retry">ลองบันทึกอีกครั้ง</button>':''}${state.step===7?reviewAction():`<button type="button" class="sv-button sv-button--primary" data-svw-action="next">ถัดไป</button>`}</div></footer></div>`;
-        if (state.step === 6) {
+        container.innerHTML = `<div class="svw-shell" data-sv-wizard="2026-10-24-jury-wizard-r1"><header class="svw-header"><button type="button" class="sv-icon-button" data-svw-action="close" aria-label="กลับศูนย์จัดการ">←</button><div><p class="sv-eyebrow">${state.liveJuryMode?'จัดการกรรมการระหว่างแคมเปญ':editing?'แก้ไขแคมเปญฉบับร่าง':'สร้างแคมเปญ'}${sourceLabel ? ` · ${escHtml(sourceLabel)}` : ''}</p><h1>${escHtml(stepTitle)}</h1>${state.persisted.serverUpdatedAt ? `<small>แก้ไขล่าสุด ${formatThaiDateTime(state.persisted.serverUpdatedAt)}</small>` : ''}</div><div class="svw-progress-copy">${state.liveJuryMode?'เฉพาะรายชื่อกรรมการ':`ขั้น ${state.step + 1} จาก ${WIZARD_STEPS.length}`}</div></header><div class="svw-progress" role="progressbar" aria-label="ความคืบหน้าการสร้างแคมเปญ" aria-valuemin="1" aria-valuemax="${WIZARD_STEPS.length}" aria-valuenow="${state.step + 1}"><span style="width:${(state.step + 1) / WIZARD_STEPS.length * 100}%"></span></div>${recovery}<section class="svw-readiness-summary" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อม ${readyCount}/${readiness.length}</strong><span>${readyCount === readiness.length ? 'พร้อมตรวจสอบขั้นสุดท้าย' : 'ระบบจะอัปเดตตามข้อมูลที่กรอก'}</span></div><div class="sv-readiness-meter" role="progressbar" aria-label="ความพร้อมของแคมเปญ" aria-valuemin="0" aria-valuemax="${readiness.length}" aria-valuenow="${readyCount}"><span style="width:${readiness.length ? readyCount/readiness.length*100 : 0}%"></span></div></section><div class="svw-layout"><nav class="svw-step-nav" aria-label="ขั้นตอนสร้างแคมเปญ">${WIZARD_STEPS.map(([key,label],index)=>`<button type="button" data-svw-step="${index}" ${index===state.step?'aria-current="step"':''} ${(state.liveJuryMode&&index!==4)||index>state.maxStep?'disabled':''}><span>${index+1}</span><span>${escHtml(label)}</span></button>`).join('')}</nav><main class="svw-main" data-step="${stepKey}">${state.errors.length?`<section class="svw-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบข้อมูล</h2><ul>${state.errors.map(error=>`<li>${escHtml(error)}</li>`).join('')}</ul></section>`:''}<section class="svw-card">${stepMarkup(state.step,state.draft,state.persisted,state.previewMode,state.previewUserView,state.previewSubmitted)}</section></main></div><div class="svw-save-status" data-svw-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage)}</div><footer class="svw-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svw-action="${state.liveJuryMode?'close':'back'}" ${!state.liveJuryMode&&state.step===0?'disabled':''}>${state.liveJuryMode?'เสร็จสิ้น':'ย้อนกลับ'}</button><div>${state.saveState==='error'?'<button type="button" class="sv-button sv-button--secondary" data-svw-action="retry">ลองบันทึกอีกครั้ง</button>':''}${state.liveJuryMode?'':state.step===WIZARD_STEPS.length-1?reviewAction():`<button type="button" class="sv-button sv-button--primary" data-svw-action="next">ถัดไป</button>`}</div></footer></div>`;
+        if (state.step === 7) {
             const discoveryField = container.querySelector('[data-svw-field="discoveryMode"]')?.closest('.svw-field');
+            const officialTopN = `<section class="svw-live-config" aria-labelledby="svw-official-topn-title"><div class="svw-section-heading"><div><p class="sv-eyebrow">Official results</p><h3 id="svw-official-topn-title">ผลอย่างเป็นทางการและการเผยแพร่</h3></div></div><div class="svw-form-grid"><label class="svw-field"><span>จำนวนอันดับ</span><select data-svw-field="officialResultTopN"><option value="5" ${Number(state.draft.officialResultTopN)===5?'selected':''}>Top 5</option><option value="10" ${Number(state.draft.officialResultTopN)===10?'selected':''}>Top 10</option></select><small>ใช้กับ Frozen/Published Snapshot เท่านั้น และไม่ผูกกับ Live Leaderboard</small></label><label class="svw-field"><span>นโยบายเผยแพร่ผล</span><select data-svw-field="resultReleasePolicy"><option value="automatic" ${state.draft.resultReleasePolicy==='automatic'?'selected':''}>อัตโนมัติเมื่อผ่านเงื่อนไข</option><option value="manual" ${state.draft.resultReleasePolicy==='manual'?'selected':''}>ให้แอดมินรับรองและเผยแพร่</option></select><small>${state.draft.campaignType==='popular_vote'?'แบบอัตโนมัติจะคำนวณและเผยแพร่เมื่อปิดกิจกรรม รวมถึงกรณีไม่มีคะแนน':'แบบอัตโนมัติจะเผยแพร่หลัง workflow เฉพาะประเภทและการรับรองครบเท่านั้น'}</small></label></div></section>`;
+            container.querySelector('.svw-live-config')?.insertAdjacentHTML('beforebegin', officialTopN);
+            discoveryField?.insertAdjacentHTML('beforebegin', '<section class="svw-privacy-scope" role="note"><strong>ค่าเริ่มต้นองค์กร: พนักงานทุกคนเห็นแคมเปญที่เผยแพร่</strong><span>การเห็นรายการและรายละเอียดไม่ให้สิทธิ์ตอบแบบสอบถาม ลงคะแนน ส่งผลงาน หรือให้คะแนน กิจกรรมเหล่านี้ยังตรวจรายชื่อผู้มีสิทธิ์และหน้าที่กรรมการแยกต่างหาก</span></section>');
             const discoveryHelp = state.draft.discoveryMode === 'public_listing'
                 ? 'พนักงานที่เข้าสู่ระบบทุกคนเห็นการ์ดและรายละเอียด แต่เฉพาะผู้มีสิทธิ์ในรายชื่อที่ยืนยันแล้วเท่านั้นที่เห็นคำถามและลงคะแนนได้'
                 : 'เฉพาะผู้มีสิทธิ์ในรายชื่อที่ยืนยันแล้วเท่านั้นที่เห็นแคมเปญ รายละเอียด คำถาม และการลงคะแนน';
             discoveryField?.insertAdjacentHTML('beforeend', `<small data-svw-discovery-help>${discoveryHelp}</small>`);
         }
         container.querySelector('.svw-header')?.insertAdjacentHTML('beforebegin', safetyVoteJourneyNav({ role: 'admin', current: 'readiness', campaign: state.draft, onPage: typeof onNavigate !== 'function' }));
+        renderQuestionImageEditors();
         bind();
-        if (state.step === 7) bindSafetyVoteImageGallery(container);
-        if ([3, 7].includes(state.step)) hydrateOptionImages();
+        if ([3,8].includes(state.step)) bindSafetyVoteImageGallery(container);
+        if ([3,8].includes(state.step)) hydrateOptionImages();
+        if ([3,8].includes(state.step)) hydrateQuestionImages();
     };
 
     const reviewAction = () => {
@@ -454,7 +569,7 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
 
     const next = async () => {
         clearTimeout(state.timer); readFields(); state.errors = validateStep(state.step,state.draft); if(state.errors.length){render();container.querySelector('.svw-validation')?.focus();return;}
-        try { await state.saveChain; if(!await persistForStep(state.step))return; state.step=Math.min(7,state.step+1);state.maxStep=Math.max(state.maxStep,state.step);state.errors=[];render();container.querySelector('.svw-main')?.focus?.(); }
+        try { await state.saveChain; if(!await persistForStep(state.step))return; state.step=Math.min(WIZARD_STEPS.length-1,state.step+1);state.maxStep=Math.max(state.maxStep,state.step);state.errors=[];render();container.querySelector('.svw-main')?.focus?.(); }
         catch(error){state.errors=[error?.message||'บันทึกข้อมูลไม่สำเร็จ'];render();container.querySelector('.svw-validation')?.focus();}
     };
 
@@ -497,15 +612,20 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
     };
 
     const beforeUnload = event => { if (!state.dirty && state.saveState !== 'saving') return; event.preventDefault(); event.returnValue = ''; };
-    const cleanup = () => { clearTimeout(state.timer); window.removeEventListener('beforeunload', beforeUnload); state.objectUrls.forEach(url=>URL.revokeObjectURL(url)); state.objectUrls.clear(); };
+    const cleanup = () => { clearTimeout(state.timer); state.peoplePickerCleanup?.(); window.removeEventListener('beforeunload', beforeUnload); state.objectUrls.forEach(url=>URL.revokeObjectURL(url)); state.objectUrls.clear(); };
     const finishClose = () => { cleanup(); onClose(); };
     const requestClose = () => { if(!state.dirty&&state.saveState!=='saving')return finishClose();openSafetyVoteConfirmDialog({title:'ออกจากการสร้างแคมเปญ',description:'ข้อมูลที่บันทึกแล้วจะยังอยู่ แต่ข้อมูลล่าสุดที่ยังไม่ได้บันทึกอาจสูญหาย',confirmLabel:'ออกจากหน้านี้',tone:'danger',onConfirm:finishClose}); };
     const requestNavigate = step => { const proceed = () => { cleanup(); onNavigate?.(step); }; if(!state.dirty&&state.saveState!=='saving')return proceed();openSafetyVoteConfirmDialog({title:'ออกจากแคมเปญฉบับร่าง',description:'ระบบเก็บข้อมูลล่าสุดไว้สำหรับกู้คืน แต่การเปลี่ยนพื้นที่ตอนนี้อาจทำให้ข้อมูลที่ยังไม่ส่งถึงเซิร์ฟเวอร์ไม่ถูกบันทึก',confirmLabel:'เปลี่ยนพื้นที่',tone:'danger',onConfirm:proceed}); };
 
     const bind = () => {
+        state.peoplePickerCleanup?.();state.peoplePickerCleanup=bindSafetyVotePeoplePickers(container,{onChange:detail=>{if(detail.key==='juryAssignment'&&detail.employeeId)assignJuror(detail.employeeId);}});
+        container.querySelectorAll('[data-svw-question-image]').forEach(input=>input.addEventListener('change',()=>uploadQuestionImage(input)));
+        container.querySelectorAll('[data-svw-question-image-alt]').forEach(input=>input.addEventListener('input',()=>{const question=state.draft.questions[Number(input.dataset.svwQuestionImageAlt)];if(question){question.imageAltText=input.value;state.persisted.builderSaved=false;enqueueSave();}}));
+        container.querySelectorAll('[data-svw-remove-question-image]').forEach(button=>button.addEventListener('click',async()=>{const question=state.draft.questions[Number(button.dataset.svwRemoveQuestionImage)];if(!question)return;try{await deleteQuestionFile(question);state.persisted.builderSaved=false;enqueueSave();render();}catch(error){showToast(error?.message||'ลบรูปประจำคำถามไม่สำเร็จ','error');}}));
+        container.querySelectorAll('[data-svw-remove-question]').forEach(button=>button.addEventListener('click',()=>{const question=state.draft.questions[Number(button.dataset.svwRemoveQuestion)];if(question?.imageFileId)deleteQuestionFile(question).catch(()=>{});}));
         container.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => requestNavigate(button.dataset.svJourneyStep)));
-        container.querySelectorAll('[data-svw-recovery]').forEach(button => button.addEventListener('click', () => { if (button.dataset.svwRecovery === 'restore') { state.draft = clone(state.recovery.draft); state.step = Math.max(0, Math.min(7, Number(state.recovery.step || 0))); state.maxStep = Math.max(state.step, Math.min(7, Number(state.recovery.maxStep || 0))); state.dirty = true; state.recovery = null; setSaveState('dirty', 'กู้คืนข้อมูลแล้ว — ยังไม่ได้บันทึก'); writeRecovery(); } else clearRecovery(); render(); }));
-        container.querySelectorAll('[data-svw-field],[data-svw-date-part],[data-svw-hour-part],[data-svw-minute-part],[data-svw-question-field],[data-svw-option-field],[data-svw-question-config],[data-svw-validation-field],[data-svw-condition-field],[data-svw-rule-field]').forEach(input=>input.addEventListener('input',()=>{readFields();if(input.dataset.svwRuleField){state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;}if(input.dataset.svwOptionField||input.dataset.svwQuestionConfig||input.dataset.svwValidationField||input.dataset.svwConditionField)state.persisted.builderSaved=false;enqueueSave();}));
+        container.querySelectorAll('[data-svw-recovery]').forEach(button => button.addEventListener('click', () => { if (button.dataset.svwRecovery === 'restore') { state.draft = clone(state.recovery.draft); state.step = Math.max(0, Math.min(WIZARD_STEPS.length-1, Number(state.recovery.step || 0))); state.maxStep = Math.max(state.step, Math.min(WIZARD_STEPS.length-1, Number(state.recovery.maxStep || 0))); state.dirty = true; state.recovery = null; setSaveState('dirty', 'กู้คืนข้อมูลแล้ว — ยังไม่ได้บันทึก'); writeRecovery(); } else clearRecovery(); render(); }));
+        container.querySelectorAll('[data-svw-field],[data-svw-date-part],[data-svw-hour-part],[data-svw-minute-part],[data-svw-question-field],[data-svw-option-field],[data-svw-question-config],[data-svw-validation-field],[data-svw-condition-field],[data-svw-rule-field],[data-svw-criterion-field],[data-svw-jury-field]').forEach(input=>input.addEventListener('input',()=>{readFields();if(input.dataset.svwRuleField){state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;}if(input.dataset.svwOptionField||input.dataset.svwQuestionConfig||input.dataset.svwValidationField||input.dataset.svwConditionField)state.persisted.builderSaved=false;if(input.dataset.svwCriterionField||input.dataset.svwJuryField)state.draft.juryConfigured=false;enqueueSave();}));
         container.querySelectorAll('[data-svw-option-field]').forEach(input=>input.addEventListener('change',()=>{readFields();render();}));
         container.querySelector('[data-svw-field="discoveryMode"]')?.addEventListener('change',()=>{readFields();render();});
         container.querySelectorAll('[data-svw-question-config],[data-svw-validation-field]').forEach(input=>input.addEventListener('change',()=>{readFields();const question=state.draft.questions[Number(input.dataset.questionIndex)];if(question&&input.dataset.svwQuestionConfig==='isRequired')question.minSelections=question.isRequired===false?0:Math.max(1,Number(question.minSelections||1));state.persisted.builderSaved=false;render();}));
@@ -527,7 +647,10 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         container.querySelectorAll('[data-svw-remove-option]').forEach(button=>button.addEventListener('click',async()=>{readFields();const question=state.draft.questions[Number(button.dataset.questionIndex)],index=Number(button.dataset.optionIndex),option=question?.options?.[index];if(!question||!option||question.options.length<=2)return;try{await deleteOptionFile(option);question.options.splice(index,1);state.persisted.builderSaved=false;enqueueSave();render();}catch(error){showToast(error?.message||'ลบตัวเลือกไม่สำเร็จ','error');}}));
         container.querySelectorAll('[data-svw-remove-question]').forEach(button=>button.addEventListener('click',async()=>{readFields();const index=Number(button.dataset.svwRemoveQuestion),question=state.draft.questions[index];if(!question||state.draft.questions.length<=1)return;try{for(const option of question.options||[])await deleteOptionFile(option);state.draft.questions.splice(index,1);state.persisted.builderSaved=false;enqueueSave();render();}catch(error){showToast(error?.message||'ลบคำถามไม่สำเร็จ','error');}}));
         container.querySelectorAll('[data-svw-remove-rule]').forEach(button=>button.addEventListener('click',()=>{state.draft.rules.splice(Number(button.dataset.svwRemoveRule),1);state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;enqueueSave();render();}));
-        container.querySelectorAll('[data-svw-action]').forEach(button=>button.addEventListener('click',()=>{const action=button.dataset.svwAction;if(action==='next')next();else if(action==='back'){readFields();state.step=Math.max(0,state.step-1);state.errors=[];render();}else if(action==='close')requestClose();else if(action==='retry')persistForStep(state.step).catch(()=>{});else if(action==='add-question'){const question=defaultQuestion(state.draft.campaignType,state.draft.questions.length);question.questionCode=nextQuestionCode();state.draft.questions.push(question);state.persisted.builderSaved=false;enqueueSave();render();}else if(action==='add-rule'){state.draft.rules.push({effect:'include',attributeKey:'department_id',operator:'IN',values:[],reason:'กำหนดจาก wizard'});state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;enqueueSave();render();}else if(action==='preview-eligibility')previewEligibility();else if(action==='freeze-eligibility')freezeEligibility();else if(action==='open')openCampaign();else if(action==='advanced'){cleanup();onOpenAdvanced(state.persisted.campaignId);}}));
+        container.querySelectorAll('[data-svw-move-criterion]').forEach(button=>button.addEventListener('click',()=>{readFields();if(moveItem(state.draft.juryCriteria,Number(button.dataset.index),button.dataset.svwMoveCriterion)){state.draft.juryConfigured=false;enqueueSave();render();}}));
+        container.querySelectorAll('[data-svw-remove-criterion]').forEach(button=>button.addEventListener('click',()=>{readFields();if(state.draft.juryCriteria.length>1){state.draft.juryCriteria.splice(Number(button.dataset.svwRemoveCriterion),1);state.draft.juryConfigured=false;enqueueSave();render();}}));
+        container.querySelectorAll('[data-svw-revoke-juror]').forEach(button=>button.addEventListener('click',()=>revokeJuror(Number(button.dataset.svwRevokeJuror))));
+        container.querySelectorAll('[data-svw-action]').forEach(button=>button.addEventListener('click',()=>{const action=button.dataset.svwAction;if(action==='next')next();else if(action==='back'){readFields();state.step=Math.max(0,state.step-1);state.errors=[];render();}else if(action==='close')requestClose();else if(action==='retry')persistForStep(state.step).catch(()=>{});else if(action==='add-question'){const question=defaultQuestion(state.draft.campaignType,state.draft.questions.length);question.questionCode=nextQuestionCode();state.draft.questions.push(question);state.persisted.builderSaved=false;enqueueSave();render();}else if(action==='add-criterion'){readFields();const index=state.draft.juryCriteria.length;state.draft.juryCriteria.push({criterionCode:`CRITERION_${index+1}`,title:'',description:'',minScore:1,maxScore:5,weight:0});state.draft.juryConfigured=false;enqueueSave();render();}else if(action==='add-rule'){state.draft.rules.push({effect:'include',attributeKey:'department_id',operator:'IN',values:[],reason:'กำหนดจาก wizard'});state.draft.eligibilityPreview=null;state.draft.eligibilityFrozen=false;enqueueSave();render();}else if(action==='preview-eligibility')previewEligibility();else if(action==='freeze-eligibility')freezeEligibility();else if(action==='open')openCampaign();else if(action==='advanced'){cleanup();onOpenAdvanced(state.persisted.campaignId);}}));
     };
 
     window.addEventListener('beforeunload', beforeUnload);

@@ -432,6 +432,17 @@ function upload_public_url(string $storedName, string $originalName): string
         . '?filename=' . rawurlencode(clean_upload_name($originalName));
 }
 
+function available_upload_public_url($value): string
+{
+    $raw = mb_substr(trim((string) $value), 0, 2048);
+    if ($raw === '') return '';
+    $path = (string) parse_url($raw, PHP_URL_PATH);
+    if (strpos($path, '/uploads/') === false || strpos($raw, '/') !== 0) return $raw;
+    $name = basename(rawurldecode($path));
+    if ($name === '' || $name === '.' || $name === '..') return '';
+    return is_file(upload_dir() . DIRECTORY_SEPARATOR . $name) ? $raw : '';
+}
+
 function store_uploaded_file(string $field, array $allowed, int $maxBytes): array
 {
     $file = $_FILES[$field] ?? null;

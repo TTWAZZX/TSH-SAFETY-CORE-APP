@@ -28,6 +28,8 @@ const migrations = [
     '20261016_safety_vote_campaign_governance.sql',
     '20261020_safety_vote_eligibility_amendments.sql',
     '20261020_safety_vote_eligibility_amendments.sql',
+    '20261024_safety_vote_eligibility_removal_policy.sql',
+    '20261024_safety_vote_eligibility_removal_policy.sql',
 ];
 
 let admin;
@@ -50,6 +52,10 @@ async function main() {
     assert.equal(versionColumns.length, 3);
     assert.equal(String(versionColumns.find(row => row.COLUMN_NAME === 'EligibilityEnrollmentMode').COLUMN_DEFAULT).replaceAll("'", ''), 'closed_after_open');
     assert.equal(snapshotColumns.length, 2);
+    const [removalSettings] = await db.query("SELECT SettingKey,SettingValue FROM SafetyVote_Settings WHERE SettingKey IN ('eligibility_removal_enabled','eligibility_removal_policy','eligibility_removal_contract') ORDER BY SettingKey");
+    assert.equal(removalSettings.length, 3);
+    assert.equal(removalSettings.find(row => row.SettingKey === 'eligibility_removal_enabled').SettingValue, '0');
+    assert.equal(removalSettings.find(row => row.SettingKey === 'eligibility_removal_policy').SettingValue, 'unstarted_only');
 
     const [campaign] = await db.query("INSERT INTO SafetyVote_Campaigns(CampaignCode,Status,OwnerEmployeeID,CreatedBy,UpdatedBy) VALUES('SHE-901-2026','Open','A1','A1','A1')");
     const [version] = await db.query("INSERT INTO SafetyVote_CampaignVersions(CampaignID,VersionNo,ContractVersion,CampaignType,PrivacyMode,TitleTh,EligibilityEnrollmentMode,CreatedBy,UpdatedBy,Status) VALUES(?,1,'2026-10-20-safety-vote-eligibility-amendments-r1','popular_vote','identified','Amendment fixture','admin_approval','A1','A1','Open')", [campaign.insertId]);
@@ -73,11 +79,15 @@ async function main() {
     assert.equal(Number(evidence.genericAudits), 1);
 
     await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', '20261020_safety_vote_eligibility_amendments.rollback.sql'), 'utf8'));
+    await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', '20261024_safety_vote_eligibility_removal_policy.rollback.sql'), 'utf8'));
     const [[retained]] = await db.query("SELECT (SELECT COUNT(*) FROM SafetyVote_EligibilityAmendments) amendments,(SELECT COUNT(*) FROM SafetyVote_EligibilityAmendmentMembers) members,(SELECT COUNT(*) FROM SafetyVote_EligibilityAmendmentEvents) events,(SELECT EligibilityEnrollmentMode FROM SafetyVote_CampaignVersions WHERE id=?) mode,(SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='eligibility_amendment_enabled') enabled", [version.insertId]);
     assert.deepEqual([Number(retained.amendments), Number(retained.members), Number(retained.events)], [1, 1, 2]);
     assert.equal(retained.mode, 'closed_after_open');
     assert.equal(retained.enabled, '0');
-    console.log('Safety Vote eligibility amendments disposable migration: PASS (idempotent x2, lineage, member evidence, chained events, generic audit, data-preserving rollback)');
+    const [[removalRetained]] = await db.query("SELECT SettingValue enabled,(SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='eligibility_removal_policy') policy FROM SafetyVote_Settings WHERE SettingKey='eligibility_removal_enabled'");
+    assert.equal(removalRetained.enabled, '0');
+    assert.equal(removalRetained.policy, 'unstarted_only');
+    console.log('Safety Vote eligibility amendments disposable migration: PASS (idempotent x2, governed removal settings, lineage, member evidence, chained events, generic audit, data-preserving rollback)');
 }
 
 main().catch(error => {

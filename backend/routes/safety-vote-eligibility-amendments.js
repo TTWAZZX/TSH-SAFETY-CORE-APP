@@ -39,6 +39,11 @@ async function requireFeature(queryable = db, lock = false) {
     return String(row?.SettingValue || '0') === '1';
 }
 
+async function requireRemovalFeature(queryable = db, lock = false) {
+    const [[row]] = await queryable.query(`SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='eligibility_removal_enabled'${lock ? ' FOR UPDATE' : ''}`);
+    return String(row?.SettingValue || '0') === '1';
+}
+
 async function campaign(campaignId, queryable = db, lock = false) {
     const [rows] = await queryable.query(`SELECT c.id,c.CampaignCode,c.Status,c.CurrentVersionID,c.ScheduledOpenAt,c.ScheduledCloseAt,v.VersionNo,v.Status VersionStatus,v.TitleTh,v.OpenAt,v.CloseAt,v.EligibilityEnrollmentMode FROM SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID WHERE c.id=?${lock ? ' FOR UPDATE' : ''}`, [campaignId]);
     return rows[0] || null;
@@ -177,9 +182,10 @@ async function overview(campaignId, queryable = db) {
     const current = await campaign(campaignId, queryable);
     if (!current) return null;
     const enabled = await requireFeature(queryable);
-    const [snapshotResult, amendmentResult] = await Promise.all([
+    const [snapshotResult, amendmentResult, removalEnabled] = await Promise.all([
         queryable.query("SELECT id,SnapshotNo,Status,RowsHash,EligibleCount,AccountReadyCount,WarningCount,FrozenAt,FrozenBy,Reason,ParentSnapshotID,SnapshotKind FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen' ORDER BY SnapshotNo DESC LIMIT 1", [current.CurrentVersionID]),
-        queryable.query("SELECT id,SourceSnapshotID,ResultSnapshotID,EnrollmentMode,RequestType,Status,Reason,CandidateCount,ApprovedCount,AddedCount,SkippedCount,BeforeRowsHash,CandidateSetHash,AfterRowsHash,RequestedBy,RequestedAt,ReviewedBy,ReviewedAt,AppliedBy,AppliedAt FROM SafetyVote_EligibilityAmendments WHERE CampaignVersionID=? ORDER BY id DESC LIMIT 50", [current.CurrentVersionID]),
+        queryable.query("SELECT a.id,a.SourceSnapshotID,a.ResultSnapshotID,a.EnrollmentMode,a.RequestType,a.Status,a.Reason,a.CandidateCount,a.ApprovedCount,a.AddedCount,a.SkippedCount,a.BeforeRowsHash,a.CandidateSetHash,a.AfterRowsHash,a.RequestedBy,a.RequestedAt,a.ReviewedBy,a.ReviewedAt,a.AppliedBy,a.AppliedAt,(SELECT COUNT(*) FROM SafetyVote_EligibilityAmendmentMembers m WHERE m.AmendmentID=a.id AND m.MemberStatus='Removed') RemovedCount FROM SafetyVote_EligibilityAmendments a WHERE a.CampaignVersionID=? ORDER BY a.id DESC LIMIT 50", [current.CurrentVersionID]),
+        requireRemovalFeature(queryable),
     ]);
     const snapshot = snapshotResult[0][0] || null, amendments = amendmentResult[0];
     const mode = String(current.EligibilityEnrollmentMode || 'closed_after_open');
@@ -196,6 +202,7 @@ async function overview(campaignId, queryable = db) {
             automaticTriggers: ['campaign_discovery', 'campaign_detail', 'ballot_submit'],
             addOnly: true,
             allowedModes: [...ENROLLMENT_MODES],
+            removal: { enabled: removalEnabled, mode: 'unstarted_only', allowed: removalEnabled && ACTIVE_STATES.has(current.Status) && mode === 'admin_approval', requiresEnrollmentMode: 'admin_approval', protectedActivities: ['participation', 'submission', 'nomination', 'jury_assignment'] },
         },
         currentSnapshot: snapshot ? {
             id: Number(snapshot.id), snapshotNo: Number(snapshot.SnapshotNo), status: snapshot.Status,
@@ -207,6 +214,7 @@ async function overview(campaignId, queryable = db) {
             id: Number(row.id), sourceSnapshotId: Number(row.SourceSnapshotID), resultSnapshotId: row.ResultSnapshotID ? Number(row.ResultSnapshotID) : null,
             enrollmentMode: row.EnrollmentMode, requestType: row.RequestType, status: row.Status, reason: row.Reason,
             candidateCount: Number(row.CandidateCount), approvedCount: Number(row.ApprovedCount), addedCount: Number(row.AddedCount), skippedCount: Number(row.SkippedCount),
+            removedCount: Number(row.RemovedCount || 0),
             beforeRowsHash: row.BeforeRowsHash, candidateSetHash: row.CandidateSetHash, afterRowsHash: row.AfterRowsHash,
             requestedBy: row.RequestedBy, requestedAt: row.RequestedAt, reviewedBy: row.ReviewedBy, reviewedAt: row.ReviewedAt, appliedBy: row.AppliedBy, appliedAt: row.AppliedAt,
         })),
@@ -262,6 +270,114 @@ router.post('/admin/campaigns/:id/eligibility/amendments/preview', permit('SAFET
         console.error('[safety-vote] eligibility amendment preview failed:', error);
         return fail(res, 503, 'ELIGIBILITY_AMENDMENT_PREVIEW_FAILED', 'Unable to preview new eligible voters.');
     }
+});
+
+router.post('/admin/campaigns/:id/eligibility/amendments/individual', permit('SAFETY_VOTE_ELIGIBILITY_MANAGE'), async (req, res) => {
+    const id = phase2.int(req.params.id), employeeId = phase2.text(req.body?.employeeId, 20), reason = phase2.text(req.body?.reason, 500);
+    const idempotencyKey = phase2.text(req.get('Idempotency-Key'), 200);
+    if (!id || !employeeId || Array.from(reason).length < 10 || idempotencyKey.length < 16) return fail(res, 400, 'VALIDATION_FAILED', 'Campaign, employee, reason of at least 10 characters and a valid Idempotency-Key are required.');
+    const keyHash = crypto.createHash('sha256').update(idempotencyKey).digest('hex');
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        if (!await requireFeature(connection, true)) { await connection.rollback(); return fail(res, 503, 'ELIGIBILITY_AMENDMENT_DISABLED', 'Eligibility amendments are disabled.'); }
+        const [replays] = await connection.query('SELECT * FROM SafetyVote_EligibilityAmendments WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) AND IdempotencyKeyHash=? LIMIT 1 FOR UPDATE', [id, keyHash]);
+        const replay = replays[0];
+        if (replay) {
+            const [[member]] = await connection.query('SELECT EmployeeID employeeId FROM SafetyVote_EligibilityAmendmentMembers WHERE AmendmentID=? ORDER BY id LIMIT 1', [replay.id]);
+            await connection.rollback();
+            if (replay.Status !== 'Applied') return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'This idempotency key belongs to an unfinished amendment.');
+            return res.json({ success: true, data: { contractVersion: CONTRACT, amendmentId: Number(replay.id), status: replay.Status, employeeId: member?.employeeId || null, sourceSnapshotId: Number(replay.SourceSnapshotID), resultSnapshotId: Number(replay.ResultSnapshotID), addedCount: Number(replay.AddedCount), afterRowsHash: replay.AfterRowsHash, replayed: true } });
+        }
+        const current = await campaign(id, connection, true);
+        if (!current) { await connection.rollback(); return fail(res, 404, 'CAMPAIGN_NOT_FOUND', 'Campaign was not found.'); }
+        if (!ACTIVE_STATES.has(current.Status)) { await connection.rollback(); return fail(res, 409, 'CAMPAIGN_STATE_CONFLICT', 'Individual eligibility additions are available only for Scheduled or Open campaigns.'); }
+        const mode = String(current.EligibilityEnrollmentMode || 'closed_after_open');
+        if (!OPEN_MODES.has(mode)) { await connection.rollback(); return fail(res, 409, 'ELIGIBILITY_ENROLLMENT_CLOSED', 'This campaign does not accept new eligible voters after opening.'); }
+        if (req.body?.confirmation !== `ADD ${current.CampaignCode} ${employeeId}`) { await connection.rollback(); return fail(res, 400, 'AMENDMENT_CONFIRMATION_REQUIRED', 'Exact campaign and employee confirmation is required.'); }
+        const [[source]] = await connection.query("SELECT * FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen' ORDER BY SnapshotNo DESC,id DESC LIMIT 1 FOR UPDATE", [current.CurrentVersionID]);
+        if (!source) { await connection.rollback(); return fail(res, 409, 'FROZEN_SNAPSHOT_REQUIRED', 'A frozen eligibility snapshot is required before an amendment.'); }
+        const [[existing]] = await connection.query('SELECT id FROM SafetyVote_EligibleVoters WHERE SnapshotID=? AND EmployeeID=? LIMIT 1', [source.id, employeeId]);
+        if (existing) { await connection.rollback(); return fail(res, 409, 'ELIGIBILITY_ALREADY_GRANTED', 'This employee is already eligible in the current snapshot.'); }
+        const master = await foundation.masterProjection(connection);
+        const matched = master.employees.find(item => String(item.employeeId) === employeeId);
+        if (!matched) { await connection.rollback(); return fail(res, 404, 'EMPLOYEE_NOT_FOUND', 'Employee was not found in current Employee Master Data.'); }
+        const row = { ...voterProjection(matched), inclusionSource: 'eligibility_amendment', inclusionReason: reason };
+        const candidateSetHash = phase2.rowsHash([row]);
+        const [created] = await connection.query("INSERT INTO SafetyVote_EligibilityAmendments(CampaignID,CampaignVersionID,SourceSnapshotID,EnrollmentMode,RequestType,Status,Reason,CandidateCount,ApprovedCount,BeforeRowsHash,CandidateSetHash,IdempotencyKeyHash,RequestedBy,ReviewedBy,ReviewedAt) VALUES(?,?,?,?,'individual_add','Approved',?,1,1,?,?,?,?,?,NOW())", [id, current.CurrentVersionID, source.id, mode, reason, source.RowsHash, candidateSetHash, keyHash, actor(req), actor(req)]);
+        const amendmentId = Number(created.insertId);
+        await connection.query("INSERT INTO SafetyVote_EligibilityAmendmentMembers(AmendmentID,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,SourceType,SourceReason,MasterWarningsJson,MemberStatus,DecisionReason,DecidedBy,DecidedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'individual_admin_add',?,?, 'Approved',?,?,NOW())", [amendmentId, row.employeeId, row.employeeName, row.departmentId, row.departmentName, row.safetyUnitId, row.safetyUnitName, row.positionId, row.positionName, row.role, row.team, row.masterPresent ? 1 : 0, row.accountReady ? 1 : 0, reason, JSON.stringify(row.masterWarnings), reason, actor(req)]);
+        const amendment = { id: amendmentId, campaignId: id, versionId: current.CurrentVersionID };
+        let eventHash = await appendEvent(connection, req, amendment, 'REQUESTED', null, 'Pending', reason, { employeeId, candidateCount: 1, candidateSetHash, requestType: 'individual_add' }, null, 1);
+        eventHash = await appendEvent(connection, req, amendment, 'APPROVED', 'Pending', 'Approved', reason, { employeeId, approvedCount: 1, enrollmentMode: mode }, eventHash, 2);
+        const [[next]] = await connection.query('SELECT COALESCE(MAX(SnapshotNo),0)+1 snapshotNo FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=?', [current.CurrentVersionID]);
+        const warningCount = Number(source.WarningCount || 0) + row.masterWarnings.length;
+        const [snapshotCreated] = await connection.query("INSERT INTO SafetyVote_EligibilitySnapshots(CampaignVersionID,SnapshotNo,Status,RuleHash,RowsHash,EligibleCount,AccountReadyCount,WarningCount,FrozenAt,FrozenBy,Reason,CreatedBy,ParentSnapshotID,SnapshotKind) VALUES(?,?,'building',?,NULL,0,0,?,NULL,NULL,?,?,?,'amendment')", [current.CurrentVersionID, next.snapshotNo, source.RuleHash, warningCount, reason, actor(req), source.id]);
+        const resultSnapshotId = Number(snapshotCreated.insertId);
+        await connection.query('INSERT INTO SafetyVote_EligibleVoters(SnapshotID,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource,InclusionReason,OverrideBy,OverrideAt,OverrideReason) SELECT ?,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource,InclusionReason,OverrideBy,OverrideAt,OverrideReason FROM SafetyVote_EligibleVoters WHERE SnapshotID=?', [resultSnapshotId, source.id]);
+        await connection.query("INSERT INTO SafetyVote_EligibleVoters(SnapshotID,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource,InclusionReason,OverrideBy,OverrideAt,OverrideReason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'eligible','eligibility_amendment',?,?,NOW(),?)", [resultSnapshotId, row.employeeId, row.employeeName, row.departmentId, row.departmentName, row.safetyUnitId, row.safetyUnitName, row.positionId, row.positionName, row.role, row.team, row.masterPresent ? 1 : 0, row.accountReady ? 1 : 0, reason, actor(req), reason]);
+        const [merged] = await connection.query('SELECT EmployeeID employeeId,DepartmentIDSnapshot departmentId,SafetyUnitIDSnapshot safetyUnitId,PositionIDSnapshot positionId,RoleSnapshot role,TeamSnapshot team,AccountReady accountReady FROM SafetyVote_EligibleVoters WHERE SnapshotID=? ORDER BY EmployeeID', [resultSnapshotId]);
+        const afterRowsHash = phase2.rowsHash(merged), accountReadyCount = merged.filter(item => Boolean(item.accountReady)).length;
+        await connection.query("UPDATE SafetyVote_EligibilitySnapshots SET Status='superseded' WHERE id=? AND Status='frozen'", [source.id]);
+        await connection.query("UPDATE SafetyVote_EligibilitySnapshots SET Status='frozen',RowsHash=?,EligibleCount=?,AccountReadyCount=?,FrozenAt=NOW(),FrozenBy=? WHERE id=? AND Status='building'", [afterRowsHash, merged.length, accountReadyCount, actor(req), resultSnapshotId]);
+        await connection.query("UPDATE SafetyVote_EligibilityAmendmentMembers SET MemberStatus='Applied',AppliedAt=NOW() WHERE AmendmentID=?", [amendmentId]);
+        await connection.query("UPDATE SafetyVote_EligibilityAmendments SET ResultSnapshotID=?,Status='Applied',AddedCount=1,SkippedCount=0,AfterRowsHash=?,AppliedBy=?,AppliedAt=NOW(),MetadataJson=? WHERE id=?", [resultSnapshotId, afterRowsHash, actor(req), JSON.stringify({ employeeId, requestType: 'individual_add', addOnly: true }), amendmentId]);
+        await appendEvent(connection, req, amendment, 'APPLIED', 'Approved', 'Applied', reason, { employeeId, sourceSnapshotId: Number(source.id), resultSnapshotId, addedCount: 1, afterRowsHash }, eventHash, 3);
+        await connection.query('INSERT INTO SafetyVote_AuditLogs(CampaignID,CampaignVersionID,ActorEmployeeID,ActorRole,Action,TargetType,TargetID,StatusCode,BoundedDetail,MetadataJson,IPAddress,UserAgent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', [id, current.CurrentVersionID, actor(req), role(req), 'SAFETY_VOTE_ELIGIBILITY_INDIVIDUAL_ADDED', 'SafetyVote_EligibilityAmendment', String(amendmentId), 201, `employee=${employeeId}; sourceSnapshot=${source.id}; resultSnapshot=${resultSnapshotId}`, JSON.stringify({ employeeId, sourceSnapshotId: Number(source.id), resultSnapshotId, beforeRowsHash: source.RowsHash, afterRowsHash, candidateSetHash, enrollmentMode: mode, requestType: 'individual_add', addOnly: true }), req.ip || null, String(req.headers?.['user-agent'] || '').slice(0, 255) || null]);
+        await connection.commit();
+        return res.status(201).json({ success: true, data: { contractVersion: CONTRACT, amendmentId, status: 'Applied', employeeId, employeeName: row.employeeName, sourceSnapshotId: Number(source.id), resultSnapshotId, snapshotNo: Number(next.snapshotNo), addedCount: 1, afterRowsHash, replayed: false } });
+    } catch (error) {
+        await connection.rollback().catch(() => {});
+        if (error?.code === 'ER_DUP_ENTRY') return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'The individual amendment was already requested.');
+        console.error('[safety-vote] individual eligibility amendment failed:', error);
+        return fail(res, 500, 'ELIGIBILITY_INDIVIDUAL_ADD_FAILED', 'Unable to add this employee to eligibility.');
+    } finally { connection.release(); }
+});
+
+router.post('/admin/campaigns/:id/eligibility/removals/individual', permit('SAFETY_VOTE_ELIGIBILITY_MANAGE'), async (req, res) => {
+    const id = phase2.int(req.params.id), employeeId = phase2.text(req.body?.employeeId, 20), reason = phase2.text(req.body?.reason, 500), idempotencyKey = phase2.text(req.get('Idempotency-Key'), 200);
+    if (!id || !employeeId || Array.from(reason).length < 10 || idempotencyKey.length < 16) return fail(res, 400, 'VALIDATION_FAILED', 'Campaign, employee, reason of at least 10 characters and a valid Idempotency-Key are required.');
+    const keyHash = crypto.createHash('sha256').update(idempotencyKey).digest('hex'), connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        if (!await requireFeature(connection, true) || !await requireRemovalFeature(connection, true)) { await connection.rollback(); return fail(res, 503, 'ELIGIBILITY_REMOVAL_DISABLED', 'Eligibility removal is disabled.'); }
+        const [replays] = await connection.query('SELECT * FROM SafetyVote_EligibilityAmendments WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) AND IdempotencyKeyHash=? LIMIT 1 FOR UPDATE', [id, keyHash]);
+        const replay = replays[0];
+        if (replay) { await connection.rollback(); if (replay.Status !== 'Applied' || replay.RequestType !== 'individual_remove') return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'This idempotency key belongs to another amendment.'); return res.json({ success: true, data: { contractVersion: '2026-10-24-safety-vote-eligibility-removal-r1', amendmentId: Number(replay.id), status: replay.Status, sourceSnapshotId: Number(replay.SourceSnapshotID), resultSnapshotId: Number(replay.ResultSnapshotID), removedCount: 1, afterRowsHash: replay.AfterRowsHash, replayed: true } }); }
+        const current = await campaign(id, connection, true);
+        if (!current) { await connection.rollback(); return fail(res, 404, 'CAMPAIGN_NOT_FOUND', 'Campaign was not found.'); }
+        if (!ACTIVE_STATES.has(current.Status)) { await connection.rollback(); return fail(res, 409, 'CAMPAIGN_STATE_CONFLICT', 'Eligibility removal is available only for Scheduled or Open campaigns.'); }
+        if (String(current.EligibilityEnrollmentMode) !== 'admin_approval') { await connection.rollback(); return fail(res, 409, 'ELIGIBILITY_REMOVAL_POLICY_CONFLICT', 'Set enrollment mode to admin approval before removing eligibility.'); }
+        if (req.body?.confirmation !== `REMOVE ${current.CampaignCode} ${employeeId}`) { await connection.rollback(); return fail(res, 400, 'REMOVAL_CONFIRMATION_REQUIRED', 'Exact campaign and employee confirmation is required.'); }
+        const [[source]] = await connection.query("SELECT * FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen' ORDER BY SnapshotNo DESC,id DESC LIMIT 1 FOR UPDATE", [current.CurrentVersionID]);
+        if (!source) { await connection.rollback(); return fail(res, 409, 'FROZEN_SNAPSHOT_REQUIRED', 'A frozen eligibility snapshot is required before removal.'); }
+        const [[row]] = await connection.query('SELECT EmployeeID employeeId,EmployeeNameSnapshot employeeName,DepartmentIDSnapshot departmentId,DepartmentNameSnapshot departmentName,SafetyUnitIDSnapshot safetyUnitId,SafetyUnitNameSnapshot safetyUnitName,PositionIDSnapshot positionId,PositionNameSnapshot positionName,RoleSnapshot role,TeamSnapshot team,MasterPresent masterPresent,AccountReady accountReady,InclusionSource inclusionSource,InclusionReason inclusionReason FROM SafetyVote_EligibleVoters WHERE SnapshotID=? AND EmployeeID=? AND EligibilityState=\'eligible\' LIMIT 1', [source.id, employeeId]);
+        if (!row) { await connection.rollback(); return fail(res, 409, 'ELIGIBILITY_NOT_ACTIVE', 'This employee is not eligible in the current snapshot.'); }
+        const [[activity]] = await connection.query('SELECT (SELECT COUNT(*) FROM SafetyVote_Participation WHERE CampaignVersionID=? AND EmployeeID=?) participation,(SELECT COUNT(*) FROM SafetyVote_Submissions WHERE CampaignVersionID=? AND SubmitterEmployeeID=?) submissions,(SELECT COUNT(*) FROM SafetyVote_Nominations WHERE CampaignVersionID=? AND (NominatorEmployeeID=? OR NomineeEmployeeID=?)) nominations,(SELECT COUNT(*) FROM SafetyVote_JuryAssignments WHERE CampaignVersionID=? AND JurorEmployeeID=?) juryAssignments', [current.CurrentVersionID, employeeId, current.CurrentVersionID, employeeId, current.CurrentVersionID, employeeId, employeeId, current.CurrentVersionID, employeeId]);
+        const protectedActivity = { participation: Number(activity.participation), submissions: Number(activity.submissions), nominations: Number(activity.nominations), juryAssignments: Number(activity.juryAssignments) };
+        if (Object.values(protectedActivity).some(Boolean)) { await connection.rollback(); return fail(res, 409, 'ELIGIBILITY_REMOVAL_PROTECTED_ACTIVITY', 'Eligibility cannot be removed after protected campaign activity exists.', protectedActivity); }
+        const candidate = voterProjection(row), candidateSetHash = phase2.rowsHash([candidate]);
+        const [created] = await connection.query("INSERT INTO SafetyVote_EligibilityAmendments(CampaignID,CampaignVersionID,SourceSnapshotID,EnrollmentMode,RequestType,Status,Reason,CandidateCount,ApprovedCount,BeforeRowsHash,CandidateSetHash,IdempotencyKeyHash,RequestedBy,ReviewedBy,ReviewedAt,MetadataJson) VALUES(?,?,?,?,'individual_remove','Approved',?,1,1,?,?,?,?,?,NOW(),?)", [id, current.CurrentVersionID, source.id, current.EligibilityEnrollmentMode, reason, source.RowsHash, candidateSetHash, keyHash, actor(req), actor(req), JSON.stringify({ removalPolicy: 'unstarted_only', employeeId })]);
+        const amendmentId = Number(created.insertId);
+        await connection.query("INSERT INTO SafetyVote_EligibilityAmendmentMembers(AmendmentID,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,SourceType,SourceReason,MasterWarningsJson,MemberStatus,DecisionReason,DecidedBy,DecidedAt,AppliedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'individual_admin_remove',?,'[]','Removed',?,?,NOW(),NOW())", [amendmentId, candidate.employeeId, candidate.employeeName, candidate.departmentId, candidate.departmentName, candidate.safetyUnitId, candidate.safetyUnitName, candidate.positionId, candidate.positionName, candidate.role, candidate.team, candidate.masterPresent ? 1 : 0, candidate.accountReady ? 1 : 0, reason, reason, actor(req)]);
+        const amendment = { id: amendmentId, campaignId: id, versionId: current.CurrentVersionID };
+        let eventHash = await appendEvent(connection, req, amendment, 'REMOVAL_REQUESTED', null, 'Pending', reason, { employeeId, removalPolicy: 'unstarted_only', protectedActivity }, null, 1);
+        eventHash = await appendEvent(connection, req, amendment, 'REMOVAL_APPROVED', 'Pending', 'Approved', reason, { employeeId, approvedCount: 1 }, eventHash, 2);
+        const [[next]] = await connection.query('SELECT COALESCE(MAX(SnapshotNo),0)+1 snapshotNo FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=?', [current.CurrentVersionID]);
+        const [snapshotCreated] = await connection.query("INSERT INTO SafetyVote_EligibilitySnapshots(CampaignVersionID,SnapshotNo,Status,RuleHash,RowsHash,EligibleCount,AccountReadyCount,WarningCount,FrozenAt,FrozenBy,Reason,CreatedBy,ParentSnapshotID,SnapshotKind) VALUES(?,?,'building',?,NULL,0,0,?,NULL,NULL,?,?,?,'removal')", [current.CurrentVersionID, next.snapshotNo, source.RuleHash, Number(source.WarningCount || 0), reason, actor(req), source.id]);
+        const resultSnapshotId = Number(snapshotCreated.insertId);
+        await connection.query('INSERT INTO SafetyVote_EligibleVoters(SnapshotID,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource,InclusionReason,OverrideBy,OverrideAt,OverrideReason) SELECT ?,EmployeeID,EmployeeNameSnapshot,DepartmentIDSnapshot,DepartmentNameSnapshot,SafetyUnitIDSnapshot,SafetyUnitNameSnapshot,PositionIDSnapshot,PositionNameSnapshot,RoleSnapshot,TeamSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource,InclusionReason,OverrideBy,OverrideAt,OverrideReason FROM SafetyVote_EligibleVoters WHERE SnapshotID=? AND EmployeeID<>?', [resultSnapshotId, source.id, employeeId]);
+        const [merged] = await connection.query('SELECT EmployeeID employeeId,DepartmentIDSnapshot departmentId,SafetyUnitIDSnapshot safetyUnitId,PositionIDSnapshot positionId,RoleSnapshot role,TeamSnapshot team,AccountReady accountReady FROM SafetyVote_EligibleVoters WHERE SnapshotID=? ORDER BY EmployeeID', [resultSnapshotId]);
+        const afterRowsHash = phase2.rowsHash(merged), accountReadyCount = merged.filter(item => Boolean(item.accountReady)).length;
+        await connection.query("UPDATE SafetyVote_EligibilitySnapshots SET Status='superseded' WHERE id=? AND Status='frozen'", [source.id]);
+        await connection.query("UPDATE SafetyVote_EligibilitySnapshots SET Status='frozen',RowsHash=?,EligibleCount=?,AccountReadyCount=?,FrozenAt=NOW(),FrozenBy=? WHERE id=? AND Status='building'", [afterRowsHash, merged.length, accountReadyCount, actor(req), resultSnapshotId]);
+        await connection.query("UPDATE SafetyVote_EligibilityAmendments SET ResultSnapshotID=?,Status='Applied',AddedCount=0,SkippedCount=0,AfterRowsHash=?,AppliedBy=?,AppliedAt=NOW(),MetadataJson=? WHERE id=?", [resultSnapshotId, afterRowsHash, actor(req), JSON.stringify({ employeeId, removedCount: 1, removalPolicy: 'unstarted_only', addOnly: false }), amendmentId]);
+        await appendEvent(connection, req, amendment, 'REMOVAL_APPLIED', 'Approved', 'Applied', reason, { employeeId, sourceSnapshotId: Number(source.id), resultSnapshotId, removedCount: 1, afterRowsHash }, eventHash, 3);
+        await connection.query('INSERT INTO SafetyVote_AuditLogs(CampaignID,CampaignVersionID,ActorEmployeeID,ActorRole,Action,TargetType,TargetID,StatusCode,BoundedDetail,MetadataJson,IPAddress,UserAgent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', [id, current.CurrentVersionID, actor(req), role(req), 'SAFETY_VOTE_ELIGIBILITY_INDIVIDUAL_REMOVED', 'SafetyVote_EligibilityAmendment', String(amendmentId), 201, `employee=${employeeId}; sourceSnapshot=${source.id}; resultSnapshot=${resultSnapshotId}`, JSON.stringify({ employeeId, sourceSnapshotId: Number(source.id), resultSnapshotId, beforeRowsHash: source.RowsHash, afterRowsHash, candidateSetHash, removalPolicy: 'unstarted_only', protectedActivity, removedCount: 1 }), req.ip || null, String(req.headers?.['user-agent'] || '').slice(0, 255) || null]);
+        await connection.commit();
+        return res.status(201).json({ success: true, data: { contractVersion: '2026-10-24-safety-vote-eligibility-removal-r1', amendmentId, status: 'Applied', employeeId, employeeName: candidate.employeeName, sourceSnapshotId: Number(source.id), resultSnapshotId, snapshotNo: Number(next.snapshotNo), removedCount: 1, afterRowsHash, replayed: false } });
+    } catch (error) { await connection.rollback().catch(() => {}); if (error?.code === 'ER_DUP_ENTRY') return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'The removal was already requested.'); console.error('[safety-vote] eligibility removal failed:', error); return fail(res, 500, 'ELIGIBILITY_REMOVAL_FAILED', 'Unable to remove eligibility.'); }
+    finally { connection.release(); }
 });
 
 router.post('/admin/campaigns/:id/eligibility/amendments/apply', permit('SAFETY_VOTE_ELIGIBILITY_MANAGE'), async (req, res) => {

@@ -213,7 +213,13 @@ async function processSchedule() {
 
 async function closeCampaign() {
     await runAction(async () => {
-        await API.post(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/lifecycle/close`, {});
+        const reason = window.prompt('ระบุเหตุผลการปิดก่อนกำหนดอย่างน้อย 10 ตัวอักษร', 'ปิดแคมเปญก่อนกำหนดโดยผู้ดูแลระบบ');
+        if (reason === null) throw new Error('ยกเลิกการปิดแคมเปญแล้ว');
+        if (reason.trim().length < 10) throw new Error('กรุณาระบุเหตุผลอย่างน้อย 10 ตัวอักษร');
+        const expected = `CLOSE ${state.campaign.CampaignCode || state.campaign.campaignCode}`;
+        const confirmation = window.prompt(`พิมพ์ข้อความนี้ให้ตรงทุกตัวอักษรเพื่อยืนยัน:\n${expected}`, '');
+        if (confirmation !== expected) throw new Error('ข้อความยืนยันไม่ถูกต้อง');
+        await API.post(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/lifecycle/close-early`, { reason: reason.trim(), confirmation });
         state.campaign.Status = 'Closed';
         await loadData();
     }, 'ปิดรับคะแนนแล้ว พร้อมสร้าง Result Snapshot');

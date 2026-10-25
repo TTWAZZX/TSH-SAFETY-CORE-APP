@@ -25,7 +25,7 @@ function branding_normalize(array $raw = []): array
     $tagline = $text($raw['tagline'] ?? 'TSH Safety Core Activity', 80) ?: 'TSH Safety Core Activity';
     $safeUrl = static function ($value) use ($text): string {
         $url = $text($value, 1024);
-        return $url === '' || str_starts_with($url, '/') || preg_match('/^https:\/\//i', $url) ? $url : '';
+        return $url === '' || strpos($url, '/') === 0 || preg_match('/^https:\/\//i', $url) ? $url : '';
     };
     $tone = in_array((string) ($raw['loginAnnouncementTone'] ?? ''), ['info', 'warning', 'critical'], true)
         ? (string) $raw['loginAnnouncementTone']

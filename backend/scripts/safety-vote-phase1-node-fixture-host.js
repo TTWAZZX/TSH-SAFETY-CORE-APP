@@ -15,6 +15,7 @@ const users={
     'sv-admin':{id:'SV-ADMIN',name:'Safety Vote Admin',role:'Admin',department:'Safety',unit:'Core',position:'Officer'},
     'sv-user':{id:'SV-USER',name:'Safety Vote User',role:'User',department:'Production',unit:'Line 1',position:'Operator'},
     'sv-user2':{id:'SV-USER2',name:'Safety Vote User Two',role:'User',department:'Production',unit:'Line 1',position:'Operator'},
+    'sv-observer':{id:'SV-OBSERVER',name:'Safety Vote Observer',role:'User',department:'Production',unit:'Line 1',position:'Operator'},
     'sv-ops-limited':{id:'SV-OPS-LIMITED',name:'Operations Viewer',role:'User',department:'Safety',unit:'Core',position:'Officer'},
     'sv-ops-denied':{id:'SV-OPS-DENIED',name:'Operations Denied',role:'User',department:'Safety',unit:'Core',position:'Officer'},
     'sv-cert-one':{id:'SV-CERT-ONE',name:'Independent Certifier One',role:'User',department:'Safety',unit:'Core',position:'Officer'},
@@ -30,6 +31,7 @@ const app=express();
 app.use(express.json({limit:'1mb'}));
 app.use('/public',express.static(path.join(root,'public')));
 app.get('/__phase2-browser',(_req,res)=>res.type('html').send(`<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#f8fafc;font-family:Arial,sans-serif}button,input,select,textarea,a{min-height:44px}a{display:inline-flex;align-items:center}*{box-sizing:border-box}</style><body><main id="safety-vote-page"></main><script>window.API_BASE=location.origin+'/api';window.TSHSession={getToken:()=> 'sv-user',logout:()=>{}};</script><script type="module">import {loadSafetyVotePage} from '/public/js/pages/safety-vote.js';loadSafetyVotePage();</script></body></html>`));
+app.get('/__company-catalogue',(_req,res)=>res.type('html').send(uxPage({token:'sv-observer',target:'safety-vote-page',modulePath:'/public/js/pages/safety-vote-page-ux1.js',exportName:'loadSafetyVotePage'})));
 app.get('/__phase3-admin-browser',(_req,res)=>res.type('html').send(`<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#f8fafc;font-family:Arial,sans-serif}button,input,select,textarea{min-height:44px;max-width:100%}*{box-sizing:border-box}.hidden{display:none}.flex,.grid{display:flex;flex-wrap:wrap;gap:8px}.overflow-x-auto{max-width:100%;overflow-x:auto}main,section{max-width:100%}table{max-width:100%}</style><body><main id="safety-vote-admin"></main><script>window.API_BASE=location.origin+'/api';window.TSHSession={getToken:()=> 'sv-admin',logout:()=>{}};window.XLSX={};window.jspdf={};</script><script type="module">import {renderSafetyVoteFoundation} from '/public/js/pages/admin-safety-vote.js';renderSafetyVoteFoundation(document.getElementById('safety-vote-admin'));</script></body></html>`));
 function uxPage({token,target,modulePath,exportName}){return`<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="/public/style.css"><style>body{margin:0;background:#f8fafc;font-family:Arial,sans-serif}*{box-sizing:border-box}.hidden{display:none}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}main{width:100%;min-height:100vh}</style></head><body><main id="${target}"></main><script>window.API_BASE=location.origin+'/api';window.__TSH_FEATURE_FLAGS__={safetyVoteUxV1:true,safetyVoteEngagementV1:true};window.TSHSession={getToken:()=> '${token}',logout:()=>{}};window.XLSX={};window.jspdf={};window.qrcode=()=>({addData:()=>{},make:()=>{},createDataURL:()=> 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='});</script><script type="module">import {${exportName}} from '${modulePath}';${exportName}(${target==='safety-vote-admin'?`document.getElementById('${target}')`:''});</script></body></html>`;}
 app.get('/__ux1-admin',(_req,res)=>res.type('html').send(uxPage({token:'sv-admin',target:'safety-vote-admin',modulePath:'/public/js/pages/admin-safety-vote-ux1.js',exportName:'renderSafetyVoteFoundation'})));
@@ -52,6 +54,8 @@ app.post('/__fixture/module/:enabled',async(req,res)=>{if(req.user.role!=='Admin
 app.use('/api/safety-vote',safetyVoteRoutes.operationalGate);
 app.use('/api/safety-vote',safetyVoteRoutes);
 app.use('/api/safety-vote',safetyVoteEligibilityAmendmentRoutes);
+app.use('/api/safety-vote',require('../routes/safety-vote-company-visibility-remediation'));
+app.use('/api/safety-vote',require('../routes/safety-vote-gallery'));
 app.use('/api/safety-vote',require('../routes/safety-vote-engagement'));
 app.use('/api/safety-vote',require('../routes/safety-vote-planning'));
 app.use('/api/safety-vote',require('../routes/safety-vote-analytics'));

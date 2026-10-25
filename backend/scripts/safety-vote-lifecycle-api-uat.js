@@ -200,7 +200,11 @@ async function main() {
     admin = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS });
     for (const name of Object.values(names)) { assert(guard.test(name)); await admin.query(`CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`); await seed(name); }
     children.push(spawn(process.execPath, [path.join(__dirname, 'safety-vote-phase1-node-fixture-host.js')], { cwd: root, env: { ...process.env, DB_NAME: names.node, SAFETY_VOTE_FIXTURE_DB: names.node, SAFETY_VOTE_FIXTURE_PORT: '5191' }, stdio: 'ignore', windowsHide: true }));
-    children.push(spawn(process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe', ['-d', 'display_errors=0', '-S', '127.0.0.1:5192', path.join(__dirname, 'safety-vote-phase1-php-router.php')], { cwd: root, env: { ...process.env, DB_NAME: names.php }, stdio: 'ignore', windowsHide: true }));
+    const phpBin = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
+    const phpArgs = ['-d', 'display_errors=0'];
+    if (process.platform === 'win32' && fs.existsSync(path.join(path.dirname(phpBin), 'ext', 'php_zip.dll'))) phpArgs.push('-d', 'extension=zip');
+    phpArgs.push('-S', '127.0.0.1:5192', path.join(__dirname, 'safety-vote-phase1-php-router.php'));
+    children.push(spawn(phpBin, phpArgs, { cwd: root, env: { ...process.env, DB_NAME: names.php }, stdio: 'ignore', windowsHide: true }));
     await Promise.all([waitReady('http://127.0.0.1:5191/__ready'), waitReady('http://127.0.0.1:5192/__ready')]);
     await lifecycle('node', 'http://127.0.0.1:5191/api/safety-vote');
     await lifecycle('php', 'http://127.0.0.1:5192/api/safety-vote');

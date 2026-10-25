@@ -1,6 +1,6 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
-import { renderSafetyVoteFoundation as renderLegacySafetyVoteFoundation } from './admin-safety-vote.js?v=20261008-safety-vote-phase4-r1';
+import { renderSafetyVoteFoundation as renderLegacySafetyVoteFoundation } from './admin-safety-vote.js?v=20261024-safety-vote-gallery-r1';
 import {
     isSafetyVoteUxV1Enabled,
     isSafetyVoteEngagementV1Enabled,
@@ -11,14 +11,14 @@ import {
     safetyVoteStatusBadge
 } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9a-r1';
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
-import { CORE_TEMPLATES } from './safety-vote-wizard-model.mjs?v=20261015-safety-vote-live-results-r1';
-import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261019-safety-vote-account-advisory-r1';
-import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261020-safety-vote-duplicate-media-r3';
-import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261020-eligibility-reporting-r1';
+import { CORE_TEMPLATES } from './safety-vote-wizard-model.mjs?v=20261025-company-wide-visibility-r1';
+import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261025-result-release-policy-r1';
+import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261025-close-finalization-r1';
+import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261025-result-release-policy-r1';
 import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261015-safety-vote-thai-time-r1';
 import { renderSafetyVotePlanningWorkspace } from './admin-safety-vote-planning.js?v=20261020-safety-vote-response-images-r1';
-import { renderSafetyVoteReviewWorkspace } from './admin-safety-vote-review.js?v=20261015-safety-vote-thai-time-r1';
-import { renderSafetyVoteEligibilityWorkspace } from './admin-safety-vote-eligibility.js?v=20261020-eligibility-auto-enrollment-r2';
+import { renderSafetyVoteReviewWorkspace } from './admin-safety-vote-review.js?v=20261024-safety-vote-gallery-r1';
+import { renderSafetyVoteEligibilityWorkspace } from './admin-safety-vote-eligibility.js?v=20261024-eligibility-removal-r1';
 import { bangkokInputToIso, formatThaiDateTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const VIEW_LABELS = {
@@ -191,12 +191,18 @@ function visibleCampaigns() {
 }
 
 function governanceBadges(row) {
+    if (Number(row.PendingDraftVersionID) > 0) {
+        const test = Number(row.IsTest) === 1 ? '<span class="sv-status-badge sv-status-badge--warning">TEST</span>' : '';
+        const hidden = Number(row.IsHidden) === 1 ? '<span class="sv-status-badge">ซ่อนอยู่</span>' : '';
+        return `${test}${hidden}<span class="sv-status-badge sv-status-badge--warning">มี Draft V${Number(row.PendingDraftVersionNo || 0)} รอแก้ไข</span>`;
+    }
     return `${Number(row.IsTest) === 1 ? '<span class="sv-status-badge sv-status-badge--warning">TEST</span>' : ''}${Number(row.IsHidden) === 1 ? '<span class="sv-status-badge">ซ่อนอยู่</span>' : ''}`;
 }
 
 function governanceActions(row) {
     const status=String(row.Status||''),hidden=Number(row.IsHidden)===1,test=Number(row.IsTest)===1,id=Number(row.id);
     const items=[];
+    if (Number(row.PendingDraftVersionID) > 0) items.push(`<button type="button" data-sv-action="open-versions">เปิด Draft V${Number(row.PendingDraftVersionNo || 0)}</button>`);
     if (!['Archived','Voided'].includes(status)) items.push(`<button type="button" data-sv-governance="${hidden?'unhide':'hide'}" data-campaign-id="${id}">${hidden?'แสดงต่อผู้ใช้':'ซ่อนจากผู้ใช้'}</button>`);
     if (status==='Draft') items.push(`<button type="button" data-sv-governance="${test?'unmark-test':'mark-test'}" data-campaign-id="${id}">${test?'ยกเลิกป้าย Test':'กำหนดเป็น Test'}</button>`);
     if (['Closed','Certified','Published'].includes(status)) items.push(`<button type="button" data-sv-governance="archive" data-campaign-id="${id}">เก็บถาวร</button>`);
@@ -256,9 +262,10 @@ function detailMarkup(row) {
     const draftWarning = String(row.Status).toLowerCase() === 'draft' ? `<div class="sv-readiness-warning" role="status"><strong>ควรตรวจความพร้อมก่อนเปิดแคมเปญ</strong><span>ตรวจเนื้อหา ผู้มีสิทธิ์ กำหนดการ และการแสดงผลให้ครบในพื้นที่จัดการ</span></div>` : '';
     const draft = String(row.Status).toLowerCase() === 'draft';
     const readiness = draft ? draftReadiness(row) : null;
+    const liveJuryAction = row.CampaignType === 'jury_scoring' && ['Scheduled', 'Open'].includes(row.Status) ? '<button type="button" data-sv-action="manage-live-jury">จัดการกรรมการ</button>' : '';
     const actions = draft
         ? `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-edit-draft="${Number(row.id)}">แก้ไขต่อ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div>${duplicateCampaignButton(row.id, 'ทำสำเนาการตั้งค่าและเนื้อหา')}<button type="button" data-sv-action="open-eligibility">จัดการผู้มีสิทธิ์</button><button type="button" data-sv-action="open-workspace">ตั้งค่าขั้นสูง</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`
-        : `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-action="open-operations">ศูนย์ปฏิบัติการ</button><details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div><button type="button" data-sv-action="open-eligibility">จัดการผู้มีสิทธิ์</button><button type="button" data-sv-action="open-results">ผลและการรับรอง</button><button type="button" data-sv-action="open-governance">ธรรมาภิบาล</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`;
+        : `<div class="sv-context-actions"><button type="button" class="sv-button sv-button--primary" data-sv-action="open-operations">ศูนย์ปฏิบัติการ</button>${row.Status === 'Open' ? '<button type="button" class="sv-button sv-button--danger" data-sv-action="close-early">ปิดแคมเปญก่อนกำหนด</button>' : ''}<details><summary class="sv-button sv-button--secondary">เพิ่มเติม</summary><div>${liveJuryAction}<button type="button" data-sv-action="open-eligibility">จัดการผู้มีสิทธิ์</button><button type="button" data-sv-action="open-results">ผลและการรับรอง</button><button type="button" data-sv-action="open-governance">ธรรมาภิบาล</button><button type="button" data-sv-action="open-versions">เวอร์ชันและนโยบาย</button>${governanceActions(row)}</div></details></div>`;
     return `<section class="sv-master-detail__detail" aria-labelledby="sv-detail-title"><div class="sv-detail-header"><div><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h2 id="sv-detail-title" tabindex="-1">${escHtml(row.TitleTh || 'ไม่มีชื่อแคมเปญ')}</h2><p>${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || 'ไม่ระบุประเภท')} · ${escHtml(PRIVACY_LABELS[row.PrivacyMode] || 'ไม่ระบุรูปแบบความเป็นส่วนตัว')}</p><small>แก้ไขล่าสุด ${relativeUpdated(row.UpdatedAt)} โดย ${escHtml(row.OwnerEmployeeID || 'ไม่ระบุผู้รับผิดชอบ')}</small></div><div>${safetyVoteStatusBadge(row.Status)}${governanceBadges(row)}</div></div>${Number(row.IsHidden)===1?`<div class="sv-readiness-warning" role="status"><strong>ผู้ใช้ทั่วไปมองไม่เห็นแคมเปญนี้</strong><span>${escHtml(row.HideReason||'ซ่อนโดยผู้ดูแลระบบ')}</span></div>`:''}${draftWarning}${readiness ? `<section class="sv-detail-readiness" aria-label="ความพร้อมเบื้องต้น"><div><strong>ความพร้อมเบื้องต้น ${readiness.percent}%</strong><span>${readiness.passed} จาก ${readiness.total} หมวด · ตรวจรายละเอียดจริงใน Wizard ก่อนเปิด</span></div><span><i style="width:${readiness.percent}%"></i></span></section>` : ''}<nav class="sv-workspace-nav" aria-label="ส่วนงานสำหรับแคมเปญประเภท ${escHtml(TYPE_LABELS[row.CampaignType] || row.CampaignType || '')}">${sections.map(([key, label], index) => `<button type="button" data-sv-section="${key}" ${index === 0 ? 'aria-current="page"' : ''}>${escHtml(label)}</button>`).join('')}</nav><dl class="sv-detail-summary"><div><dt>ผู้รับผิดชอบ</dt><dd>${escHtml(row.OwnerEmployeeID || 'ยังไม่ระบุ')}</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledOpenAt || row.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${formattedDate(row.ScheduledCloseAt || row.CloseAt)}</dd></div><div><dt>การแสดงผล</dt><dd>${escHtml(RESULT_LABELS[row.ResultVisibility] || 'ตามการตั้งค่าแคมเปญ')}</dd></div></dl>${actions}</section>`;
 }
 
@@ -619,6 +626,28 @@ function openGovernanceWorkspace() {
     renderSafetyVoteGovernanceWorkspace(state.container, { campaign: row, onClose: () => render(), onNavigate: handleJourneyStep });
 }
 
+function closeCampaignEarly() {
+    const row = selectedCampaign();
+    if (!row || row.Status !== 'Open') return;
+    openSafetyVoteReasonDialog({
+        title: 'ปิดแคมเปญก่อนกำหนด',
+        description: 'ระบบจะหยุดรับรายการทันที เก็บหลักฐานเดิมทั้งหมด และคำนวณผลจากข้อมูลที่รับจริงโดยอัตโนมัติ จำนวนผู้ใช้สิทธิ์ไม่ครบจะไม่ขวางการปิดหรือการคำนวณ',
+        label: 'เหตุผลการปิดก่อนกำหนด',
+        confirmLabel: 'ตรวจสอบและปิดต่อ',
+        onConfirm: async reason => {
+            if (reason.trim().length < 10) throw new Error('กรุณาระบุเหตุผลอย่างน้อย 10 ตัวอักษร');
+            const expected = `CLOSE ${row.CampaignCode}`;
+            const confirmation = window.prompt(`พิมพ์ข้อความนี้ให้ตรงทุกตัวอักษรเพื่อยืนยัน:\n${expected}`, '');
+            if (confirmation === null) throw new Error('ยกเลิกการปิดแคมเปญแล้ว');
+            if (confirmation !== expected) throw new Error('ข้อความยืนยันไม่ถูกต้อง');
+            const response = await API.post(`/safety-vote/admin/campaigns/${Number(row.id)}/lifecycle/close-early`, { reason, confirmation });
+            const outcome = response.data?.resultFinalization?.status;
+            await load();
+            showToast(outcome === 'finalized' || outcome === 'already_finalized' ? 'ปิดแคมเปญและสร้าง Result Snapshot อัตโนมัติแล้ว' : 'ปิดแคมเปญแล้ว ระบบบันทึกงานผลลัพธ์ที่ต้องดำเนินการต่อไว้แล้ว', outcome === 'failed' ? 'warning' : 'success');
+        }
+    });
+}
+
 async function openVersionWorkspace() {
     const row = selectedCampaign(); if (!row) return;
     const host = state.container;
@@ -627,9 +656,10 @@ async function openVersionWorkspace() {
     const panel=host.querySelector('.sv-version-workspace');
     try {
         const [history,policy]=await Promise.all([API.get(`/safety-vote/admin/campaigns/${Number(row.id)}/versions`),API.get(`/safety-vote/admin/campaigns/${Number(row.id)}/edit-policy`)]),data=history.data,items=data.versions||[],rule=policy.data?.rules||{};
-        panel.innerHTML=`<header><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h1>เวอร์ชันและนโยบายการแก้ไข</h1><p>เวอร์ชันที่กำลังใช้งานคือ V${Number(items.find(x=>Number(x.id)===Number(data.currentVersionId))?.VersionNo||1)}</p></header><section class="sv-version-policy" role="note"><h2>หลังเปิดแคมเปญแก้อะไรได้บ้าง</h2><ul><li>${escHtml(rule.openCampaign||'เนื้อหา live ถูกล็อก')}</li><li>${escHtml(rule.revision||'สร้าง revision แยกจาก live')}</li><li>${escHtml(rule.activation||'ต้องปิดแคมเปญก่อนสลับเวอร์ชัน')}</li><li>แคมเปญแบบกรรมการ/ผู้สมัคร/เลือกตั้งลับต้องตั้งค่าขั้นสูงและตรวจ readiness ใหม่ใน revision — ระบบไม่คัดลอก assignment หรือผลเดิม</li></ul></section><section><h2>ประวัติเวอร์ชัน</h2><div class="sv-version-list">${items.map(item=>`<article><div><strong>V${Number(item.VersionNo)} · ${escHtml(item.TitleTh||'ไม่มีชื่อ')}</strong><span>${Number(item.id)===Number(data.currentVersionId)?'กำลังใช้งาน':escHtml(item.Status)}</span></div><p>${escHtml(item.ChangeReason||'เวอร์ชันเริ่มต้น')}</p>${item.policy?.activateRevisionAllowed&&Number(item.id)!==Number(data.currentVersionId)?`<label class="svw-field"><span>พิมพ์ ACTIVATE ${escHtml(row.CampaignCode)} V${Number(item.VersionNo)}</span><input data-sv-activate-confirm="${Number(item.id)}"><button type="button" class="sv-button sv-button--primary" data-sv-activate-version="${Number(item.id)}" data-version-no="${Number(item.VersionNo)}">ใช้เวอร์ชันนี้</button></label>`:''}</article>`).join('')}</div></section><section class="sv-version-create"><h2>เตรียม revision ใหม่</h2><p>สร้างสำเนาแบบ Draft โดยไม่กระทบผู้ใช้ในเวอร์ชันปัจจุบัน</p><label class="svw-field"><span>เหตุผลการแก้ไข</span><textarea rows="3" minlength="10" maxlength="500" data-sv-revision-reason></textarea></label><button type="button" class="sv-button sv-button--secondary" data-sv-create-revision>สร้าง Draft revision</button></section>`;
+        const completed=['Closed','Certified','Published'].includes(String(data.campaignStatus));
+        panel.innerHTML=`<header><p class="sv-eyebrow">${escHtml(row.CampaignCode)}</p><h1>เวอร์ชันและนโยบายการแก้ไข</h1><p>เวอร์ชันที่กำลังใช้งานคือ V${Number(items.find(x=>Number(x.id)===Number(data.currentVersionId))?.VersionNo||1)}</p></header><section class="sv-version-policy" role="note"><h2>หลังเปิดแคมเปญแก้อะไรได้บ้าง</h2><ul><li>${escHtml(rule.openCampaign||'เนื้อหา live ถูกล็อก')}</li><li>${escHtml(rule.revision||'สร้าง revision แยกจาก live')}</li><li>${completed?'แคมเปญที่จบแล้วจะสร้างเป็นรอบใหม่ โดย V1 และผลทางการเดิมยังอยู่ใน Catalogue':escHtml(rule.activation||'ต้องปิดแคมเปญก่อนสลับเวอร์ชัน')}</li><li>รูปส่วนตัวและ assignment ต้องตรวจและอัปโหลด/มอบหมายใหม่ในรอบใหม่ เพื่อไม่แชร์สิทธิ์ข้ามแคมเปญโดยไม่ตั้งใจ</li></ul></section><section><h2>ประวัติเวอร์ชัน</h2><div class="sv-version-list">${items.map(item=>`<article><div><strong>V${Number(item.VersionNo)} · ${escHtml(item.TitleTh||'ไม่มีชื่อ')}</strong><span>${Number(item.id)===Number(data.currentVersionId)?'กำลังใช้งาน':escHtml(item.Status)}</span></div><p>${escHtml(item.ChangeReason||'เวอร์ชันเริ่มต้น')}</p>${item.policy?.activateRevisionAllowed&&Number(item.id)!==Number(data.currentVersionId)?`<label class="svw-field"><span>พิมพ์ ${completed?'CREATE NEXT CYCLE':'ACTIVATE'} ${escHtml(row.CampaignCode)} V${Number(item.VersionNo)}</span><input data-sv-activate-confirm="${Number(item.id)}"><button type="button" class="sv-button sv-button--primary" data-sv-activate-version="${Number(item.id)}" data-version-no="${Number(item.VersionNo)}">${completed?'สร้างรอบใหม่โดยรักษาผลเดิม':'ใช้เวอร์ชันนี้'}</button></label>`:''}</article>`).join('')}</div></section><section class="sv-version-create"><h2>เตรียม revision ใหม่</h2><p>สร้างสำเนาแบบ Draft โดยไม่กระทบผู้ใช้ในเวอร์ชันปัจจุบัน</p><label class="svw-field"><span>เหตุผลการแก้ไข</span><textarea rows="3" minlength="10" maxlength="500" data-sv-revision-reason></textarea></label><button type="button" class="sv-button sv-button--secondary" data-sv-create-revision>สร้าง Draft revision</button></section>`;
         panel.querySelector('[data-sv-create-revision]')?.addEventListener('click',async()=>{const reason=panel.querySelector('[data-sv-revision-reason]')?.value.trim()||'';if(reason.length<10){showToast('กรุณาระบุเหตุผลอย่างน้อย 10 ตัวอักษร','warning');return;}try{await API.post(`/safety-vote/admin/campaigns/${Number(row.id)}/versions`,{reason});showToast('สร้าง Draft revision แล้ว','success');openVersionWorkspace();}catch(error){showToast(error?.message||'สร้าง revision ไม่สำเร็จ','error');}});
-        panel.querySelectorAll('[data-sv-activate-version]').forEach(button=>button.addEventListener('click',async()=>{const vid=Number(button.dataset.svActivateVersion),versionNo=Number(button.dataset.versionNo),confirmation=panel.querySelector(`[data-sv-activate-confirm="${vid}"]`)?.value||'';try{await API.post(`/safety-vote/admin/campaigns/${Number(row.id)}/versions/${vid}/activate`,{confirmation});showToast('สลับเวอร์ชันแล้ว แคมเปญกลับเป็น Draft และต้องตรวจความพร้อมใหม่','success');await load();}catch(error){showToast(error?.message||`ยังใช้ V${versionNo} ไม่ได้`,'error');}}));
+        panel.querySelectorAll('[data-sv-activate-version]').forEach(button=>button.addEventListener('click',async()=>{const vid=Number(button.dataset.svActivateVersion),versionNo=Number(button.dataset.versionNo),completed=['Closed','Certified','Published'].includes(String(data.campaignStatus)),confirmation=panel.querySelector(`[data-sv-activate-confirm="${vid}"]`)?.value||'',expected=completed?`CREATE NEXT CYCLE ${row.CampaignCode} V${versionNo}`:`ACTIVATE ${row.CampaignCode} V${versionNo}`;if(confirmation!==expected){showToast(`กรุณาพิมพ์ ${expected}`,'warning');return;}try{const result=await API.post(`/safety-vote/admin/campaigns/${Number(row.id)}/versions/${vid}/${completed?'activate-next-cycle':'activate'}`,{confirmation});showToast(completed?`สร้างรอบใหม่ ${result.data?.targetCampaignCode||''} แล้ว โดยผลเดิมยังคงอยู่`:'สลับเวอร์ชันแล้ว แคมเปญกลับเป็น Draft และต้องตรวจความพร้อมใหม่','success');await load();}catch(error){showToast(error?.message||`ยังใช้ V${versionNo} ไม่ได้`,'error');}}));
     } catch(error) { panel.innerHTML=`<div class="sv-state-panel sv-state-panel--error" role="alert"><h1>โหลดเวอร์ชันไม่สำเร็จ</h1><p>${escHtml(error?.message||'กรุณาลองใหม่')}</p></div>`; }
 }
 
@@ -641,10 +671,12 @@ function handleAction(action) {
     if (action === 'close-drawer') { state.drawerOpen = false; render(); return; }
     if (action === 'new-campaign') { openCreationLauncher(); return; }
     if (action === 'open-operations') { openOperationsWorkspace(); return; }
+    if (action === 'close-early') { closeCampaignEarly(); return; }
     if (action === 'open-eligibility') { openEligibilityWorkspace(); return; }
     if (action === 'open-results') { openResultsWorkspace(); return; }
     if (action === 'open-governance') { openGovernanceWorkspace(); return; }
     if (action === 'open-versions') { openVersionWorkspace(); return; }
+    if (action === 'manage-live-jury') { const row = selectedCampaign(); if (row) openCampaignWizard(Number(row.id)); return; }
     if (action === 'open-workspace') {
         const row = selectedCampaign();
         if (!row) return;

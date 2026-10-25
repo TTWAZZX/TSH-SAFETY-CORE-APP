@@ -120,7 +120,11 @@ CREATE TABLE IF NOT EXISTS SafetyVote_EligibilityAmendmentEvents (
 INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
 ('schema_version','2026-10-20-eligibility-amendments-r1','migration'),
 ('eligibility_amendment_contract','2026-10-20-safety-vote-eligibility-amendments-r1','migration'),
-('eligibility_amendment_enabled','0','migration'),
 ('eligibility_amendment_default_mode','closed_after_open','migration'),
 ('eligibility_amendment_allowed_modes','closed_after_open,admin_approval,automatic_rule_match','migration')
 ON DUPLICATE KEY UPDATE SettingValue=VALUES(SettingValue),UpdatedBy='migration';
+
+-- First install is fail-closed; rerunning this migration must not silently disable
+-- a feature gate that was explicitly activated after deployment.
+INSERT IGNORE INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
+('eligibility_amendment_enabled','0','migration');

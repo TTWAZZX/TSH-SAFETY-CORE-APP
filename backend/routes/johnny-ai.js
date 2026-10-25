@@ -8,7 +8,7 @@ const zlib = require('zlib');
 const XLSX = require('xlsx');
 const db = require('../db');
 const { isAdmin } = require('../middleware/auth');
-const { uploadsDir, cleanOriginalFilename, deleteLocalUpload } = require('../storage');
+const { uploadsDir, cleanOriginalFilename, deleteLocalUpload, availablePublicUploadUrl } = require('../storage');
 const {
     searchSystemUsageKnowledge,
     usageContextText,
@@ -2149,7 +2149,7 @@ router.use(async (_req, res, next) => {
 
 router.get('/status', async (req, res) => {
     await ready;
-    const johnnyAvatarUrl = await getAppSetting(JOHNNY_AVATAR_SETTING_KEY);
+    const johnnyAvatarUrl = availablePublicUploadUrl(await getAppSetting(JOHNNY_AVATAR_SETTING_KEY));
     const [[summary]] = await db.query(
         `SELECT COUNT(*) AS total,
                 SUM(IsActive=1 AND IndexedStatus='ready') AS readyDocs,

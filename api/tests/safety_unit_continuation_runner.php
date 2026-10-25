@@ -37,13 +37,13 @@ function safety_test_db(string $scenario): PDO
 
 function safety_requested_unit(string $scenario): string
 {
-    return match ($scenario) {
-        'blank' => " \r\n ",
-        'wrong_department' => 'Unit B',
-        'invalid' => 'Unknown Unit',
-        'already_completed' => 'Unit C',
-        default => " unit a\r\n ",
-    };
+    switch ($scenario) {
+        case 'blank': return " \r\n ";
+        case 'wrong_department': return 'Unit B';
+        case 'invalid': return 'Unknown Unit';
+        case 'already_completed': return 'Unit C';
+        default: return " unit a\r\n ";
+    }
 }
 
 function safety_state(PDO $pdo): array

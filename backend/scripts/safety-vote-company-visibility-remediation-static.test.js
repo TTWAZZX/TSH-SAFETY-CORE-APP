@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const root=path.resolve(__dirname,'..','..'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
+const node=read('backend/routes/safety-vote-company-visibility-remediation.js'),php=read('api/handlers/safety_vote_company_visibility_remediation.php'),nodeModel=read('backend/services/safety-vote-company-visibility-remediation.js'),phpModel=read('api/lib/safety_vote_company_visibility_remediation.php'),migration=read('backend/migrations/20261025_safety_vote_company_visibility_remediation.sql'),rollback=read('backend/migrations/20261025_safety_vote_company_visibility_remediation_rollback.sql'),server=read('backend/server.js'),index=read('api/index.php');
+for(const source of [node,php])for(const marker of ['company-visibility-remediation/preview','company-visibility-remediation/apply','REMEDIATION_PREVIEW_STALE','ROLLBACK COMPANY VISIBILITY','SAFETY_VOTE_COMPANY_VISIBILITY_REMEDIATED','eligibilityChanged','resultEvidenceChanged'])assert(source.includes(marker),`remediation route missing ${marker}`);
+for(const source of [nodeModel,phpModel])assert(source.includes('REMEDIATE COMPANY VISIBILITY'),'preview model must return exact hash confirmation');
+for(const marker of ['SafetyVote_VisibilityRemediationBatches','SafetyVote_VisibilityRemediationItems','IdempotencyHash','OriginalDiscoveryMode','AppliedRowVersion'])assert(migration.includes(marker),`migration evidence missing ${marker}`);
+assert(rollback.includes("company_visibility_remediation_enabled','0'")&&rollback.includes('Data-preserving rollback'));
+assert(server.includes('safety-vote-company-visibility-remediation'));
+assert(index.includes('handle_safety_vote_company_visibility_remediation_routes'));
+console.log('Safety Vote company visibility remediation static contract: PASS (dry-run, exact hash confirmation, idempotent apply, conflict-safe rollback and audit evidence)');

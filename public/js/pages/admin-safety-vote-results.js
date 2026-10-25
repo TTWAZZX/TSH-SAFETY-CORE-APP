@@ -1,7 +1,7 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { isSafetyVoteUxV1Enabled, safetyVoteJourneyNav, safetyVoteRoleNav, safetyVoteStatusBadge, openSafetyVoteConfirmDialog, openSafetyVoteReasonDialog, openSafetyVoteHashReasonDialog } from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
-import { snapshotList, selectedSnapshot, resultReadiness, verificationChecks, publicPreview, isSecretCampaign } from './safety-vote-results-model.mjs?v=20261008-safety-vote-ux6-r1';
+import { snapshotList, selectedSnapshot, resultReadiness, verificationChecks, publicPreview, isSecretCampaign } from './safety-vote-results-model.mjs?v=20261025-result-release-policy-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const state = { container: null, campaign: null, onClose: null, onNavigate: null, snapshots: [], stages: [], verification: null, published: null, dashboard: null, dashboardLoading: false, selectedId: null, loading: true, denied: false, moduleDisabled: false, error: null, partial: [], busy: false, notice: '', actionError: '', receipt: null };
@@ -37,7 +37,8 @@ function readinessPanel(snapshot, secret) {
 function publicationPanel(snapshot) {
     const preview = publicPreview({ campaign: state.campaign, snapshot, published: state.published });
     if (!preview.visible) return `<div class="svr-publication is-hidden" role="note"><strong>ยังไม่เปิดเผยผล</strong><p>${escHtml(preview.message)}</p><small>Result visibility: ${escHtml(preview.visibility)}</small></div>`;
-    return `<div class="svr-publication is-visible"><strong>ตัวอย่างผลที่เผยแพร่แล้ว</strong><p>${escHtml(preview.message)}</p><div class="svr-public-rows">${preview.rows.map(row => `<article><span>${escHtml(row.positionCode || 'ผลรวม')}</span><strong>อันดับ ${row.rank || '—'}</strong><small>${row.count.toLocaleString('th-TH')} คะแนน/บัตร · ${escHtml(row.state)}</small></article>`).join('')}</div></div>`;
+    const title = preview.noResult ? 'เปิดเผยผลแล้ว · ไม่มีคะแนน' : 'ตัวอย่างผลที่พนักงานเห็น';
+    return `<div class="svr-publication is-visible" data-svr-official-state="${escHtml(preview.officialState || '')}" data-svr-no-result="${preview.noResult ? 'true' : 'false'}"><strong>${title}</strong><p>${escHtml(preview.message)}</p><div class="svr-public-rows">${preview.rows.map(row => `<article><span>${escHtml(row.label || row.positionCode || 'ผลรวม')}</span><strong>${row.rank == null ? 'ไม่มีอันดับ' : `อันดับ ${row.rank}`}</strong><small>${row.count.toLocaleString('th-TH')} คะแนน/บัตร · ${escHtml(row.state)}</small></article>`).join('')}</div></div>`;
 }
 
 function metricLabel(metric) {
@@ -88,6 +89,7 @@ function render() {
     state.selectedId = snapshot?.id || null;
     const partial = state.partial.length ? `<section class="svr-partial-list" aria-labelledby="svr-partial-title"><h2 id="svr-partial-title">ข้อมูลบางส่วนไม่พร้อม</h2>${state.partial.map(item => `<article role="status"><strong>${escHtml(item.label)}</strong><span>${escHtml(item.message)}</span></article>`).join('')}</section>` : '';
     state.container.innerHTML = `<div class="svr-shell" data-sv-results="2026-10-16-campaign-result-dashboard-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svr-hero"><button type="button" class="sv-icon-button" data-svr-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ตรวจสอบและรับรองผล Safety Vote</p><h1>${escHtml(state.campaign.TitleTh || state.campaign.CampaignCode || 'Safety Vote')}</h1><p>${secret ? 'Secret Election · dual control' : 'ผลมาตรฐาน'} · ตรวจ snapshot และ exact hash ก่อนดำเนินการที่ย้อนกลับไม่ได้</p></div>${safetyVoteStatusBadge(state.campaign.Status)}</header>${partial}${state.actionError ? `<div class="svr-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.notice ? `<div class="svr-message is-success" role="status">${escHtml(state.notice)}</div>` : ''}${state.receipt ? `<div class="svr-receipt" role="status"><strong>${escHtml(state.receipt.title)}</strong><span>Snapshot ${Number(state.receipt.snapshotId || 0)} · ${escHtml(state.receipt.status || '')}</span><code>${escHtml(state.receipt.resultHash || '')}</code></div>` : ''}<main class="svr-grid">${dashboardPanel(snapshot)}<section class="svr-panel svr-panel--snapshots" aria-labelledby="svr-snapshots-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Immutable result versions</p><h2 id="svr-snapshots-title">เปรียบเทียบ Snapshot</h2></div><span>${rows.length.toLocaleString('th-TH')} รุ่น</span></div>${snapshotCards(rows, snapshot)}</section><section class="svr-panel" aria-labelledby="svr-readiness-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Readiness</p><h2 id="svr-readiness-title">ความพร้อมและ exact hash</h2></div></div>${readinessPanel(snapshot, secret)}</section><section class="svr-panel" aria-labelledby="svr-governance-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">SHE governance</p><h2 id="svr-governance-title">หลักฐานการควบคุมและความเป็นส่วนตัว</h2></div></div>${verificationPanel(secret)}</section><section class="svr-panel" aria-labelledby="svr-public-title"><div class="svr-panel__heading"><div><p class="sv-eyebrow">Visibility preview</p><h2 id="svr-public-title">ตัวอย่างหลังเผยแพร่</h2></div></div>${publicationPanel(snapshot)}</section></main>${certifierAssignment(secret)}${actions(snapshot, secret)}</div>`;
+    if (state.dashboard?.integrity?.eligible === false) state.container.querySelector('.svr-panel--dashboard')?.insertAdjacentHTML('afterbegin', '<div class="svr-message is-error" role="alert"><strong>Snapshot เก่านี้ถูกตัดออกจากผลอย่างเป็นทางการ</strong><span>พบอันดับใน Snapshot ที่ไม่มีผู้เข้าร่วม ระบบเก็บ exact hash และหลักฐานเดิมไว้ แต่ซ่อนอันดับที่ผิดจากการแสดงผล</span></div>');
     const turnout = state.container.querySelector('.svr-turnout');
     if (turnout && state.dashboard?.eligibilityEvolution) turnout.insertAdjacentHTML('afterend', eligibilityEvolutionPanel(state.dashboard.eligibilityEvolution));
     state.container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'results', campaign: state.campaign, onPage: typeof state.onNavigate !== 'function' }));
@@ -97,6 +99,10 @@ function render() {
 function partialIssue(label, error) {
     const code = error?.code || (error?.status ? `HTTP_${error.status}` : 'UNAVAILABLE');
     return { label, message: `${code} — ไม่ถือว่าผ่าน readiness และส่วนอื่นยังทำงานตามสิทธิ์ที่มี` };
+}
+
+function expectedOfficialResultUnavailable(error) {
+    return Number(error?.status) === 404 && ['RESULT_NOT_AVAILABLE','RESULT_NOT_PUBLISHED','RESULT_NOT_CERTIFIED','RESULT_SNAPSHOT_NOT_AVAILABLE'].includes(String(error?.code || ''));
 }
 
 async function loadData() {
@@ -126,9 +132,9 @@ async function loadData() {
     if (dashboard.status === 'rejected') state.partial.push(partialIssue('Campaign Result Dashboard', dashboard.reason));
     const current = selectedSnapshot(state.snapshots, state.selectedId);
     state.published = null;
-    if (isSecretCampaign(state.campaign) && current?.published) {
-        try { state.published = (await API.get(`/safety-vote/campaigns/${id}/results`, { suppressErrorLog: true })).data; }
-        catch (error) { state.partial.push(partialIssue('ตัวอย่างผลที่เผยแพร่', error)); }
+    if (current && ['Frozen','Certified','Published'].includes(current.status)) {
+        try { state.published = (await API.get(`/safety-vote/campaigns/${id}/official-results`, { suppressErrorLog: true })).data; }
+        catch (error) { if (!expectedOfficialResultUnavailable(error)) state.partial.push(partialIssue('ตัวอย่าง Official Results', error)); }
     }
     state.loading = false; render();
 }

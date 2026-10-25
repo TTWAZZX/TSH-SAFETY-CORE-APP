@@ -25,7 +25,7 @@ async function wait(url) {
 }
 
 async function call(base, route, options = {}) {
-    const headers = { Authorization: `Bearer ${options.token || 'sv-admin'}`, Accept: 'application/json', ...(options.headers || {}) };
+    const headers = { Accept: 'application/json', ...(options.anonymous ? {} : { Authorization: `Bearer ${options.token || 'sv-admin'}` }), ...(options.headers || {}) };
     let body;
     if (options.body !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(options.body); }
     const response = await fetch(`${base}${route}`, { method: options.method || 'GET', headers, body });
@@ -47,7 +47,8 @@ async function seed(databaseName) {
         INSERT INTO Employees VALUES
           ('SV-ADMIN','Safety Vote Admin','Safety','Core','Admin','A','Officer','admin@example.test','hash',0),
           ('SV-USER','Existing Voter','Production','Line 1','User','B','Operator','user@example.test','hash',0),
-          ('SV-USER2','New Voter','Production','Line 1','User','B','Operator','user2@example.test','hash',0);
+          ('SV-USER2','New Voter','Production','Line 1','User','B','Operator','user2@example.test','hash',0),
+          ('SV-OUT','Individual Exception','Safety','Core','Visitor','A','Officer','outside@example.test','hash',0);
     `);
     const migrations = [
         '20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql',
@@ -58,9 +59,11 @@ async function seed(databaseName) {
         '20261010_safety_vote_ux_phase9c_engagement_analytics.sql', '20261015_safety_vote_live_results.sql',
         '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql',
         '20261020_safety_vote_eligibility_amendments.sql',
+        '20261024_safety_vote_eligibility_removal_policy.sql',
     ];
     for (const migration of migrations) await connection.query(fs.readFileSync(path.join(root, 'backend', 'migrations', migration), 'utf8'));
     await connection.query("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='amendment-uat' WHERE SettingKey IN ('module_enabled','engagement_enabled')");
+    await connection.query("INSERT INTO Admin_UserPermissions(employee_id,permission,granted) VALUES('SV-USER2','SAFETY_VOTE_ELIGIBILITY_MANAGE',1)");
     const [campaign] = await connection.query("INSERT INTO SafetyVote_Campaigns(CampaignCode,Status,OwnerEmployeeID,CreatedBy,UpdatedBy,OpenedAt) VALUES('SHE-991-2026','Open','SV-ADMIN','SV-ADMIN','SV-ADMIN',NOW())");
     const [version] = await connection.query("INSERT INTO SafetyVote_CampaignVersions(CampaignID,VersionNo,ContractVersion,CampaignType,PrivacyMode,TitleTh,Status,EligibilityEnrollmentMode,CreatedBy,UpdatedBy) VALUES(?,1,'2026-10-08-safety-vote-phase0-r1','popular_vote','identified','Eligibility amendment UAT','Frozen','admin_approval','SV-ADMIN','SV-ADMIN')", [campaign.insertId]);
     await connection.query('UPDATE SafetyVote_Campaigns SET CurrentVersionID=? WHERE id=?', [version.insertId, campaign.insertId]);
@@ -72,32 +75,38 @@ async function seed(databaseName) {
     await connection.query("INSERT INTO SafetyVote_Participation(CampaignID,CampaignVersionID,SnapshotID,EmployeeID,State,AttemptCount,FirstStartedAt,SubmittedAt,LastActivityAt,ReceiptCodeHash) VALUES(?,?,?,'SV-USER','submitted',1,NOW(),NOW(),NOW(),REPEAT('9',64))", [campaign.insertId, version.insertId, snapshot.insertId]);
     const [ballot] = await connection.query("INSERT INTO SafetyVote_Ballots(CampaignVersionID,BallotSequence,PrivacyModeSnapshot,Status,CanonicalBallotHash,IdempotencyHash,SchemaVersion) VALUES(?,1,'identified','Accepted',REPEAT('8',64),REPEAT('7',64),'eligibility-amendment-uat')", [version.insertId]);
     await connection.query("INSERT INTO SafetyVote_BallotIdentities(BallotID,EmployeeID,IdentityMode) VALUES(?,'SV-USER','identified')", [ballot.insertId]);
+    const [resultSnapshot] = await connection.query("INSERT INTO SafetyVote_ResultSnapshots(CampaignID,CampaignVersionID,SnapshotNo,CalculationContract,EligibilitySnapshotID,Status,EligibleCount,ParticipationCount,AcceptedBallotCount,RejectedBallotCount,AbstainCount,QuorumState,TieState,ReconciliationState,InputHash,ResultHash,CalculatedBy,FrozenAt,FrozenBy) VALUES(?,?,1,'eligibility-integrity-uat',?,'Frozen',1,1,1,0,0,'met','none','matched',REPEAT('a',64),REPEAT('b',64),'SV-ADMIN',NOW(),'SV-ADMIN')", [campaign.insertId, version.insertId, snapshot.insertId]);
+    await connection.query("INSERT INTO SafetyVote_ResultRows(ResultSnapshotID,MetricKey,RawCount,Numerator,Denominator,NumericValue,RankNo,ResultState,MetadataJson) VALUES(?,'accepted_ballots',1,1,1,1,1,'normal','{\"fixture\":true}')", [resultSnapshot.insertId]);
+    await connection.query("INSERT INTO SafetyVote_Certifications(ResultSnapshotID,CertifierEmployeeID,CertificationRole,Decision,Reason,ResultHashSnapshot) VALUES(?,'SV-ADMIN','certifier','certified','Frozen result integrity fixture',REPEAT('b',64))", [resultSnapshot.insertId]);
     await connection.end();
-    return { campaignId: Number(campaign.insertId), versionId: Number(version.insertId), sourceSnapshotId: Number(snapshot.insertId) };
+    return { campaignId: Number(campaign.insertId), versionId: Number(version.insertId), sourceSnapshotId: Number(snapshot.insertId), resultSnapshotId: Number(resultSnapshot.insertId) };
 }
 
 async function inspect(databaseName, fixture) {
     const connection = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: databaseName });
     try {
-        const [[counts]] = await connection.query("SELECT (SELECT COUNT(*) FROM SafetyVote_EligibilityAmendments) amendments,(SELECT COUNT(*) FROM SafetyVote_EligibilityAmendmentMembers) members,(SELECT COUNT(*) FROM SafetyVote_EligibilityAmendmentEvents) events,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE Action='SAFETY_VOTE_ELIGIBILITY_AMENDMENT_APPLIED') audits,(SELECT COUNT(*) FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen') frozen,(SELECT COUNT(*) FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='superseded') superseded,(SELECT COUNT(*) FROM SafetyVote_Participation WHERE CampaignVersionID=?) participation,(SELECT COUNT(*) FROM SafetyVote_Ballots WHERE CampaignVersionID=?) ballots", [fixture.versionId, fixture.versionId, fixture.versionId, fixture.versionId]);
+        const [[counts]] = await connection.query("SELECT (SELECT COUNT(*) FROM SafetyVote_EligibilityAmendments) amendments,(SELECT COUNT(*) FROM SafetyVote_EligibilityAmendmentMembers) members,(SELECT COUNT(*) FROM SafetyVote_EligibilityAmendmentEvents) events,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE Action='SAFETY_VOTE_ELIGIBILITY_AMENDMENT_APPLIED') audits,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE Action='SAFETY_VOTE_ELIGIBILITY_INDIVIDUAL_REMOVED') removalAudits,(SELECT COUNT(*) FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen') frozen,(SELECT COUNT(*) FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='superseded') superseded,(SELECT COUNT(*) FROM SafetyVote_Participation WHERE CampaignVersionID=?) participation,(SELECT COUNT(*) FROM SafetyVote_Ballots WHERE CampaignVersionID=?) ballots", [fixture.versionId, fixture.versionId, fixture.versionId, fixture.versionId]);
         const [[current]] = await connection.query("SELECT id,ParentSnapshotID,SnapshotKind,EligibleCount,RowsHash FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen'", [fixture.versionId]);
         const [voters] = await connection.query('SELECT EmployeeID,InclusionSource FROM SafetyVote_EligibleVoters WHERE SnapshotID=? ORDER BY EmployeeID', [current.id]);
         const [events] = await connection.query('SELECT AmendmentID,EventSequence,EventHash,PreviousEventHash FROM SafetyVote_EligibilityAmendmentEvents ORDER BY AmendmentID,EventSequence');
         const [snapshots] = await connection.query('SELECT id,SnapshotNo,ParentSnapshotID,SnapshotKind,Status,EligibleCount FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? ORDER BY SnapshotNo', [fixture.versionId]);
         const [[vote]] = await connection.query("SELECT p.SnapshotID,p.State,p.AttemptCount,p.ReceiptCodeHash,b.Status ballotStatus,b.CanonicalBallotHash,bi.EmployeeID identityEmployeeId FROM SafetyVote_Participation p JOIN SafetyVote_BallotIdentities bi ON bi.EmployeeID=p.EmployeeID JOIN SafetyVote_Ballots b ON b.id=bi.BallotID AND b.CampaignVersionID=p.CampaignVersionID WHERE p.CampaignVersionID=? AND p.EmployeeID='SV-USER'", [fixture.versionId]);
-        assert.deepEqual(Object.values(counts).map(Number), [2, 2, 6, 2, 1, 2, 1, 1]);
-        assert.equal(snapshots.length, 3);
+        const [[resultEvidence]] = await connection.query("SELECT rs.id,rs.EligibilitySnapshotID,rs.Status,rs.EligibleCount,rs.ParticipationCount,rs.AcceptedBallotCount,rs.InputHash,rs.ResultHash,(SELECT COUNT(*) FROM SafetyVote_ResultRows rr WHERE rr.ResultSnapshotID=rs.id) resultRows,(SELECT COUNT(*) FROM SafetyVote_Certifications c WHERE c.ResultSnapshotID=rs.id AND c.Decision='certified' AND c.RevokedAt IS NULL) certifications FROM SafetyVote_ResultSnapshots rs WHERE rs.id=?", [fixture.resultSnapshotId]);
+        assert.deepEqual(Object.values(counts).map(Number), [4, 4, 12, 2, 1, 1, 4, 1, 1]);
+        assert.equal(snapshots.length, 5);
         assert.equal(Number(snapshots[0].id), fixture.sourceSnapshotId);
         assert.equal(snapshots[0].ParentSnapshotID, null);
         assert.equal(Number(snapshots[1].ParentSnapshotID), Number(snapshots[0].id));
         assert.equal(Number(snapshots[2].ParentSnapshotID), Number(snapshots[1].id));
-        assert.equal(Number(current.ParentSnapshotID), Number(snapshots[1].id));
+        assert.equal(Number(snapshots[3].ParentSnapshotID), Number(snapshots[2].id));
+        assert.equal(Number(snapshots[4].ParentSnapshotID), Number(snapshots[3].id));
+        assert.equal(Number(current.ParentSnapshotID), Number(snapshots[3].id));
         assert.equal(current.SnapshotKind, 'amendment');
         assert.equal(Number(current.EligibleCount), 3);
         assert.deepEqual(voters.map(row => row.EmployeeID), ['SV-USER', 'SV-USER2', 'SV-USER3']);
-        assert.equal(voters[0].InclusionSource, 'rule');
-        assert.equal(voters[1].InclusionSource, 'eligibility_amendment');
-        assert.equal(voters[2].InclusionSource, 'eligibility_amendment');
+        assert.equal(voters.find(row => row.EmployeeID === 'SV-USER').InclusionSource, 'rule');
+        assert.equal(voters.find(row => row.EmployeeID === 'SV-USER2').InclusionSource, 'eligibility_amendment');
+        assert.equal(voters.find(row => row.EmployeeID === 'SV-USER3').InclusionSource, 'eligibility_amendment');
         for (let index = 0; index < events.length; index++) {
             if (index % 3 === 0) assert.equal(events[index].PreviousEventHash, null);
             else assert.equal(events[index].PreviousEventHash, events[index - 1].EventHash);
@@ -109,12 +118,19 @@ async function inspect(databaseName, fixture) {
         assert.equal(vote.ballotStatus, 'Accepted');
         assert.equal(vote.CanonicalBallotHash, '8'.repeat(64));
         assert.equal(vote.identityEmployeeId, 'SV-USER');
-        return { rowsHash: current.RowsHash, eventHashes: events.map(row => row.EventHash) };
+        assert.equal(Number(resultEvidence.id), fixture.resultSnapshotId);
+        assert.equal(Number(resultEvidence.EligibilitySnapshotID), fixture.sourceSnapshotId, 'frozen result must retain original eligibility snapshot');
+        assert.deepEqual([resultEvidence.Status, Number(resultEvidence.EligibleCount), Number(resultEvidence.ParticipationCount), Number(resultEvidence.AcceptedBallotCount)], ['Frozen', 1, 1, 1]);
+        assert.equal(resultEvidence.InputHash, 'a'.repeat(64));
+        assert.equal(resultEvidence.ResultHash, 'b'.repeat(64));
+        assert.deepEqual([Number(resultEvidence.resultRows), Number(resultEvidence.certifications)], [1, 1], 'result rows and certification must remain intact');
+        return { rowsHash: current.RowsHash, eventHashes: events.map(row => row.EventHash), resultEvidence: { eligibilitySnapshotId: Number(resultEvidence.EligibilitySnapshotID), status: resultEvidence.Status, eligibleCount: Number(resultEvidence.EligibleCount), participationCount: Number(resultEvidence.ParticipationCount), acceptedBallotCount: Number(resultEvidence.AcceptedBallotCount), inputHash: resultEvidence.InputHash, resultHash: resultEvidence.ResultHash, resultRows: Number(resultEvidence.resultRows), certifications: Number(resultEvidence.certifications) } };
     } finally { await connection.end(); }
 }
 
 async function lifecycle(label, base, databaseName, fixture, concurrentBase = base) {
     const route = `/admin/campaigns/${fixture.campaignId}/eligibility/amendments`;
+    const removalRoute = `/admin/campaigns/${fixture.campaignId}/eligibility/removals/individual`;
     const beforeDiscovery = await call(base, '/me/campaigns', { token: 'sv-user2' });
     assert.equal(beforeDiscovery.status, 200, `${label} discovery before amendment`);
     assert.equal(beforeDiscovery.data.data.eligibilitySource, 'latest_frozen_snapshot');
@@ -122,7 +138,9 @@ async function lifecycle(label, base, databaseName, fixture, concurrentBase = ba
     const initialDiscovery = await call(base, '/me/campaigns', { token: 'sv-user' });
     assert.equal(initialDiscovery.status, 200, `${label} initial voter discovery`);
     assert.equal(initialDiscovery.data.data.rows.find(row => Number(row.id) === fixture.campaignId)?.EligibilityOrigin, 'initial_snapshot', `${label} initial voter must retain its eligibility origin`);
+    assert.equal((await call(base, route, { anonymous: true })).status, 401, `${label} anonymous access must fail closed`);
     assert.equal((await call(base, route, { token: 'sv-user' })).status, 403, `${label} permission boundary`);
+    assert.equal((await call(base, route, { token: 'sv-user2' })).status, 200, `${label} explicit user permission must be honored`);
     let overview = await call(base, route);
     assert.equal(overview.status, 200, `${label} disabled overview remains readable`);
     assert.equal(overview.data.data.featureEnabled, false);
@@ -141,6 +159,51 @@ async function lifecycle(label, base, databaseName, fixture, concurrentBase = ba
     assert.equal(closedPreview.data.code, 'ELIGIBILITY_ENROLLMENT_CLOSED');
     const reopenedPolicy = await call(base, `/admin/campaigns/${fixture.campaignId}/eligibility/enrollment-mode`, { method: 'PUT', body: { enrollmentMode: 'admin_approval', reason: 'Guarded UAT reopens admin-approved enrollment', confirmation: 'SET SHE-991-2026 admin_approval' } });
     assert.equal(reopenedPolicy.status, 200, JSON.stringify(reopenedPolicy.data));
+    const individualBody = { employeeId: 'SV-OUT', reason: 'Approved individual exception after campaign opening', confirmation: 'ADD SHE-991-2026 SV-OUT' };
+    const wrongIndividualConfirmation = await call(base, `${route}/individual`, { method: 'POST', body: { ...individualBody, confirmation: 'ADD SHE-991-2026 SV-USER2' }, headers: { 'Idempotency-Key': `${label}-individual-wrong-0001` } });
+    assert.equal(wrongIndividualConfirmation.status, 400, JSON.stringify(wrongIndividualConfirmation.data));
+    assert.equal(wrongIndividualConfirmation.data.code, 'AMENDMENT_CONFIRMATION_REQUIRED');
+    const individual = await call(base, `${route}/individual`, { method: 'POST', body: individualBody, headers: { 'Idempotency-Key': `${label}-individual-add-0001` } });
+    assert.equal(individual.status, 201, JSON.stringify(individual.data));
+    assert.equal(individual.data.data.employeeId, 'SV-OUT');
+    assert.equal(individual.data.data.addedCount, 1);
+    const individualReplay = await call(base, `${route}/individual`, { method: 'POST', body: individualBody, headers: { 'Idempotency-Key': `${label}-individual-add-0001` } });
+    assert.equal(individualReplay.status, 200, JSON.stringify(individualReplay.data));
+    assert.equal(individualReplay.data.data.replayed, true);
+    const individualDuplicate = await call(base, `${route}/individual`, { method: 'POST', body: individualBody, headers: { 'Idempotency-Key': `${label}-individual-add-0002` } });
+    assert.equal(individualDuplicate.status, 409, JSON.stringify(individualDuplicate.data));
+    assert.equal(individualDuplicate.data.code, 'ELIGIBILITY_ALREADY_GRANTED');
+    const verifyIndividual = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: databaseName });
+    const [[afterIndividual]] = await verifyIndividual.query('SELECT COUNT(*) total FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=?', [fixture.versionId]);
+    await verifyIndividual.end();
+    assert.equal(Number(afterIndividual.total), Number(before.total) + 1, `${label} individual add must create exactly one snapshot`);
+    const removalBody = { employeeId: 'SV-OUT', reason: 'Employee transferred before starting campaign activity', confirmation: 'REMOVE SHE-991-2026 SV-OUT' };
+    const removalDisabled = await call(base, removalRoute, { method: 'POST', body: removalBody, headers: { 'Idempotency-Key': `${label}-removal-disabled-0001` } });
+    assert.equal(removalDisabled.status, 503, JSON.stringify(removalDisabled.data));
+    assert.equal(removalDisabled.data.code, 'ELIGIBILITY_REMOVAL_DISABLED');
+    const enableRemoval = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: databaseName });
+    await enableRemoval.query("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='removal-uat' WHERE SettingKey='eligibility_removal_enabled'");
+    await enableRemoval.end();
+    const protectedRemoval = await call(base, removalRoute, { method: 'POST', body: { employeeId: 'SV-USER', reason: 'Attempt removal of submitted participant for policy test', confirmation: 'REMOVE SHE-991-2026 SV-USER' }, headers: { 'Idempotency-Key': `${label}-removal-protected-0001` } });
+    assert.equal(protectedRemoval.status, 409, JSON.stringify(protectedRemoval.data));
+    assert.equal(protectedRemoval.data.code, 'ELIGIBILITY_REMOVAL_PROTECTED_ACTIVITY');
+    const wrongRemoval = await call(base, removalRoute, { method: 'POST', body: { ...removalBody, confirmation: 'REMOVE SHE-991-2026 SV-USER2' }, headers: { 'Idempotency-Key': `${label}-removal-wrong-0001` } });
+    assert.equal(wrongRemoval.status, 400, JSON.stringify(wrongRemoval.data));
+    assert.equal(wrongRemoval.data.code, 'REMOVAL_CONFIRMATION_REQUIRED');
+    const removed = await call(base, removalRoute, { method: 'POST', body: removalBody, headers: { 'Idempotency-Key': `${label}-removal-apply-0001` } });
+    assert.equal(removed.status, 201, JSON.stringify(removed.data));
+    assert.equal(removed.data.data.employeeId, 'SV-OUT');
+    assert.equal(removed.data.data.removedCount, 1);
+    const removedReplay = await call(base, removalRoute, { method: 'POST', body: removalBody, headers: { 'Idempotency-Key': `${label}-removal-apply-0001` } });
+    assert.equal(removedReplay.status, 200, JSON.stringify(removedReplay.data));
+    assert.equal(removedReplay.data.data.replayed, true);
+    const removedDuplicate = await call(base, removalRoute, { method: 'POST', body: removalBody, headers: { 'Idempotency-Key': `${label}-removal-apply-0002` } });
+    assert.equal(removedDuplicate.status, 409, JSON.stringify(removedDuplicate.data));
+    assert.equal(removedDuplicate.data.code, 'ELIGIBILITY_NOT_ACTIVE');
+    const verifyRemoval = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: databaseName });
+    const [[afterRemoval]] = await verifyRemoval.query('SELECT COUNT(*) total FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=?', [fixture.versionId]);
+    await verifyRemoval.end();
+    assert.equal(Number(afterRemoval.total), Number(before.total) + 2, `${label} governed removal must create exactly one additional snapshot`);
     response = await call(base, `${route}/preview`, { method: 'POST', body: {} });
     assert.equal(response.status, 200, JSON.stringify(response.data));
     const data = response.data.data;
@@ -152,7 +215,7 @@ async function lifecycle(label, base, databaseName, fixture, concurrentBase = ba
     const verifyPreview = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: databaseName });
     const [[afterPreview]] = await verifyPreview.query('SELECT COUNT(*) total FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=?', [fixture.versionId]);
     await verifyPreview.end();
-    assert.equal(Number(afterPreview.total), Number(before.total), `${label} preview must not mutate`);
+    assert.equal(Number(afterPreview.total), Number(afterRemoval.total), `${label} preview must not mutate`);
     const body = { reason: 'New employee joined after campaign opening', previewHash: data.previewHash, confirmation: 'APPLY SHE-991-2026' };
     const stale = await call(base, `${route}/apply`, { method: 'POST', body: { ...body, previewHash: '0'.repeat(64) }, headers: { 'Idempotency-Key': `${label}-stale-amendment-0001` } });
     assert.equal(stale.status, 409);
@@ -221,8 +284,9 @@ async function lifecycle(label, base, databaseName, fixture, concurrentBase = ba
     assert.equal(overview.status, 200);
     assert.equal(overview.data.data.currentSnapshot.snapshotKind, 'amendment');
     assert.equal(overview.data.data.currentSnapshot.eligibleCount, 3);
-    assert.equal(overview.data.data.amendments.length, 2);
+    assert.equal(overview.data.data.amendments.length, 4);
     assert.equal(overview.data.data.amendments[0].addedCount, 1);
+    assert.equal(overview.data.data.amendments.find(item => item.requestType === 'individual_remove').removedCount, 1);
     const evidence = await inspect(databaseName, fixture);
     const automaticPolicy = await call(base, `/admin/campaigns/${fixture.campaignId}/eligibility/enrollment-mode`, { method: 'PUT', body: { enrollmentMode: 'automatic_rule_match', reason: 'Guarded UAT enables automatic rule matching', confirmation: 'SET SHE-991-2026 automatic_rule_match' } });
     assert.equal(automaticPolicy.status, 200, JSON.stringify(automaticPolicy.data));
@@ -257,7 +321,7 @@ async function lifecycle(label, base, databaseName, fixture, concurrentBase = ba
     const [[automaticCounts]] = await verifyAutomatic.query("SELECT (SELECT COUNT(*) FROM SafetyVote_EligibilityAmendments WHERE RequestType='automatic_rule_match' AND Status='Applied') amendments,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE Action='SAFETY_VOTE_ELIGIBILITY_AUTO_ENROLLED') audits,(SELECT COUNT(*) FROM SafetyVote_Notifications WHERE EventType='eligibility_granted' AND Status='Sent') notices,(SELECT COUNT(*) FROM SafetyVote_NotificationDeliveries d JOIN SafetyVote_Notifications n ON n.id=d.NotificationID WHERE n.EventType='eligibility_granted' AND d.DeliveryState='Sent') deliveries,(SELECT EligibleCount FROM SafetyVote_EligibilitySnapshots WHERE CampaignVersionID=? AND Status='frozen' ORDER BY SnapshotNo DESC LIMIT 1) eligible", [fixture.versionId]);
     await verifyAutomatic.end();
     assert.deepEqual([Number(automaticCounts.amendments), Number(automaticCounts.audits), Number(automaticCounts.notices), Number(automaticCounts.deliveries), Number(automaticCounts.eligible)], [1, 1, 1, 1, 4], `${label} automatic enrollment must commit once with notice, delivery, audit and latest snapshot`);
-    console.log(`PASS ${label} open-campaign amendment/automatic discovery enrollment/duplicate guard/submitted-vote preservation/concurrent apply/idempotency/audit`);
+    console.log(`PASS ${label} individual add/governed removal/rule amendment/automatic discovery enrollment/duplicate guard/submitted-vote preservation/concurrent apply/idempotency/audit`);
     return { preview: { ...data, rows: data.rows.map(row => ({ ...row, onboardingStatus: undefined })) }, applied: applied.data.data, overview: overview.data.data, evidence };
 }
 
@@ -284,7 +348,8 @@ async function main() {
     assert.equal(node.preview.previewHash, php.preview.previewHash);
     assert.equal(node.applied.afterRowsHash, php.applied.afterRowsHash);
     assert.deepEqual(node.evidence.eventHashes, php.evidence.eventHashes);
-    console.log('Safety Vote eligibility amendment guarded Node/PHP API UAT: PASS (parity, add-only snapshot lineage, chained audit, zero production access)');
+    assert.deepEqual(node.evidence.resultEvidence, php.evidence.resultEvidence);
+    console.log('Safety Vote eligibility governance guarded Node/PHP API UAT: PASS (response/hash parity, permission matrix, snapshot/ballot/result integrity, chained audit, zero production access)');
 }
 
 main().catch(error => { console.error(error.stack || error); process.exitCode = 1; }).finally(async () => {

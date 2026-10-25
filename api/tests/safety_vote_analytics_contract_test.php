@@ -38,6 +38,6 @@ $assert(count($conflicts) === 2 && $conflicts[0]['windowMinutes'] === 30, 'inter
 $recommendations = sva_recommendations([$campaign], [], $conflicts);
 $assert(count($recommendations) >= 2, 'deterministic recommendations');
 $csv = sva_csv(['campaigns' => [$campaign]]);
-$assert(str_contains($csv, 'SUPPRESSED') && !str_contains($csv, 'EmployeeID'), 'aggregate CSV suppresses low counts and identities');
+$assert(strpos($csv, 'SUPPRESSED') !== false && strpos($csv, 'EmployeeID') === false, 'aggregate CSV suppresses low counts and identities');
 
 echo "Safety Vote UX Phase 9C PHP analytics contract: PASS ({$checks} assertions)\n";

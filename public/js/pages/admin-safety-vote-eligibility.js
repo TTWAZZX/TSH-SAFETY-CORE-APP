@@ -2,6 +2,7 @@ import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { safetyVoteJourneyNav, safetyVoteRoleNav, safetyVoteStatusBadge } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9a-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
+import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
 
 const MODES = {
     closed_after_open: ['ไม่รับผู้มีสิทธิ์ใหม่หลังเปิด', 'ใช้รายชื่อที่ตรึงไว้เท่านั้น เหมาะกับงานที่ต้องการฐานผู้มีสิทธิ์คงที่'],
@@ -9,7 +10,7 @@ const MODES = {
     automatic_rule_match: ['เพิ่มอัตโนมัติเมื่อเข้าเงื่อนไข', 'เมื่อผู้ใช้เปิดรายการหรือรายละเอียดแคมเปญ ระบบตรวจตามกฎและเพิ่มสิทธิ์ให้ทันที พร้อมสร้าง Snapshot และ Audit แบบ Add-only'],
 };
 
-const state = { container: null, campaign: null, onClose: null, onNavigate: null, overview: null, preview: null, loading: true, busy: false, error: null, notice: '' };
+const state = { container: null, campaign: null, onClose: null, onNavigate: null, overview: null, preview: null, individual: null, removal: null, peoplePickerCleanup: null, loading: true, busy: false, error: null, notice: '' };
 const statusAllowsAmendment = status => ['Scheduled', 'Open'].includes(String(status));
 const dateTime = value => value ? formatThaiDateTime(value) : '—';
 const hash = value => value ? `${String(value).slice(0, 12)}…` : '—';
@@ -35,7 +36,26 @@ function policyEditor(data) {
 
 function snapshotMarkup(snapshot) {
     if (!snapshot) return '<div class="sve-empty"><strong>ยังไม่มี Frozen Snapshot</strong><span>กลับไปตรวจและตรึงรายชื่อในขั้นผู้มีสิทธิ์ของ Wizard ก่อน</span></div>';
-    return `<div class="sve-snapshot"><div><strong>Snapshot #${Number(snapshot.snapshotNo)}</strong><span>${snapshot.snapshotKind === 'amendment' ? 'เกิดจากการเพิ่มผู้มีสิทธิ์' : 'รายชื่อเริ่มต้น'}</span></div><dl><div><dt>ผู้มีสิทธิ์</dt><dd>${Number(snapshot.eligibleCount).toLocaleString('th-TH')}</dd></div><div><dt>บัญชีพร้อม</dt><dd>${Number(snapshot.accountReadyCount).toLocaleString('th-TH')}</dd></div><div><dt>ข้อมูลที่ควรติดตาม</dt><dd>${Number(snapshot.warningCount).toLocaleString('th-TH')}</dd></div><div><dt>ตรึงเมื่อ</dt><dd>${dateTime(snapshot.frozenAt)}</dd></div></dl><small>Rows SHA-256: <code>${escHtml(hash(snapshot.rowsHash))}</code></small></div>`;
+    const kind = snapshot.snapshotKind === 'removal' ? 'เกิดจากการนำผู้ไม่มี Activity ออก' : snapshot.snapshotKind === 'amendment' ? 'เกิดจากการเพิ่มผู้มีสิทธิ์' : 'รายชื่อเริ่มต้น';
+    return `<div class="sve-snapshot"><div><strong>Snapshot #${Number(snapshot.snapshotNo)}</strong><span>${kind}</span></div><dl><div><dt>ผู้มีสิทธิ์</dt><dd>${Number(snapshot.eligibleCount).toLocaleString('th-TH')}</dd></div><div><dt>บัญชีพร้อม</dt><dd>${Number(snapshot.accountReadyCount).toLocaleString('th-TH')}</dd></div><div><dt>ข้อมูลที่ควรติดตาม</dt><dd>${Number(snapshot.warningCount).toLocaleString('th-TH')}</dd></div><div><dt>ตรึงเมื่อ</dt><dd>${dateTime(snapshot.frozenAt)}</dd></div></dl><small>Rows SHA-256: <code>${escHtml(hash(snapshot.rowsHash))}</code></small></div>`;
+}
+
+function individualMarkup(data) {
+    if (!statusAllowsAmendment(data.campaign.status) || !data.currentSnapshot) return '<div class="sve-banner"><strong>ยังเพิ่มรายบุคคลไม่ได้</strong><span>ต้องมี Frozen Snapshot และแคมเปญอยู่ในสถานะ Scheduled หรือ Open ก่อน</span></div>';
+    if (!data.policy.applyAllowed) return '<div class="sve-banner"><strong>นโยบายยังปิดรับรายชื่อใหม่</strong><span>เปลี่ยนนโยบายเป็น “ให้แอดมินตรวจสอบและอนุมัติ” ก่อนเพิ่มรายบุคคล</span></div>';
+    const employeeId = state.individual?.employeeId || '', employeeName = state.individual?.employeeName || '';
+    const confirmation = employeeId ? `ADD ${data.campaign.campaignCode} ${employeeId}` : `ADD ${data.campaign.campaignCode} [รหัสพนักงาน]`;
+    return `<form class="sve-individual-form" data-sve-individual-form>${safetyVotePeoplePickerMarkup({pickerId:'eligibility-individual',key:'eligibilityIndividual',label:'พนักงานที่ต้องการเพิ่มสิทธิ์',value:employeeId,selectedLabel:employeeName,help:'เลือกจาก Employee Master Data ระบบจะไม่อนุญาตให้กรอกรหัสเอง'})}<label><span>เหตุผลการเพิ่มสิทธิ์รายบุคคล</span><textarea name="reason" minlength="10" maxlength="500" rows="3" required placeholder="ระบุเหตุผลอย่างน้อย 10 ตัวอักษร"></textarea></label><label><span data-sve-individual-confirm-copy>พิมพ์ ${escHtml(confirmation)}</span><input name="confirmation" autocomplete="off" placeholder="${escHtml(confirmation)}" required></label><div class="sve-banner" role="note"><strong>Add-only และมี Audit</strong><span>ระบบจะสร้าง Snapshot รุ่นใหม่โดยเก็บผู้มีสิทธิ์เดิมทั้งหมด บุคคลที่เพิ่มแล้วจะลบย้อนหลังจากหน้าจอนี้ไม่ได้</span></div><button type="submit" class="sv-button sv-button--primary" ${state.busy ? 'disabled' : ''}>ยืนยันเพิ่มบุคคลนี้</button></form>`;
+}
+
+function removalMarkup(data) {
+    const policy = data.policy.removal || {};
+    if (!policy.enabled) return '<div class="sve-banner is-warning" role="status"><strong>Feature การนำรายชื่อออกยังปิดอยู่</strong><span>หน้าจอนี้เป็นแบบอ่านอย่างเดียวจนกว่าจะเปิด feature ผ่านกระบวนการควบคุม</span></div>';
+    if (!statusAllowsAmendment(data.campaign.status) || !data.currentSnapshot) return '<div class="sve-banner"><strong>ยังนำรายชื่อออกไม่ได้</strong><span>ต้องมี Frozen Snapshot และแคมเปญอยู่ในสถานะ Scheduled หรือ Open</span></div>';
+    if (!policy.allowed) return '<div class="sve-banner is-warning"><strong>Policy ยังไม่อนุญาตให้นำออก</strong><span>ตั้งนโยบายรับผู้มีสิทธิ์ใหม่เป็น “ให้แอดมินตรวจสอบและอนุมัติ” เพื่อป้องกันระบบเพิ่มบุคคลกลับอัตโนมัติ</span></div>';
+    const employeeId = state.removal?.employeeId || '', employeeName = state.removal?.employeeName || '';
+    const confirmation = employeeId ? `REMOVE ${data.campaign.campaignCode} ${employeeId}` : `REMOVE ${data.campaign.campaignCode} [รหัสพนักงาน]`;
+    return `<form class="sve-removal-form" data-sve-removal-form>${safetyVotePeoplePickerMarkup({pickerId:'eligibility-removal',key:'eligibilityRemoval',label:'พนักงานที่ต้องการนำสิทธิ์ออก',value:employeeId,selectedLabel:employeeName,help:'เลือกจาก Employee Master Data ระบบจะตรวจ Activity ที่ได้รับการคุ้มครองก่อนทุกครั้ง'})}<label><span>เหตุผลการนำสิทธิ์ออก</span><textarea name="reason" minlength="10" maxlength="500" rows="3" required placeholder="ระบุเหตุผลอย่างน้อย 10 ตัวอักษร"></textarea></label><label><span data-sve-removal-confirm-copy>พิมพ์ ${escHtml(confirmation)}</span><input name="confirmation" autocomplete="off" placeholder="${escHtml(confirmation)}" required></label><div class="sve-banner is-warning" role="note"><strong>Policy: unstarted_only</strong><span>นำออกได้เฉพาะผู้ที่ยังไม่มีการเข้าร่วม ส่งผลงาน เสนอชื่อ หรือได้รับมอบหมายเป็นกรรมการ ระบบจะสร้าง Snapshot ใหม่และเก็บ Snapshot, Activity และ Audit เดิมทั้งหมดโดยไม่ DELETE ประวัติ</span></div><button type="submit" class="sv-button sv-button--danger" ${state.busy ? 'disabled' : ''}>ตรวจ Policy และยืนยันนำออก</button></form>`;
 }
 
 function previewMarkup(data) {
@@ -50,15 +70,16 @@ function previewMarkup(data) {
 
 function historyMarkup(rows) {
     if (!rows.length) return '<div class="sve-empty"><strong>ยังไม่มีประวัติการเพิ่มผู้มีสิทธิ์</strong><span>เมื่อ Apply สำเร็จ รายการและ Snapshot lineage จะแสดงที่นี่</span></div>';
-    return `<div class="sve-history">${rows.map(row => `<article><div><span class="sve-history-id">#${Number(row.id)}</span><strong>เพิ่ม ${Number(row.addedCount).toLocaleString('th-TH')} คน</strong><small>${dateTime(row.appliedAt || row.requestedAt)} · ${escHtml(row.appliedBy || row.requestedBy || 'ไม่ระบุ')}</small></div><p>${escHtml(row.reason || 'ไม่ระบุเหตุผล')}</p><dl><div><dt>ต้นทาง</dt><dd>Snapshot #${Number(row.sourceSnapshotId)}</dd></div><div><dt>ผลลัพธ์</dt><dd>Snapshot #${Number(row.resultSnapshotId || 0)}</dd></div><div><dt>สถานะ</dt><dd>${escHtml(row.status)}</dd></div><div><dt>After hash</dt><dd><code>${escHtml(hash(row.afterRowsHash))}</code></dd></div></dl></article>`).join('')}</div>`;
+    return `<div class="sve-history">${rows.map(row => { const removed = row.requestType === 'individual_remove' || Number(row.removedCount) > 0; return `<article class="${removed ? 'is-removal' : ''}"><div><span class="sve-history-id">#${Number(row.id)}</span><strong>${removed ? 'นำออก' : 'เพิ่ม'} ${Number(removed ? row.removedCount : row.addedCount).toLocaleString('th-TH')} คน</strong><small>${dateTime(row.appliedAt || row.requestedAt)} · ${escHtml(row.appliedBy || row.requestedBy || 'ไม่ระบุ')}</small></div><p>${escHtml(row.reason || 'ไม่ระบุเหตุผล')}</p><dl><div><dt>ต้นทาง</dt><dd>Snapshot #${Number(row.sourceSnapshotId)}</dd></div><div><dt>ผลลัพธ์</dt><dd>Snapshot #${Number(row.resultSnapshotId || 0)}</dd></div><div><dt>สถานะ</dt><dd>${escHtml(row.status)}</dd></div><div><dt>After hash</dt><dd><code>${escHtml(hash(row.afterRowsHash))}</code></dd></div></dl></article>`; }).join('')}</div>`;
 }
 
 function render() {
     const host = state.container; if (!host) return;
+    state.peoplePickerCleanup?.(); state.peoplePickerCleanup = null;
     const panel = statePanel();
     if (panel) { host.innerHTML = `<div class="sve-shell">${panel}</div>`; bind(); return; }
     const data = state.overview, campaign = data.campaign;
-    host.innerHTML = `<div class="sve-shell" data-sv-eligibility-admin="2026-10-20-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="sve-hero"><button type="button" class="sv-icon-button" data-sve-action="back" aria-label="กลับศูนย์จัดการ">←</button><div><p class="sv-eyebrow">จัดการผู้มีสิทธิ์ตามสถานะ</p><h1>${escHtml(state.campaign.TitleTh || state.campaign.titleTh || campaign.campaignCode)}</h1><p>${escHtml(campaign.campaignCode)} · Version ${Number(campaign.versionNo)} · เพิ่มรายชื่อแบบ Add-only เท่านั้น</p></div>${safetyVoteStatusBadge(campaign.status)}</header>${safetyVoteJourneyNav({ role: 'admin', current: 'readiness', campaign: state.campaign, onPage: true })}${state.notice ? `<div class="sve-banner is-success" role="status"><strong>${escHtml(state.notice)}</strong></div>` : ''}<main class="sve-layout"><section class="sve-panel"><div class="sve-heading"><div><p class="sv-eyebrow">Policy</p><h2>นโยบายผู้มีสิทธิ์ใหม่</h2></div><span>${data.featureEnabled ? 'พร้อมใช้งาน' : 'Feature ปิดอยู่'}</span></div>${modeCards(data)}${policyEditor(data)}</section><section class="sve-panel"><div class="sve-heading"><div><p class="sv-eyebrow">Current population</p><h2>Snapshot ปัจจุบัน</h2></div></div>${snapshotMarkup(data.currentSnapshot)}</section><section class="sve-panel sve-panel--full"><div class="sve-heading"><div><p class="sv-eyebrow">Preview & Apply</p><h2>ตรวจสอบผู้เข้าเงื่อนไขใหม่</h2></div></div>${previewMarkup(data)}</section><section class="sve-panel sve-panel--full"><div class="sve-heading"><div><p class="sv-eyebrow">Audit history</p><h2>ประวัติ Eligibility Amendment</h2></div><span>${data.amendments.length.toLocaleString('th-TH')} รายการ</span></div>${historyMarkup(data.amendments)}</section></main><footer class="sve-action-bar"><button type="button" class="sv-button sv-button--secondary" data-sve-action="back">กลับศูนย์จัดการ</button><button type="button" class="sv-button sv-button--secondary" data-sve-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button></footer></div>`;
+    host.innerHTML = `<div class="sve-shell" data-sv-eligibility-admin="2026-10-24-removal-policy-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="sve-hero"><button type="button" class="sv-icon-button" data-sve-action="back" aria-label="กลับศูนย์จัดการ">←</button><div><p class="sv-eyebrow">จัดการผู้มีสิทธิ์ตามสถานะ</p><h1>${escHtml(state.campaign.TitleTh || state.campaign.titleTh || campaign.campaignCode)}</h1><p>${escHtml(campaign.campaignCode)} · Version ${Number(campaign.versionNo)} · เพิ่มรายชื่อและนำผู้ไม่มี Activity ออกแบบมี Policy/Audit</p></div>${safetyVoteStatusBadge(campaign.status)}</header>${safetyVoteJourneyNav({ role: 'admin', current: 'readiness', campaign: state.campaign, onPage: true })}${state.notice ? `<div class="sve-banner is-success" role="status"><strong>${escHtml(state.notice)}</strong></div>` : ''}<main class="sve-layout"><section class="sve-panel"><div class="sve-heading"><div><p class="sv-eyebrow">Policy</p><h2>นโยบายผู้มีสิทธิ์ใหม่</h2></div><span>${data.featureEnabled ? 'พร้อมใช้งาน' : 'Feature ปิดอยู่'}</span></div>${modeCards(data)}${policyEditor(data)}</section><section class="sve-panel"><div class="sve-heading"><div><p class="sv-eyebrow">Current population</p><h2>Snapshot ปัจจุบัน</h2></div></div>${snapshotMarkup(data.currentSnapshot)}</section><section class="sve-panel sve-panel--full"><div class="sve-heading"><div><p class="sv-eyebrow">Individual amendment</p><h2>เพิ่มผู้มีสิทธิ์รายบุคคล</h2></div><span>Employee Master</span></div>${individualMarkup(data)}</section><section class="sve-panel sve-panel--full"><div class="sve-heading"><div><p class="sv-eyebrow">Governed removal</p><h2>นำผู้มีสิทธิ์ที่ยังไม่เริ่ม Activity ออก</h2></div><span>Policy + Audit</span></div>${removalMarkup(data)}</section><section class="sve-panel sve-panel--full"><div class="sve-heading"><div><p class="sv-eyebrow">Rule sync</p><h2>ตรวจสอบผู้เข้าเงื่อนไขใหม่ทั้งหมด</h2></div></div>${previewMarkup(data)}</section><section class="sve-panel sve-panel--full"><div class="sve-heading"><div><p class="sv-eyebrow">Audit history</p><h2>ประวัติ Eligibility Amendment</h2></div><span>${data.amendments.length.toLocaleString('th-TH')} รายการ</span></div>${historyMarkup(data.amendments)}</section></main><footer class="sve-action-bar"><button type="button" class="sv-button sv-button--secondary" data-sve-action="back">กลับศูนย์จัดการ</button><button type="button" class="sv-button sv-button--secondary" data-sve-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button></footer></div>`;
     bind();
 }
 
@@ -66,7 +87,7 @@ async function load() {
     state.loading = true; state.error = null; render();
     try { const response = await API.get(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/eligibility/amendments`, { suppressErrorLog: true }); state.overview = response.data; }
     catch (error) { state.error = error; }
-    finally { state.loading = false; render(); }
+    finally { state.loading = false; state.busy = false; render(); }
 }
 
 async function savePolicy(form) {
@@ -99,19 +120,64 @@ async function applyPreview(form) {
     } catch (error) { state.busy = false; if (error?.code === 'ELIGIBILITY_PREVIEW_STALE') state.preview = null; showToast(error?.message || 'เพิ่มผู้มีสิทธิ์ไม่สำเร็จ', 'error'); render(); }
 }
 
+async function applyIndividual(form) {
+    const employeeId = form.querySelector('[data-sv-people-value="eligibilityIndividual"]')?.value || '';
+    const values = new FormData(form), reason = String(values.get('reason') || '').trim(), confirmation = String(values.get('confirmation') || '').trim();
+    const expected = `ADD ${state.overview.campaign.campaignCode} ${employeeId}`;
+    if (!employeeId) { showToast('กรุณาเลือกพนักงานจาก Employee Master Data', 'warning'); return; }
+    if (Array.from(reason).length < 10 || confirmation !== expected) { showToast(`กรุณาระบุเหตุผลและพิมพ์ ${expected} ให้ตรงทุกตัวอักษร`, 'warning'); return; }
+    state.busy = true; render();
+    try {
+        const response = await API.post(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/eligibility/amendments/individual`, { employeeId, reason, confirmation }, { headers: { 'Idempotency-Key': requestKey() } });
+        state.individual = null; state.preview = null; state.notice = `เพิ่มสิทธิ์ให้ ${response.data.employeeName || employeeId} แล้ว และสร้าง Snapshot #${Number(response.data.snapshotNo)}`;
+        showToast(state.notice, 'success'); await load();
+    } catch (error) { state.busy = false; showToast(error?.message || 'เพิ่มผู้มีสิทธิ์รายบุคคลไม่สำเร็จ', 'error'); render(); }
+}
+
+async function applyRemoval(form) {
+    const employeeId = form.querySelector('[data-sv-people-value="eligibilityRemoval"]')?.value || '';
+    const values = new FormData(form), reason = String(values.get('reason') || '').trim(), confirmation = String(values.get('confirmation') || '').trim();
+    const expected = `REMOVE ${state.overview.campaign.campaignCode} ${employeeId}`;
+    if (!employeeId) { showToast('กรุณาเลือกพนักงานจาก Employee Master Data', 'warning'); return; }
+    if (Array.from(reason).length < 10 || confirmation !== expected) { showToast(`กรุณาระบุเหตุผลและพิมพ์ ${expected} ให้ตรงทุกตัวอักษร`, 'warning'); return; }
+    state.busy = true; render();
+    try {
+        const response = await API.post(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/eligibility/removals/individual`, { employeeId, reason, confirmation }, { headers: { 'Idempotency-Key': requestKey() } });
+        state.removal = null; state.preview = null; state.notice = `นำสิทธิ์ของ ${response.data.employeeName || employeeId} ออกจาก Snapshot ปัจจุบันแล้ว และสร้าง Snapshot #${Number(response.data.snapshotNo)}`;
+        showToast(state.notice, 'success'); await load();
+    } catch (error) {
+        state.busy = false;
+        const fallback = error?.code === 'ELIGIBILITY_REMOVAL_PROTECTED_ACTIVITY' ? 'นำรายชื่อนี้ออกไม่ได้ เนื่องจากมี Activity ที่ต้องเก็บรักษา' : 'นำผู้มีสิทธิ์ออกไม่สำเร็จ';
+        showToast(error?.message || fallback, 'error'); render();
+    }
+}
+
 function bind() {
     const host = state.container;
+    state.peoplePickerCleanup = bindSafetyVotePeoplePickers(host, { onChange: detail => {
+        if (!['eligibilityIndividual', 'eligibilityRemoval'].includes(detail.key)) return;
+        const removing = detail.key === 'eligibilityRemoval';
+        state[removing ? 'removal' : 'individual'] = detail.employeeId ? { employeeId: detail.employeeId, employeeName: detail.person?.employeeName || detail.employeeId } : null;
+        const verb = removing ? 'REMOVE' : 'ADD';
+        const expected = detail.employeeId ? `${verb} ${state.overview.campaign.campaignCode} ${detail.employeeId}` : `${verb} ${state.overview.campaign.campaignCode} [รหัสพนักงาน]`;
+        const form = host.querySelector(removing ? '[data-sve-removal-form]' : '[data-sve-individual-form]');
+        const copy = form?.querySelector(removing ? '[data-sve-removal-confirm-copy]' : '[data-sve-individual-confirm-copy]'), input = form?.querySelector('[name="confirmation"]');
+        if (copy) copy.textContent = `พิมพ์ ${expected}`; if (input) { input.value = ''; input.placeholder = expected; }
+    } });
     host?.querySelectorAll('[data-sve-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.sveAction;
         if (action === 'back') state.onClose?.(); else if (action === 'retry' || action === 'refresh') load(); else if (action === 'preview') runPreview();
     }));
     host?.querySelector('[data-sve-policy-form]')?.addEventListener('submit', event => { event.preventDefault(); savePolicy(event.currentTarget); });
     host?.querySelector('[data-sve-apply-form]')?.addEventListener('submit', event => { event.preventDefault(); applyPreview(event.currentTarget); });
+    host?.querySelector('[data-sve-individual-form]')?.addEventListener('submit', event => { event.preventDefault(); applyIndividual(event.currentTarget); });
+    host?.querySelector('[data-sve-removal-form]')?.addEventListener('submit', event => { event.preventDefault(); applyRemoval(event.currentTarget); });
     host?.querySelectorAll('input[name="sve-mode"]').forEach(input => input.addEventListener('change', () => { host.querySelectorAll('.sve-mode-card').forEach(card => card.classList.toggle('is-selected', card.contains(input))); const confirmation = host.querySelector('[name="confirmation"]'); if (confirmation) confirmation.placeholder = `SET ${state.overview.campaign.campaignCode} ${input.value}`; }));
     host?.querySelectorAll('[data-sv-journey-step]').forEach(button => button.addEventListener('click', () => state.onNavigate?.(button.dataset.svJourneyStep)));
 }
 
 export async function renderSafetyVoteEligibilityWorkspace(container, { campaign, onClose = () => {}, onNavigate = null } = {}) {
-    Object.assign(state, { container, campaign, onClose, onNavigate, overview: null, preview: null, loading: true, busy: false, error: null, notice: '' });
+    state.peoplePickerCleanup?.();
+    Object.assign(state, { container, campaign, onClose, onNavigate, overview: null, preview: null, individual: null, removal: null, peoplePickerCleanup: null, loading: true, busy: false, error: null, notice: '' });
     await load();
 }

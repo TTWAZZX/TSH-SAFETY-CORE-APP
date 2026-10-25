@@ -39,7 +39,7 @@ const checks = [
   [page.includes('Excel ทางการ') && page.includes('PDF ทางการ'), 'Official report actions missing'],
   [page.includes('/exports/certified-report'), 'Certified report endpoint selection missing'],
   [page.includes('Controlled result copy — ยังไม่รับรอง'), 'Frozen report disclosure missing'],
-  [index.includes('20261020-safety-vote-response-media-r2'), 'Current Safety Vote runtime cache key missing']
+  [index.includes('20261024-eligibility-removal-r1'), 'Current Safety Vote runtime cache key missing']
 ];
 checks.forEach(([ok, message]) => assert(ok, message));
 console.log(`Safety Vote official Excel/PDF static contract: PASS (${checks.length} assertions)`);

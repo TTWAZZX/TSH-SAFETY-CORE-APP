@@ -17,15 +17,15 @@ const checks = [
     [!components.includes('questions.slice(0, 2)') && !components.includes('options.slice(0, 3)'), 'final preview must render every question and option'],
     [components.includes('ทดลองตอบได้ · ไม่บันทึกคะแนน') && components.includes('disabled>ส่งคำตอบ'), 'preview must be interactive without a submit path'],
     [components.includes('option.previewUrl') && components.includes('option.description'), 'preview must include private image previews and descriptions'],
-    [wizard.includes('if ([3, 7].includes(state.step)) hydrateOptionImages()'), 'review step must hydrate authenticated private image blobs'],
+    [wizard.includes('if ([3,8].includes(state.step)) hydrateOptionImages()') && wizard.includes('if ([3,8].includes(state.step)) hydrateQuestionImages()'), 'content and nine-step review must hydrate authenticated private image blobs'],
     [wizard.includes('bindSafetyVoteImageGallery(container)'), 'wizard preview must bind the shared gallery'],
-    [participant.includes('bindSafetyVoteImageGallery(state.page)') && participant.includes('data-sv-gallery-group="question-${id}"'), 'participant page must bind the same question-scoped gallery'],
+    [participant.includes('bindSafetyVoteImageGallery(state.page)') && participant.includes('data-sv-gallery-group="question-cover-${Number(question.id)}"'), 'participant page must bind the same question-scoped gallery'],
     [gallery.includes('รูปที่ ${index + 1} จาก ${triggers.length}'), 'gallery must announce image position'],
     [gallery.includes("event.key === 'ArrowLeft'") && gallery.includes("event.key === 'ArrowRight'") && gallery.includes("event.key === 'Escape'"), 'gallery keyboard navigation is incomplete'],
     [gallery.includes("addEventListener('touchstart'") && gallery.includes("addEventListener('touchend'") && gallery.includes('Math.abs(dx) >= 50'), 'gallery swipe navigation is incomplete'],
     [gallery.includes("document.body.style.overflow = 'hidden'") && gallery.includes('restoreTarget.focus()'), 'gallery modal lifecycle or focus restoration is incomplete'],
     [css.includes('.svp-gallery__nav--previous') || css.includes('.svp-gallery__nav'), 'gallery navigation styling is missing'],
-    [/2026101[56]-safety-vote-(?:preview-gallery|preview-parity)-r1/.test(html), 'top-level cache key was not advanced']
+    [/202610(?:1[56]-safety-vote-(?:preview-gallery|preview-parity)|24-(?:safety-vote-(?:question-images|gallery|people-picker)|eligibility-individual-add))-r1/.test(html), 'top-level cache key was not advanced']
 ];
 
 for (const [value, message] of checks) assert(value, message);

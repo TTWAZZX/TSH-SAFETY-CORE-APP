@@ -167,9 +167,25 @@ export function safeReceipt({ campaign = {}, receiptCode = '', submittedAt = '',
     };
 }
 
+export function campaignMatchesView(campaign = {}, view = 'all') {
+    const status = String(valueOf(campaign, 'Status', 'status'));
+    const participation = String(valueOf(campaign, 'ParticipationState', 'participationState')).toLowerCase();
+    const discoveryOnly = Number(valueOf(campaign, 'DiscoveryOnly', 'discoveryOnly') || 0) === 1;
+    const votingWindow = valueOf(campaign, 'VotingWindowOpen', 'votingWindowOpen');
+    const votingWindowOpen = votingWindow === '' || Number(votingWindow) === 1;
+    if (view === 'all') return true;
+    if (view === 'open') return status === 'Open' && votingWindowOpen && !discoveryOnly;
+    if (view === 'upcoming') return status === 'Scheduled' || (status === 'Open' && !votingWindowOpen);
+    if (view === 'submitted') return participation === 'submitted';
+    if (view === 'read_only') return discoveryOnly;
+    if (view === 'results') return ['Closed', 'Certified', 'Published'].includes(status);
+    if (view === 'closed') return ['Closed', 'Certified', 'Published'].includes(status);
+    return participationState(campaign) === view;
+}
+
 export function filterCampaigns(campaigns = [], { view = 'open', query = '' } = {}) {
     const normalized = String(query).trim().toLocaleLowerCase('th');
-    return campaigns.filter(campaign => view === 'all' || participationState(campaign) === view).filter(campaign => {
+    return campaigns.filter(campaign => campaignMatchesView(campaign, view)).filter(campaign => {
         if (!normalized) return true;
         return ['TitleTh', 'Summary', 'CampaignCode', 'CampaignType'].some(key => String(campaign[key] || '').toLocaleLowerCase('th').includes(normalized));
     });

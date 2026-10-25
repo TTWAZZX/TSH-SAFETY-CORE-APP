@@ -28,6 +28,16 @@ const fixture = {
 const nodeResult = {
     campaigns: fixture.campaigns.map(contract.normalizeCampaign),
     campaignCodes: [1, 9, 999, 0, 1000].map(sequence => contract.formatCampaignCode(sequence, 2026)),
+    visibilityContracts: [
+        contract.campaignVisibilityContract({ discoveryMode:'eligible_only' }, false),
+        contract.campaignVisibilityContract({ discoveryMode:'eligible_only' }, true),
+    ],
+    catalogueAccess: [
+        contract.campaignCatalogueAccess({ Status:'Open', DiscoveryMode:'eligible_only' }, false, false),
+        contract.campaignCatalogueAccess({ Status:'Open', DiscoveryMode:'eligible_only' }, false, true),
+        contract.campaignCatalogueAccess({ Status:'Open', DiscoveryMode:'eligible_only' }, true, true),
+        contract.campaignCatalogueAccess({ Status:'Draft', DiscoveryMode:'public_listing' }, false, true),
+    ],
     ruleSet: contract.normalizeRules(fixture.rules),
 };
 nodeResult.eligible = contract.evaluateEligibility(nodeResult.ruleSet.rules, fixture.employees);

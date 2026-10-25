@@ -44,7 +44,7 @@ export function resultReadiness(snapshot, { secret = false, verification = null 
     if (!snapshot) return { ready: false, blocks: ['ยังไม่มี Result Snapshot'] };
     const blocks = [];
     if (snapshot.reconciliation !== 'balanced') blocks.push('ยอดผลยังไม่สมดุล');
-    if (snapshot.quorum !== 'met') blocks.push('องค์ประชุมหรือเกณฑ์ขั้นต่ำยังไม่ผ่าน');
+    // Quorum is disclosed for governance but does not block closing or calculating actual results.
     if (snapshot.tie !== 'none') blocks.push('ยังมีผลเสมอที่ต้องจัดการตามกติกา');
     if (snapshot.resultHash.length !== 64) blocks.push('Result SHA-256 ไม่สมบูรณ์');
     if (secret && verification && verification.privacySafe !== true) blocks.push('การแยกตัวตนของบัตรลับยังไม่ผ่าน');
@@ -64,14 +64,40 @@ export function verificationChecks(data = null) {
     }));
 }
 
+function publishedResultRows(published = {}) {
+    if (Array.isArray(published.rows)) return published.rows;
+    const groups = Array.isArray(published.officialGroups) ? published.officialGroups : published.groups;
+    if (!Array.isArray(groups)) return [];
+    return groups.flatMap(group => (group.rows || []).map(row => ({ ...row, question: row.question || group.title || '' })));
+}
+
 export function publicPreview({ campaign = {}, snapshot = null, published = null } = {}) {
     const visibility = String(campaign.ResultVisibility || campaign.resultVisibility || 'certified_only');
-    if (!snapshot?.published || !published) return { visible: false, visibility, rows: [], message: 'ผลจะยังไม่แสดงจนกว่าเซิร์ฟเวอร์ยืนยันการรับรองและการเผยแพร่' };
+    if (!published) return { visible: false, visibility, rows: [], noResult: false, message: 'ผลจะยังไม่แสดงจนกว่าเซิร์ฟเวอร์ยืนยัน Snapshot ตามนโยบายการเปิดเผยผล' };
+    const officialSnapshot = published.snapshot || {};
+    const officialSnapshotId = Number(officialSnapshot.id || 0);
+    if (snapshot?.id && officialSnapshotId && Number(snapshot.id) !== officialSnapshotId) {
+        return { visible: false, visibility, rows: [], noResult: false, message: 'Snapshot ที่เลือกไม่ใช่ผลอย่างเป็นทางการรุ่นปัจจุบัน' };
+    }
+    const legacyPublished = snapshot?.published && !officialSnapshotId;
+    const authoritative = published.available === true || ['Frozen','Certified','Published'].includes(String(officialSnapshot.status || ''));
+    if (!authoritative && !legacyPublished) return { visible: false, visibility, rows: [], noResult: false, message: 'ผลจะยังไม่แสดงจนกว่าเซิร์ฟเวอร์ยืนยัน Snapshot ตามนโยบายการเปิดเผยผล' };
+    const rows = publishedResultRows(published).map(row => ({
+        positionCode: row.positionCode || row.code || row.label || null,
+        label: row.label || row.positionCode || row.code || null,
+        question: row.question || null,
+        count: Number(row.count ?? row.value ?? 0),
+        rank: row.rank == null ? null : Number(row.rank),
+        state: row.state || 'normal'
+    }));
+    const noResult = published.noResult === true || (rows.length > 0 && rows.every(row => row.state === 'no_result' || row.count === 0));
     return {
         visible: true,
         visibility,
-        rows: Array.isArray(published.rows) ? published.rows.map(row => ({ positionCode: row.positionCode || null, count: Number(row.count || 0), rank: Number(row.rank || 0), state: row.state || 'normal' })) : [],
-        message: 'ตัวอย่างนี้อ่านจาก published-result API หลังผ่านกติกาการมองเห็นแล้ว'
+        officialState: published.officialState || String(officialSnapshot.status || '').toLowerCase(),
+        noResult,
+        rows,
+        message: noResult ? 'ผลอย่างเป็นทางการได้รับการยืนยันแล้ว แต่กิจกรรมนี้ไม่มีคะแนน' : 'ตัวอย่างนี้อ่านจาก Official Results API และ Snapshot ทางการเดียวกับที่พนักงานเห็น'
     };
 }
 

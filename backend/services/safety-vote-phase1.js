@@ -4,6 +4,10 @@ const crypto = require('crypto');
 const liveResults = require('./safety-vote-live-results');
 
 const CONTRACT_VERSION = '2026-10-08-safety-vote-phase0-r1';
+const VISIBILITY_CONTRACT_VERSION = '2026-10-24-company-wide-campaign-visibility-r1';
+const COMPANY_WIDE_DISCOVERY_MODE = 'public_listing';
+const PUBLISHED_LIFECYCLE_STATUSES = Object.freeze(['Scheduled','Open','Closed','Certified','Published']);
+const EXCLUDED_LIFECYCLE_STATUSES = Object.freeze(['Draft','Voided']);
 const CAMPAIGN_TYPES = Object.freeze(['popular_vote','secret_election','survey','poll','feedback','nomination','award','submission_challenge','jury_scoring','hybrid_scoring','ranking','prioritization','allocation','resolution','petition','event_choice','risk_perception','knowledge_check','multi_stage']);
 const PRIVACY_MODES = Object.freeze(['identified','confidential','anonymous','secret_ballot']);
 const RESULT_VISIBILITY = Object.freeze(['live','admin_only','hidden_until_close','certified_only','published']);
@@ -31,6 +35,43 @@ function formatCampaignCode(sequence, year = new Date().getFullYear()) {
     return `SHE-${String(number).padStart(3, '0')}-${yearNumber}`;
 }
 
+function campaignVisibilityContract(input = {}, enabled = false) {
+    const requested = clean(input.discoveryMode || input.DiscoveryMode || 'eligible_only', 24);
+    return {
+        contractVersion: VISIBILITY_CONTRACT_VERSION,
+        enabled: Boolean(enabled),
+        catalogAudience: 'company_authenticated',
+        detailAudience: 'company_authenticated',
+        participationAudience: 'eligible_only',
+        resultsAudience: 'company_authenticated_after_publish',
+        storageDiscoveryMode: enabled ? COMPANY_WIDE_DISCOVERY_MODE : (requested === COMPANY_WIDE_DISCOVERY_MODE ? COMPANY_WIDE_DISCOVERY_MODE : 'eligible_only'),
+        publishedLifecycleStatuses: [...PUBLISHED_LIFECYCLE_STATUSES],
+        excludedLifecycleStatuses: [...EXCLUDED_LIFECYCLE_STATUSES],
+        excludedFlags: ['IsHidden','IsTest'],
+        viewDoesNotGrantParticipation: true,
+        existingCampaignsPreserved: true,
+    };
+}
+
+function campaignCatalogueAccess(campaign = {}, eligible = false, enabled = false) {
+    const status = clean(campaign.Status || campaign.status, 24);
+    const hidden = Number(campaign.IsHidden ?? campaign.isHidden ?? 0) === 1;
+    const test = Number(campaign.IsTest ?? campaign.isTest ?? 0) === 1;
+    const storedMode = clean(campaign.DiscoveryMode || campaign.discoveryMode || 'eligible_only', 24);
+    const publishedLifecycle = PUBLISHED_LIFECYCLE_STATUSES.includes(status);
+    const effectiveMode = enabled ? COMPANY_WIDE_DISCOVERY_MODE : (storedMode === COMPANY_WIDE_DISCOVERY_MODE ? COMPANY_WIDE_DISCOVERY_MODE : 'eligible_only');
+    const catalogueVisible = publishedLifecycle && !hidden && !test && (Boolean(eligible) || effectiveMode === COMPANY_WIDE_DISCOVERY_MODE);
+    return {
+        catalogueVisible,
+        detailVisible: catalogueVisible,
+        participationAllowed: catalogueVisible && Boolean(eligible),
+        readOnlyDetail: catalogueVisible && !eligible,
+        accessMode: catalogueVisible && !eligible ? 'company_catalogue_read_only' : (catalogueVisible ? 'eligible_participant' : 'hidden'),
+        effectiveDiscoveryMode: effectiveMode,
+        reasonCode: !publishedLifecycle ? 'LIFECYCLE_NOT_PUBLISHED' : hidden ? 'CAMPAIGN_HIDDEN' : test ? 'CAMPAIGN_TEST' : !eligible && effectiveMode !== COMPANY_WIDE_DISCOVERY_MODE ? 'LEGACY_ELIGIBILITY_ONLY' : !eligible ? 'NOT_ELIGIBLE_READ_ONLY' : 'ELIGIBLE',
+    };
+}
+
 function normalizeCampaign(input = {}, options = {}) {
     const campaignType = clean(input.campaignType || input.CampaignType || 'popular_vote', 40).toLowerCase();
     const privacyMode = clean(input.privacyMode || input.PrivacyMode || 'identified', 24).toLowerCase();
@@ -46,8 +87,10 @@ function normalizeCampaign(input = {}, options = {}) {
     if (privacyMode === 'secret_ballot' && resultVisibility === 'live') errors.push({ field: 'resultVisibility', code: 'SECRET_LIVE_RESULT_FORBIDDEN' });
     const live = liveResults.normalizeConfig(input, Math.max(2, Math.min(100, Number(input.privacyThreshold || input.PrivacyThreshold || 5))));
     const maxParticipationAttempts = Number(input.maxParticipationAttempts ?? input.MaxParticipationAttempts ?? 1);
+    const officialResultTopN = Number(input.officialResultTopN ?? input.OfficialResultTopN ?? input.liveLeaderboardTopN ?? input.LiveLeaderboardTopN ?? 5);
     if (!Number.isInteger(maxParticipationAttempts) || maxParticipationAttempts < 1 || maxParticipationAttempts > 10) errors.push({ field: 'maxParticipationAttempts', code: 'INVALID_RANGE' });
     if (privacyMode === 'secret_ballot' && maxParticipationAttempts !== 1) errors.push({ field: 'maxParticipationAttempts', code: 'SECRET_BALLOT_SINGLE_ATTEMPT_REQUIRED' });
+    if (![5, 10].includes(officialResultTopN)) errors.push({ field: 'officialResultTopN', code: 'INVALID_ENUM' });
     errors.push(...live.errors);
     if (live.value.enabled && campaignType !== 'popular_vote') errors.push({ field: 'liveLeaderboardEnabled', code: 'UNSUPPORTED_CAMPAIGN_TYPE' });
     if (live.value.enabled && privacyMode === 'secret_ballot') errors.push({ field: 'liveLeaderboardEnabled', code: 'SECRET_LIVE_RESULT_FORBIDDEN' });
@@ -65,6 +108,7 @@ function normalizeCampaign(input = {}, options = {}) {
             campaignType,
             privacyMode,
             resultVisibility,
+            officialResultTopN: [5, 10].includes(officialResultTopN) ? officialResultTopN : 5,
             discoveryMode: clean(input.discoveryMode || input.DiscoveryMode || 'eligible_only', 24) === 'public_listing' ? 'public_listing' : 'eligible_only',
             openAt: clean(input.openAt || input.OpenAt, 32) || null,
             closeAt: clean(input.closeAt || input.CloseAt, 32) || null,
@@ -131,4 +175,4 @@ function canonicalHash(value) {
     return crypto.createHash('sha256').update(JSON.stringify(sort(value))).digest('hex');
 }
 
-module.exports = { CONTRACT_VERSION, CAMPAIGN_TYPES, PRIVACY_MODES, RESULT_VISIBILITY, RULE_ATTRIBUTES, RULE_OPERATORS, RULE_EFFECTS, clean, positiveInt, normalizeCode, formatCampaignCode, normalizeCampaign, normalizeRule, normalizeRules, evaluateEligibility, canonicalHash };
+module.exports = { CONTRACT_VERSION, VISIBILITY_CONTRACT_VERSION, COMPANY_WIDE_DISCOVERY_MODE, PUBLISHED_LIFECYCLE_STATUSES, EXCLUDED_LIFECYCLE_STATUSES, CAMPAIGN_TYPES, PRIVACY_MODES, RESULT_VISIBILITY, RULE_ATTRIBUTES, RULE_OPERATORS, RULE_EFFECTS, clean, positiveInt, normalizeCode, formatCampaignCode, campaignVisibilityContract, campaignCatalogueAccess, normalizeCampaign, normalizeRule, normalizeRules, evaluateEligibility, canonicalHash };

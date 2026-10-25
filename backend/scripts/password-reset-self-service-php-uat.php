@@ -82,8 +82,8 @@ try {
     pr_expect_code(fn() => password_reset_complete($pdo, $knownToken, '123'), 'PASSWORD_POLICY_VIOLATION');
 
     $mail = password_reset_mail('<PHP Reset>', $email, $knownToken);
-    pr_assert(str_contains($mail['html'], '&lt;PHP Reset&gt;'), 'PHP reset template must escape HTML');
-    pr_assert(str_contains($mail['text'], '30 นาที'), 'PHP reset template TTL missing');
+    pr_assert(strpos($mail['html'], '&lt;PHP Reset&gt;') !== false, 'PHP reset email template must escape HTML');
+    pr_assert(strpos($mail['text'], '30 นาที') !== false, 'PHP reset template TTL missing');
     echo "PHP Password Reset UAT passed: enumeration-safe request, missing email, supersede, disabled delivery, complete, one-time/expired token, policy and template.\n";
 } finally {
     db_execute('DELETE FROM password_reset_audit WHERE id>? AND (EmployeeID IN (?,?,?) OR EmployeeID=?)', [$auditBaseline, $employeeWithEmail, $employeeWithoutEmail, $unknownEmployee, $rateKey]);

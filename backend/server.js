@@ -21,7 +21,7 @@ const path       = require('path');
 const { randomUUID } = require('crypto');
 
 const { authenticateToken, isAdmin } = require('./middleware/auth');
-const { storage: uploadStorage, fileFilter, uploadsDir, deleteLocalUpload, cleanOriginalFilename } = require('./storage');
+const { storage: uploadStorage, fileFilter, uploadsDir, deleteLocalUpload, cleanOriginalFilename, availablePublicUploadUrl } = require('./storage');
 const { logAudit } = require('./utils/audit');
 const {
     COMPANY_EMAIL_DOMAIN,
@@ -106,6 +106,7 @@ const safetyVotePhase2Routes = require('./routes/safety-vote-phase2');
 const safetyVotePhase3Routes = require('./routes/safety-vote-phase3');
 const safetyVotePhase4Routes = require('./routes/safety-vote-phase4');
 const safetyVotePhase5Routes = require('./routes/safety-vote-phase5');
+const safetyVoteCompanyVisibilityRemediationRoutes = require('./routes/safety-vote-company-visibility-remediation');
 const safetyVotePhase6Routes = require('./routes/safety-vote-phase6');
 const safetyVotePhase7Routes = require('./routes/safety-vote-phase7');
 const fileLibraryRoutes      = require('./routes/file-library');
@@ -115,6 +116,7 @@ const safetyVotePlanningRoutes = require('./routes/safety-vote-planning');
 const safetyVoteAnalyticsRoutes = require('./routes/safety-vote-analytics');
 const safetyVoteLiveResultsRoutes = require('./routes/safety-vote-live-results');
 const safetyVoteEligibilityAmendmentRoutes = require('./routes/safety-vote-eligibility-amendments');
+const safetyVoteGalleryRoutes = require('./routes/safety-vote-gallery');
 const { createBbsRolloutAccessMiddleware } = require('./services/bbs-rollout-access');
 
 // =================================================================
@@ -225,8 +227,8 @@ app.get('/api/public/branding', async (req, res) => {
                 tagline: String(branding.tagline || '').slice(0, 80),
                 loginHeroTitle: String(branding.loginHeroTitle || '').slice(0, 140),
                 loginHeroSubtitle: String(branding.loginHeroSubtitle || '').slice(0, 180),
-                logoUrl: String(branding.logoUrl || '').slice(0, 1024),
-                loginBackgroundUrl: String(branding.loginBackgroundUrl || '').slice(0, 1024),
+                logoUrl: availablePublicUploadUrl(branding.logoUrl),
+                loginBackgroundUrl: availablePublicUploadUrl(branding.loginBackgroundUrl),
                 loginBackgroundFit: String(branding.loginBackgroundFit) === 'contain' ? 'contain' : 'cover',
                 loginBackgroundFocusX: Number.isFinite(focusX) ? Math.max(0, Math.min(100, focusX)) : 50,
                 loginBackgroundFocusY: Number.isFinite(focusY) ? Math.max(0, Math.min(100, focusY)) : 50,
@@ -2065,6 +2067,8 @@ app.use('/api/safety-vote',       authenticateToken, safetyVotePlanningRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteAnalyticsRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteLiveResultsRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteEligibilityAmendmentRoutes);
+app.use('/api/safety-vote',       authenticateToken, safetyVoteCompanyVisibilityRemediationRoutes);
+app.use('/api/safety-vote',       authenticateToken, safetyVoteGalleryRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase104Routes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase7Routes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase6Routes);

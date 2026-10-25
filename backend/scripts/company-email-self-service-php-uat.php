@@ -72,8 +72,8 @@ try {
     ce_expect_code(fn() => company_email_change_verify($pdo, $expiredToken), 'EMAIL_VERIFICATION_EXPIRED');
 
     $mail = company_email_change_mail('<PHP Test>', $email, $knownToken);
-    ce_assert(str_contains($mail['html'], '&lt;PHP Test&gt;'), 'PHP email template must escape HTML');
-    ce_assert(str_contains($mail['text'], '24 ชั่วโมง'), 'PHP email template TTL copy missing');
+    ce_assert(strpos($mail['html'], '&lt;PHP Test&gt;') !== false, 'PHP email template must escape HTML');
+    ce_assert(strpos($mail['text'], '24 ชั่วโมง') !== false, 'PHP email template TTL copy missing');
     echo "PHP Company Email lifecycle UAT passed: validation, reauth, pending, cancel, verify, one-time/expired token and disabled delivery.\n";
 } finally {
     db_execute('DELETE FROM company_email_change_audit WHERE id>? AND EmployeeID IN (?,?)', [$auditBaseline, $employeeId, $verificationAuditKey]);

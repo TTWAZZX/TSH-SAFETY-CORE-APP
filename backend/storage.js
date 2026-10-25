@@ -42,6 +42,21 @@ function appendFilenameMetadata(publicUrl, originalName) {
     return `${publicUrl}?filename=${encodeURIComponent(cleanName)}`;
 }
 
+function availablePublicUploadUrl(value) {
+    const raw = String(value || '').trim().slice(0, 2048);
+    if (!raw) return '';
+    let parsed;
+    try { parsed = new URL(raw, 'http://local.invalid'); }
+    catch (_) { return ''; }
+    if (!parsed.pathname.includes('/uploads/')) return raw;
+    const localReference = raw.startsWith('/') || ['localhost', '127.0.0.1', '::1', 'local.invalid'].includes(parsed.hostname.toLowerCase());
+    if (!localReference) return raw;
+    const storedName = path.basename(decodeURIComponent(parsed.pathname));
+    if (!storedName || storedName === '.' || storedName === '..') return '';
+    const diskPath = path.join(uploadsDir, storedName);
+    return diskPath.startsWith(uploadsDir) && fs.existsSync(diskPath) ? raw : '';
+}
+
 const disk = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadsDir),
     filename: (req, file, cb) => {
@@ -121,4 +136,4 @@ function deleteLocalUpload(fileUrl) {
     return false;
 }
 
-module.exports = { storage, fileFilter, deleteLocalUpload, uploadsDir, cleanOriginalFilename };
+module.exports = { storage, fileFilter, deleteLocalUpload, uploadsDir, cleanOriginalFilename, availablePublicUploadUrl };

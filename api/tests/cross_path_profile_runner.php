@@ -37,7 +37,7 @@ function crosspath_case_options(string $scenario): array
 {
     $operation = in_array($scenario, ['partial_update','department_change','idempotent','resolver_failure','protected_forbidden'], true)
         ? CROSS_PATH_UPDATE
-        : (str_starts_with($scenario, 'upsert_') ? CROSS_PATH_UPSERT : CROSS_PATH_CREATE);
+        : (strpos($scenario, 'upsert_') === 0 ? CROSS_PATH_UPSERT : CROSS_PATH_CREATE);
     $employeeId = 'E001';
     $profile = [
         'EmployeeName'=>" Employee New\r\n ",

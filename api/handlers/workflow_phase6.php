@@ -1764,7 +1764,8 @@ function wf_ky_participant_employee_ids($value): array
         if ($raw !== '') {
             $decoded = json_decode($raw, true);
             if (is_array($decoded)) {
-                if (array_is_list($decoded)) foreach ($decoded as $item) $add($item);
+                $isList = $decoded === [] || array_keys($decoded) === range(0, count($decoded) - 1);
+                if ($isList) foreach ($decoded as $item) $add($item);
                 elseif (isset($decoded['participants']) && is_array($decoded['participants'])) foreach ($decoded['participants'] as $item) $add($item);
                 else $add($decoded);
             } else {

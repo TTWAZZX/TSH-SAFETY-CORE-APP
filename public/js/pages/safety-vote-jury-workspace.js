@@ -6,6 +6,8 @@ import {
     normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateScoreSheet, valueOf
 } from './safety-vote-jury-model.mjs?v=20261008-safety-vote-ux4-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
+import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261024-safety-vote-gallery-r1';
+import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261024-safety-vote-gallery-r1';
 
 const STORAGE_PREFIX = 'safety-vote-jury-draft:';
 const state = {
@@ -65,6 +67,10 @@ function renderList() {
 }
 
 function criterionValue(criterion, key) { return valueOf(criterion, key, key[0].toLowerCase() + key.slice(1)); }
+function candidateGallery(candidate) {
+    const items=candidate.gallery||[];if(!items.length)return'';
+    return `<div class="sv-work-gallery sv-work-gallery--jury" aria-label="ภาพผลงาน ${escHtml(candidate.displayName)}">${items.map((item,index)=>`<figure class="sv-work-gallery__item ${item.isCover?'is-cover':''}"><button type="button" class="svp-gallery-trigger" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="jury-candidate-${Number(candidate.id)}" data-sv-gallery-label="${escHtml(item.altText||candidate.displayName)}" aria-label="เปิดภาพที่ ${index+1} ของ ${escHtml(candidate.displayName)}"><img data-sv-auth-file="${Number(item.fileId)}" alt="${escHtml(item.altText||candidate.displayName)}" decoding="async"></button>${item.caption?`<figcaption>${escHtml(item.caption)}</figcaption>`:''}</figure>`).join('')}</div>`;
+}
 function scoreControl(candidate, criterion) {
     const key = scoreKey(candidate.id, criterion.id), row = state.scores[key] || {}, min = Number(criterionValue(criterion, 'MinScore')), max = Number(criterionValue(criterion, 'MaxScore'));
     return `<article class="svj-score-row" id="svj-score-${key.replace(':', '-')}"><div><strong>${escHtml(criterionValue(criterion, 'Title'))}</strong>${criterionValue(criterion, 'Description') ? `<p>${escHtml(criterionValue(criterion, 'Description'))}</p>` : ''}<small>ช่วงคะแนน ${min}–${max} · น้ำหนัก ${Number(criterionValue(criterion, 'Weight'))}</small></div><label><span>คะแนน</span><input type="number" min="${min}" max="${max}" step="0.01" value="${escHtml(row.score ?? '')}" data-svj-score="${key}" aria-label="คะแนน ${escHtml(criterionValue(criterion, 'Title'))} สำหรับ ${escHtml(candidate.displayName)}"></label><label class="svj-comment"><span>หมายเหตุ (ไม่บังคับ)</span><textarea rows="2" maxlength="1000" data-svj-comment="${key}">${escHtml(row.comment || '')}</textarea></label></article>`;
@@ -76,7 +82,7 @@ function validationMarkup() {
 
 function editMarkup() {
     const progress = scoreProgress(state.detail, state.scores);
-    return `${validationMarkup()}<section class="svj-sheet-summary"><div><strong>${progress.completed}/${progress.total}</strong><span>รายการที่ให้คะแนนแล้ว</span></div><div class="svj-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.completed}" aria-label="ความคืบหน้าการให้คะแนน"><span style="width:${progress.percent}%"></span></div><p data-svj-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage || 'ยังไม่มีการแก้ไข')}</p></section><form class="svj-score-form" data-svj-form novalidate>${(state.detail.candidates || []).map((candidate, index) => `<fieldset class="svj-candidate"><legend><span>${index + 1}</span>${escHtml(candidate.displayName)}</legend><p class="svj-candidate__code">รหัสรายการ ${escHtml(candidate.candidateNo)}</p>${(state.detail.criteria || []).map(criterion => scoreControl(candidate, criterion)).join('')}</fieldset>`).join('')}</form>`;
+    return `${validationMarkup()}<section class="svj-sheet-summary"><div><strong>${progress.completed}/${progress.total}</strong><span>รายการที่ให้คะแนนแล้ว</span></div><div class="svj-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.completed}" aria-label="ความคืบหน้าการให้คะแนน"><span style="width:${progress.percent}%"></span></div><p data-svj-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage || 'ยังไม่มีการแก้ไข')}</p></section><form class="svj-score-form" data-svj-form novalidate>${(state.detail.candidates || []).map((candidate, index) => `<fieldset class="svj-candidate"><legend><span>${index + 1}</span>${escHtml(candidate.displayName)}</legend><p class="svj-candidate__code">รหัสรายการ ${escHtml(candidate.candidateNo)}</p>${candidateGallery(candidate)}${(state.detail.criteria || []).map(criterion => scoreControl(candidate, criterion)).join('')}</fieldset>`).join('')}</form>`;
 }
 
 function reviewMarkup() {
@@ -102,11 +108,13 @@ function actionBarMarkup() {
 }
 
 function renderDetail() {
+    releaseSafetyVoteImages(state.page);
     const assignment = state.detail.assignment, status = assignmentState(assignment), campaignTitle = valueOf(state.selected || {}, 'CampaignTitle', 'campaignTitle') || 'งานประเมิน Safety Vote';
     const body = state.mode === 'receipt' ? receiptMarkup() : state.mode === 'review' ? reviewMarkup() : status === 'draft' ? editMarkup() : lockedMarkup();
     state.page.innerHTML = `<div class="svj-shell svj-shell--detail" data-sv-jury-workspace="2026-10-08-safety-vote-ux4-r1">${safetyVoteRoleNav({ active: 'jury', showJury: true, juryCount: state.assignments.length })}<header class="svj-detail-header"><button type="button" class="sv-icon-button" data-svj-action="back-list" aria-label="กลับงานประเมินของฉัน">←</button><div><p class="sv-eyebrow">รอบประเมิน #${Number(valueOf(assignment, 'StageID', 'stageId'))} · ชุดที่ ${Number(valueOf(assignment, 'SheetVersion', 'sheetVersion') || 1)}</p><h1>${escHtml(campaignTitle)}</h1><p>${state.detail.blind ? 'การประเมินแบบปกปิดตัวตน — ใช้เฉพาะชื่อแทนที่เซิร์ฟเวอร์ส่งมา' : 'ประเมินตามรายการและเกณฑ์ที่ได้รับมอบหมาย'}</p></div><span class="sv-status-badge sv-status-badge--${status === 'draft' ? 'scheduled' : status === 'submitted' ? 'published' : 'closed'}"><span class="sv-status-dot"></span>${JURY_VIEW_LABELS[status]}</span></header>${state.detail.blind ? '<section class="svj-blind-notice" role="note"><strong>Blind judging</strong><span>ห้ามใช้ข้อมูลนอกหน้าจอนี้เพื่อพยายามระบุตัวผู้ส่งผลงาน</span></section>' : ''}<main class="svj-main" aria-live="polite">${body}</main>${actionBarMarkup()}</div>`;
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'jury', current: 'jury', campaign: { CampaignType: 'jury_scoring', TitleTh: campaignTitle }, onPage: true }));
     bindDetail();
+    bindSafetyVoteImageGallery(state.page);hydrateSafetyVoteImages(state.page);
     if (state.errors.length) state.page.querySelector('.svp-validation')?.focus();
 }
 
@@ -214,6 +222,7 @@ async function openAssignment(id) {
     try {
         const response = await API.get(`/safety-vote/jury/assignments/${Number(id)}`);
         state.detail = response.data; state.selected = state.assignments.find(item => Number(item.id) === Number(id)) || { id };
+        await Promise.all((state.detail.candidates||[]).map(async candidate=>{const response=await API.get(`/safety-vote/gallery/candidates/${Number(candidate.id)}`,{suppressErrorLog:true}).catch(()=>null);candidate.gallery=response?.data?.items||[];}));
         state.scores = normalizeScores(state.detail.scores || []); state.errors = []; state.submitError = null; state.mode = 'edit';
         if (assignmentState(state.detail.assignment) === 'draft') {
             const local = readLocalDraft(id), version = Number(valueOf(state.detail.assignment, 'SheetVersion', 'sheetVersion') || 1);

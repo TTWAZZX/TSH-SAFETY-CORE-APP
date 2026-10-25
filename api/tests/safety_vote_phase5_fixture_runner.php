@@ -9,6 +9,8 @@ echo json_encode([
  'notificationKey'=>sv5_notification_key($x['notification']),
  'metadata'=>sv5_safe_metadata($x['metadata']),
  'report'=>sv5_report_model($x['report']),
- 'dashboard'=>sv5_dashboard_model($x['dashboard']),
+ 'dashboard'=>sv5_governed_dashboard_model($x['dashboard']),
+ 'officialPolicies'=>array_map('sv5_official_result_policy',$x['officialPolicies']??[]),
+ 'officialResults'=>array_map('sv5_official_result_model',$x['officialResults']??[]),
  'retention'=>sv5_retention($x['retention']['rows'],$x['retention']['days'],$x['retention']['now']),
 ],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);

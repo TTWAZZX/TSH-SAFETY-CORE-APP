@@ -3,6 +3,7 @@ export const WIZARD_STEPS = Object.freeze([
     ['details', 'ข้อมูลทั่วไป'],
     ['privacy', 'ความเป็นส่วนตัว'],
     ['content', 'เนื้อหา'],
+    ['jury', 'เกณฑ์และกรรมการ'],
     ['eligibility', 'ผู้มีสิทธิ์'],
     ['schedule', 'กำหนดเวลา'],
     ['results', 'การแสดงผล'],
@@ -15,7 +16,7 @@ export const CORE_TEMPLATES = Object.freeze([
     { key: 'secret_election', label: 'เลือกตั้งแบบลับ', description: 'บัตรลงคะแนนลับและผลหลังการรับรอง', privacyMode: 'secret_ballot', questionType: 'single_choice', advancedRequired: true },
     { key: 'submission_challenge', label: 'ส่งผลงานเข้าร่วม', description: 'รับผลงานและส่งต่อกระบวนการตรวจ', privacyMode: 'identified', questionType: 'long_text', advancedRequired: true },
     { key: 'nomination', label: 'เสนอชื่อบุคคลหรือผลงาน', description: 'เสนอชื่อ ขอความยินยอม และตรวจรายการ', privacyMode: 'identified', questionType: 'employee_picker', advancedRequired: true },
-    { key: 'jury_scoring', label: 'การประกวดโดยคณะกรรมการ', description: 'กำหนดเกณฑ์และมอบหมายกรรมการ', privacyMode: 'confidential', questionType: 'single_choice', advancedRequired: true }
+    { key: 'jury_scoring', label: 'การประกวดโดยคณะกรรมการ', description: 'กำหนดเกณฑ์และมอบหมายกรรมการ', privacyMode: 'confidential', questionType: 'single_choice', advancedRequired: false }
 ]);
 
 export const OPTION_TYPES = new Set(['single_choice', 'multiple_choice', 'yes_no_abstain', 'likert', 'ranking', 'matrix', 'allocation', 'token']);
@@ -69,6 +70,8 @@ export function defaultQuestion(type = 'survey', index = 0) {
         questionType,
         title: '',
         helpText: '',
+        imageFileId: null,
+        imageAltText: '',
         isRequired: true,
         minSelections: 1,
         maxSelections: questionType === 'multiple_choice' ? 2 : 1,
@@ -83,14 +86,45 @@ export function defaultQuestion(type = 'survey', index = 0) {
 export function createWizardDraft() {
     return {
         campaignType: 'survey', campaignCode: '', titleTh: '', titleEn: '', summary: '', description: '',
-        privacyMode: 'identified', privacyThreshold: 5, maxParticipationAttempts: 1, discoveryMode: 'eligible_only',
-        openAt: '', closeAt: '', resultVisibility: 'hidden_until_close',
+        privacyMode: 'identified', privacyThreshold: 5, maxParticipationAttempts: 1, discoveryMode: 'public_listing',
+        openAt: '', closeAt: '', resultVisibility: 'hidden_until_close', officialResultTopN: 5, resultReleasePolicy: 'automatic',
         liveLeaderboardEnabled: false, liveLeaderboardTopN: 5, liveLeaderboardScoreMode: 'count_percentage',
         liveLeaderboardVisibility: 'after_submit', liveLeaderboardRefreshSeconds: 15, liveLeaderboardPrivacyThreshold: 5,
         questions: [defaultQuestion('survey')],
+        juryCriteria: defaultJuryCriteria(), juryAssignments: [], juryStages: [],
+        juryScoring: { method: 'weighted_jury', minJurors: 1, tieBreak: 'candidate_id' },
+        juryBlind: true, juryConfigured: false,
         rules: [{ ruleGroup: 1, ruleOrder: 1, effect: 'include', attributeKey: 'all', operator: 'EQUALS', values: [], reason: 'พนักงานทั้งหมด' }],
         eligibilityPreview: null, eligibilityFrozen: false
     };
+}
+
+export function defaultJuryCriteria() {
+    return [
+        { criterionCode: 'CREATIVITY', title: 'ความคิดสร้างสรรค์', description: '', minScore: 1, maxScore: 5, weight: 40 },
+        { criterionCode: 'AESTHETICS', title: 'ความสวยงาม', description: '', minScore: 1, maxScore: 5, weight: 30 },
+        { criterionCode: 'PRACTICALITY', title: 'การนำไปใช้ได้จริง', description: '', minScore: 1, maxScore: 5, weight: 30 }
+    ];
+}
+
+export function juryValidationErrors(draft) {
+    if (draft.campaignType !== 'jury_scoring') return [];
+    const criteria = Array.isArray(draft.juryCriteria) ? draft.juryCriteria : [], errors = [];
+    if (!criteria.length) errors.push('ต้องมีเกณฑ์การให้คะแนนอย่างน้อยหนึ่งข้อ');
+    if (criteria.length > 50) errors.push('เพิ่มเกณฑ์ได้สูงสุด 50 ข้อ');
+    criteria.forEach((criterion, index) => {
+        const min = Number(criterion.minScore), max = Number(criterion.maxScore), weight = Number(criterion.weight);
+        if (!String(criterion.title || '').trim()) errors.push(`เกณฑ์ ${index + 1}: กรุณาระบุชื่อเกณฑ์`);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) errors.push(`เกณฑ์ ${index + 1}: คะแนนต่ำสุดต้องน้อยกว่าคะแนนสูงสุด`);
+        if (!Number.isFinite(weight) || weight <= 0 || weight > 100) errors.push(`เกณฑ์ ${index + 1}: น้ำหนักต้องอยู่ระหว่าง 0.01–100`);
+    });
+    const total = criteria.reduce((sum, criterion) => sum + Number(criterion.weight || 0), 0);
+    if (criteria.length && Math.abs(total - 100) > 0.01) errors.push('น้ำหนักเกณฑ์รวมต้องเท่ากับ 100%');
+    const activeAssignments = (draft.juryAssignments || []).filter(item => !['Revoked','Recused'].includes(item.Status || item.status));
+    if (!Number.isInteger(Number(draft.juryScoring?.minJurors)) || Number(draft.juryScoring?.minJurors) < 1) errors.push('จำนวนกรรมการขั้นต่ำต้องไม่น้อยกว่า 1 คน');
+    if (!activeAssignments.length) errors.push('กรุณาเลือกกรรมการอย่างน้อยหนึ่งคนจากข้อมูลพนักงาน');
+    else if (activeAssignments.length < Number(draft.juryScoring?.minJurors || 1)) errors.push('จำนวนกรรมการที่เลือกต้องไม่น้อยกว่าจำนวนกรรมการขั้นต่ำ');
+    return errors;
 }
 
 export function applyTemplate(draft, type) {
@@ -111,6 +145,7 @@ export function applyTemplate(draft, type) {
 export function questionValidationErrors(question, draft, index) {
     const errors = [];
     if (!question?.title?.trim()) errors.push('กรุณาระบุคำถามหรือหัวข้อ');
+    if (question?.imageFileId && !String(question.imageAltText || '').trim()) errors.push('รูปประจำคำถามต้องมีคำอธิบายภาพ');
     if (!questionTypesFor(draft.campaignType).includes(question.questionType)) errors.push('ประเภทคำถามไม่รองรับกับแคมเปญนี้');
     if (!questionTypeAllowedForPrivacy(question.questionType, draft.privacyMode)) errors.push('ประเภทคำถามนี้ไม่รองรับระดับความเป็นส่วนตัวที่เลือก');
     const options = Array.isArray(question.options) ? question.options : [];
@@ -170,14 +205,17 @@ export function validateStep(step, draft) {
     }
     if (step === 2 && !privacyValid(draft)) errors.push('บัตรลงคะแนนลับไม่สามารถแสดงผลระหว่างกิจกรรมได้');
     if (step === 3) errors.push(...contentValidationErrors(draft));
-    if (step === 4) {
+    if (step === 4) errors.push(...juryValidationErrors(draft));
+    if (step === 5) {
         if (!draft.rules.length) errors.push('ต้องมีกฎผู้มีสิทธิ์อย่างน้อยหนึ่งข้อ');
         if (!Number(draft.eligibilityPreview?.eligibleCount)) errors.push('ต้องตรวจสอบแล้วพบผู้มีสิทธิ์อย่างน้อยหนึ่งคน');
         if (!draft.eligibilityFrozen) errors.push('กรุณายืนยันและตรึงรายชื่อผู้มีสิทธิ์ก่อนดำเนินการต่อ');
     }
-    if (step === 5 && !scheduleValid(draft)) errors.push('วันเวลาเปิดต้องอยู่ก่อนวันเวลาปิด');
-    if (step === 6) {
+    if (step === 6 && !scheduleValid(draft)) errors.push('วันเวลาเปิดต้องอยู่ก่อนวันเวลาปิด');
+    if (step === 7) {
         if (!privacyValid(draft)) errors.push('การแสดงผลไม่สอดคล้องกับความเป็นส่วนตัว');
+        if (![5,10].includes(Number(draft.officialResultTopN))) errors.push('ผลอย่างเป็นทางการต้องกำหนดเป็น Top 5 หรือ Top 10');
+        if (!['manual','automatic'].includes(String(draft.resultReleasePolicy))) errors.push('นโยบายเผยแพร่ผลต้องเป็นแบบอัตโนมัติหรือให้แอดมินเผยแพร่');
         if (draft.liveLeaderboardEnabled && draft.campaignType !== 'popular_vote') errors.push('Live Leaderboard รองรับเฉพาะแคมเปญโหวตยอดนิยม');
         if (draft.liveLeaderboardEnabled && draft.questions.some(question => Number(question.maxSelections) !== 1 || !hasOptions(question.questionType))) errors.push('Live Leaderboard รองรับเฉพาะคำถามแบบตัวเลือกที่เลือกได้สูงสุด 1 รายการ');
         if (draft.liveLeaderboardEnabled && ![5,10].includes(Number(draft.liveLeaderboardTopN))) errors.push('จำนวนอันดับต้องเป็น Top 5 หรือ Top 10');
@@ -193,6 +231,7 @@ export function readinessItems(draft, persisted = {}) {
         { key: 'details', label: 'ข้อมูลทั่วไปบันทึกแล้ว', pass: Boolean(persisted.campaignId && draft.campaignCode.trim() && draft.titleTh.trim()) },
         { key: 'privacy', label: 'ความเป็นส่วนตัวและการแสดงผลสอดคล้องกัน', pass: privacyValid(draft) },
         { key: 'content', label: 'เนื้อหาผ่านการตรวจสอบและบันทึกแล้ว', pass: Boolean(persisted.builderSaved && contentValid(draft)) },
+        { key: 'jury', label: draft.campaignType === 'jury_scoring' ? 'กำหนดเกณฑ์และกรรมการแล้ว' : 'แคมเปญนี้ไม่ต้องตั้งค่าคณะกรรมการ', pass: draft.campaignType !== 'jury_scoring' || Boolean(draft.juryConfigured && !juryValidationErrors(draft).length) },
         { key: 'eligibility', label: 'ตรวจสอบและตรึงรายชื่อผู้มีสิทธิ์แล้ว', pass: Boolean(draft.eligibilityFrozen && Number(draft.eligibilityPreview?.eligibleCount) > 0) },
         { key: 'schedule', label: 'กำหนดเวลาเปิดและปิดถูกต้อง', pass: scheduleValid(draft) },
         { key: 'advanced', label: template.advancedRequired ? 'ตั้งค่าขั้นสูงตามประเภทแคมเปญในพื้นที่จัดการ' : 'ไม่ต้องตั้งค่าขั้นสูงเพิ่มเติม', pass: !template.advancedRequired }
@@ -214,6 +253,8 @@ export function campaignPayload(draft) {
         maxParticipationAttempts: draft.privacyMode === 'secret_ballot' ? 1 : Number(draft.maxParticipationAttempts || 1),
         discoveryMode: draft.discoveryMode,
         resultVisibility: draft.resultVisibility,
+        officialResultTopN: Number(draft.officialResultTopN || 5),
+        resultReleasePolicy: String(draft.resultReleasePolicy || 'automatic'),
         liveLeaderboardEnabled: Boolean(draft.liveLeaderboardEnabled),
         liveLeaderboardTopN: Number(draft.liveLeaderboardTopN || 5),
         liveLeaderboardScoreMode: draft.liveLeaderboardScoreMode,
@@ -231,6 +272,8 @@ export function builderPayload(draft) {
         questionType: question.questionType,
         title: question.title,
         helpText: question.helpText || null,
+        imageFileId: Number(question.imageFileId || 0) || null,
+        imageAltText: question.imageFileId ? String(question.imageAltText || '').trim() : null,
         isRequired: question.isRequired !== false,
         minSelections: Number(question.minSelections ?? (question.isRequired === false ? 0 : 1)),
         maxSelections: Number(question.maxSelections || 1),
