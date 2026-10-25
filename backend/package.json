@@ -222,6 +222,7 @@
     "preflight:safety-vote-phase7-controlled-production:candidate": "node scripts/safety-vote-phase7-controlled-production-preflight.js",
     "preflight:safety-vote-phase7-controlled-production:immutable": "node scripts/safety-vote-phase7-controlled-production-preflight.js --immutable",
     "preflight:safety-vote-phase7-controlled-production": "npm run verify:safety-vote-final-acceptance-phase7 && npm run preflight:safety-vote-phase7-controlled-production:candidate",
+    "deploy:safety-vote-phase7-final-production": "node scripts/safety-vote-phase7-production-deploy.js --execute DEPLOY_SAFETY_VOTE_PHASE7_FINAL_PRODUCTION",
     "test:safety-vote-workflow-results-phase01": "node scripts/safety-vote-workflow-results-phase01.test.js",
     "uat:safety-vote-workflow-results-phase01-browser": "node scripts/safety-vote-workflow-results-phase01-browser-uat.js",
     "verify:safety-vote-workflow-results-phase01": "npm run test:safety-vote-workflow-profile && npm run test:safety-vote-workflow-results-phase01 && npm run test:safety-vote-phase5-parity && npm run test:safety-vote-company-user-ux-phase5 && npm run test:safety-vote-close-finalization && npm run verify:php74-compatibility",

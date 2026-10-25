@@ -1,0 +1,184 @@
+<?php
+declare(strict_types=1);
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: private, no-store, max-age=0');
+header('X-Content-Type-Options: nosniff');
+
+const RUN_TOKEN_SHA256 = '__RUN_TOKEN_SHA256__';
+const CLEANUP_TOKEN_SHA256 = '__CLEANUP_TOKEN_SHA256__';
+const GUARD_NAME = '__GUARD_NAME__';
+const MIGRATIONS_JSON_B64 = '__MIGRATIONS_JSON_B64__';
+
+function respond(array $body, int $status = 200): void
+{
+    http_response_code($status);
+    echo json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function authorized(string $expected): bool
+{
+    $token = (string) ($_SERVER['HTTP_X_SAFETY_VOTE_RELEASE_TOKEN'] ?? '');
+    return $token !== '' && hash_equals($expected, hash('sha256', $token));
+}
+
+function integrity_ready(): bool
+{
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (!is_file($guard)) return false;
+    $expected = strtolower(trim((string) file_get_contents($guard)));
+    return preg_match('/^[a-f0-9]{64}$/', $expected) === 1
+        && hash_equals($expected, hash_file('sha256', __FILE__));
+}
+
+function database(): PDO
+{
+    $config = require __DIR__ . '/config.php';
+    if (!is_array($config)) throw new RuntimeException('CONFIG_INVALID');
+    $dsn = 'mysql:host=' . (string) $config['db_host'] . ';port=' . (int) $config['db_port']
+        . ';dbname=' . (string) $config['db_name'] . ';charset=utf8mb4';
+    return new PDO($dsn, (string) $config['db_user'], (string) $config['db_pass'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+}
+
+function setting(PDO $pdo, string $key): ?string
+{
+    $stmt = $pdo->prepare('SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey=?');
+    $stmt->execute([$key]);
+    $value = $stmt->fetchColumn();
+    return $value === false ? null : (string) $value;
+}
+
+function exists_table(PDO $pdo, string $table): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?');
+    $stmt->execute([$table]);
+    return (int) $stmt->fetchColumn() === 1;
+}
+
+function counts(PDO $pdo): array
+{
+    $tables = [
+        'campaigns' => 'SafetyVote_Campaigns',
+        'versions' => 'SafetyVote_CampaignVersions',
+        'eligibilitySnapshots' => 'SafetyVote_EligibilitySnapshots',
+        'eligibleVoters' => 'SafetyVote_EligibleVoters',
+        'ballots' => 'SafetyVote_Ballots',
+        'resultSnapshots' => 'SafetyVote_ResultSnapshots',
+        'resultRows' => 'SafetyVote_ResultRows',
+        'certifications' => 'SafetyVote_ResultCertifications',
+        'reports' => 'SafetyVote_Reports',
+        'files' => 'SafetyVote_Files',
+    ];
+    $result = [];
+    foreach ($tables as $key => $table) {
+        $result[$key] = exists_table($pdo, $table)
+            ? (int) $pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn()
+            : 0;
+    }
+    return $result;
+}
+
+function statements(string $sql): array
+{
+    $result = [];
+    $buffer = '';
+    $quote = '';
+    $lineComment = false;
+    $length = strlen($sql);
+    for ($i = 0; $i < $length; $i++) {
+        $char = $sql[$i];
+        $next = $i + 1 < $length ? $sql[$i + 1] : '';
+        if ($lineComment) {
+            if ($char === "\n") { $lineComment = false; $buffer .= $char; }
+            continue;
+        }
+        if ($quote === '' && $char === '-' && $next === '-') { $lineComment = true; $i++; continue; }
+        if ($quote === '' && ($char === "'" || $char === '"' || $char === '`')) { $quote = $char; $buffer .= $char; continue; }
+        if ($quote !== '') {
+            $buffer .= $char;
+            if ($char === '\\' && $i + 1 < $length) { $buffer .= $sql[++$i]; continue; }
+            if ($char === $quote) {
+                if ($i + 1 < $length && $sql[$i + 1] === $quote) { $buffer .= $sql[++$i]; continue; }
+                $quote = '';
+            }
+            continue;
+        }
+        if ($char === ';') {
+            $statement = trim($buffer);
+            if ($statement !== '') $result[] = $statement;
+            $buffer = '';
+            continue;
+        }
+        $buffer .= $char;
+    }
+    $statement = trim($buffer);
+    if ($statement !== '') $result[] = $statement;
+    if ($quote !== '') throw new RuntimeException('SQL_QUOTE_UNCLOSED');
+    return $result;
+}
+
+function schema_ready(PDO $pdo): bool
+{
+    $required = [
+        'SafetyVote_GalleryItems', 'SafetyVote_VisibilityRemediationBatches',
+        'SafetyVote_VisibilityRemediationItems', 'SafetyVote_CampaignVersionLineage',
+        'SafetyVote_MediaMutations',
+    ];
+    foreach ($required as $table) if (!exists_table($pdo, $table)) return false;
+    return setting($pdo, 'schema_version') === '2026-10-25-jury-work-items-atomic-media-r1'
+        && setting($pdo, 'jury_work_items_contract') === '2026-10-25-jury-work-items-r1'
+        && setting($pdo, 'atomic_media_contract') === '2026-10-25-atomic-media-r1';
+}
+
+if (!integrity_ready()) respond(['success' => false, 'code' => 'HELPER_INTEGRITY_FAILED'], 409);
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') respond(['success' => false, 'code' => 'METHOD_NOT_ALLOWED'], 405);
+$action = strtolower(trim((string) ($_SERVER['HTTP_X_SAFETY_VOTE_RELEASE_ACTION'] ?? '')));
+
+if ($action === 'cleanup') {
+    if (!authorized(CLEANUP_TOKEN_SHA256)) respond(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
+    $guard = __DIR__ . DIRECTORY_SEPARATOR . GUARD_NAME;
+    if (is_file($guard)) @unlink($guard);
+    $self = __FILE__;
+    register_shutdown_function(static function () use ($self): void { @unlink($self); });
+    respond(['success' => true, 'selfRemovalScheduled' => true]);
+}
+if (!authorized(RUN_TOKEN_SHA256)) respond(['success' => false, 'code' => 'UNAUTHORIZED'], 401);
+
+try {
+    $pdo = database();
+    $pdo->exec("SET SESSION sql_mode='STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'");
+    if ($action === 'inspect') {
+        respond(['success' => true, 'schemaVersion' => setting($pdo, 'schema_version'), 'schemaReady' => schema_ready($pdo), 'counts' => counts($pdo)]);
+    }
+    if ($action === 'enable') {
+        if (!schema_ready($pdo)) throw new RuntimeException('SCHEMA_NOT_READY');
+        $stmt = $pdo->prepare("INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES(?,?,'phase7_production') ON DUPLICATE KEY UPDATE SettingValue=VALUES(SettingValue),UpdatedBy=VALUES(UpdatedBy)");
+        foreach (['company_wide_campaign_visibility_enabled', 'company_visibility_remediation_enabled', 'eligibility_removal_enabled'] as $key) $stmt->execute([$key, '1']);
+        respond(['success' => true, 'schemaReady' => true, 'visibilityEnabled' => setting($pdo, 'company_wide_campaign_visibility_enabled') === '1', 'remediationEnabled' => setting($pdo, 'company_visibility_remediation_enabled') === '1', 'eligibilityRemovalEnabled' => setting($pdo, 'eligibility_removal_enabled') === '1']);
+    }
+    if ($action !== 'migrate') respond(['success' => false, 'code' => 'UNKNOWN_ACTION'], 400);
+    $before = counts($pdo);
+    $allowed = ['2026-10-20-eligibility-amendments-r1', '2026-10-25-jury-work-items-atomic-media-r1'];
+    if (!in_array(setting($pdo, 'schema_version'), $allowed, true)) throw new RuntimeException('UNEXPECTED_SCHEMA_VERSION');
+    $decoded = base64_decode(MIGRATIONS_JSON_B64, true);
+    $migrations = $decoded === false ? null : json_decode($decoded, true);
+    if (!is_array($migrations)) throw new RuntimeException('MIGRATION_PAYLOAD_INVALID');
+    $executed = [];
+    foreach ($migrations as $migration) {
+        $sql = base64_decode((string) ($migration['sql'] ?? ''), true);
+        if ($sql === false) throw new RuntimeException('MIGRATION_DECODE_FAILED');
+        foreach (statements($sql) as $statement) $pdo->exec($statement);
+        $executed[] = (string) ($migration['name'] ?? 'unknown');
+    }
+    $after = counts($pdo);
+    if ($before !== $after) throw new RuntimeException('PROTECTED_COUNTS_CHANGED');
+    if (!schema_ready($pdo)) throw new RuntimeException('POSTCHECK_SCHEMA_FAILED');
+    respond(['success' => true, 'schemaReady' => true, 'schemaVersion' => setting($pdo, 'schema_version'), 'protectedCountsPreserved' => true, 'counts' => $after, 'executed' => $executed]);
+} catch (Throwable $error) {
+    respond(['success' => false, 'code' => 'PHASE7_PRODUCTION_HELPER_FAILED', 'reason' => $error->getMessage()], 500);
+}
