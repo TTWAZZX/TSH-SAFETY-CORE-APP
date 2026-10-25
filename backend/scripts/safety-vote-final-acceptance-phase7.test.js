@@ -35,6 +35,22 @@ const adminEntry = read('public/js/pages/admin.js');
 const backendPackage = JSON.parse(read('backend/package.json'));
 const phase3ApiUat = read('backend/scripts/safety-vote-phase3-api-uat.js');
 
+const employeeMasterSqlSources = [
+    'api/handlers/safety_vote_planning.php',
+    'api/handlers/safety_vote_phase3.php',
+    'api/handlers/safety_vote_phase4.php',
+    'api/handlers/safety_vote_phase5.php',
+    'api/handlers/safety_vote_phase6.php',
+    'api/handlers/safety_vote_phase7.php',
+    'backend/routes/safety-vote-planning.js',
+    'backend/routes/safety-vote-phase3.js',
+    'backend/routes/safety-vote-phase4.js',
+    'backend/routes/safety-vote-phase5.js',
+    'backend/routes/safety-vote-phase6.js',
+    'backend/routes/safety-vote-phase7.js',
+    'backend/routes/safety-vote.js',
+].map(read);
+
 const campaignTypes = [
     'survey',
     'popular_vote',
@@ -60,6 +76,10 @@ for (const source of [nodeAuthorization, phpAuthorization]) {
     }
     assert(source.includes('CAMPAIGN_NOT_ELIGIBLE'), 'Eligibility denial code is missing');
     assert(source.includes('PARTICIPATION_ASSIGNMENT_REQUIRED'), 'Jury assignment denial code is missing');
+}
+
+for (const source of employeeMasterSqlSources) {
+    assert(!/\b(?:FROM|JOIN)\s+Employees\b/.test(source), 'Safety Vote SQL must use the production table name `employees` with exact Linux casing');
 }
 
 for (const source of [nodeVisibility, phpVisibility]) {

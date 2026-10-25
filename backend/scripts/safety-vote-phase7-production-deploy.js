@@ -24,6 +24,7 @@ const runtime = [
     'api/handlers/safety_vote_phase10_4.php', 'api/handlers/safety_vote_phase2.php',
     'api/handlers/safety_vote_phase3.php', 'api/handlers/safety_vote_phase4.php',
     'api/handlers/safety_vote_phase5.php', 'api/handlers/safety_vote_phase6.php',
+    'api/handlers/safety_vote_planning.php',
     'api/handlers/safety_vote_phase7.php', 'api/handlers/safety_vote_work_items.php',
     'public/js/utils/safety-vote-auth-image.js', 'public/js/pages/safety-vote-participation-model.mjs',
     'public/js/pages/safety-vote-results-model.mjs', 'public/js/pages/safety-vote-wizard-model.mjs',

@@ -218,7 +218,7 @@ async function audit(req,action,targetType,targetId,detail,metadata={}){try{awai
 
 async function masterProjection(queryable=db){
     const [[employees],[departments],[units],[positions]]=await Promise.all([
-        queryable.query('SELECT EmployeeID,EmployeeName,Department,Unit,Team,Position,Role,Password,MustChangePassword FROM Employees ORDER BY EmployeeID'),
+        queryable.query('SELECT EmployeeID,EmployeeName,Department,Unit,Team,Position,Role,Password,MustChangePassword FROM employees ORDER BY EmployeeID'),
         queryable.query('SELECT id,Name,Status,is_safety_core FROM Master_Departments ORDER BY Name'),
         queryable.query('SELECT id,name,department_id,short_code,sort_order FROM Master_SafetyUnits ORDER BY department_id,sort_order,name'),
         queryable.query('SELECT id,Name FROM Master_Positions ORDER BY Name'),
