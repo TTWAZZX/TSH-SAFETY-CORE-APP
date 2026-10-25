@@ -4,7 +4,7 @@ import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
-import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261024-safety-vote-gallery-r1';
+import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261025-safety-vote-final-phase7-r1';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-duplicate-media-r3';
 import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
@@ -12,7 +12,7 @@ import {
     CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignMatchesView, campaignType, filterCampaigns,
     isBallotCampaign, isChoiceQuestion, isQuestionVisible, participationState, privacyMode,
     privacyNotice, safeReceipt, validateParticipation, valueOf
-} from './safety-vote-participation-model.mjs?v=20261025-company-user-ux-phase5-r1';
+} from './safety-vote-participation-model.mjs?v=20261025-safety-vote-final-phase7-r1';
 
 const questionControlBase=questionControl;
 questionControl=function questionControlWithImage(question){
@@ -38,7 +38,7 @@ const state = {
     workflowDraftId: null, workflowReference: '', submissionGallery: [], submitError: null, objectUrls: new Set(), trackedPromotionEvents: new Set(),
     liveView: false, liveResults: null, liveError: null, liveInFlight: false, livePaused: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null,
     discoveryRefreshing: false, discoveryRefreshHandler: null, notificationsExpanded: false, catalogueMode: 'legacy_discovery',
-    peopleLabels: {}, peoplePickerCleanup: null, officialResults: null
+    peopleLabels: {}, peoplePickerCleanup: null, officialResults: null, publicWorks: []
 };
 
 function trackPromotionEvent(promotionId, eventType) {
@@ -259,6 +259,12 @@ function candidateGalleryMarkup(option, questionId) {
     return `<div class="sv-work-gallery sv-work-gallery--candidate" aria-label="ภาพผลงาน ${escHtml(option.label)}">${gallery.map((item,index)=>`<figure class="sv-work-gallery__item ${item.isCover?'is-cover':''}"><button type="button" class="svp-gallery-trigger" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="${group}" data-sv-gallery-label="${escHtml(item.altText||option.label)}" aria-label="เปิดภาพที่ ${index+1} ของ ${escHtml(option.label)}"><img data-svp-private-file="${Number(item.fileId)}" data-sv-auth-file="${Number(item.fileId)}" alt="${escHtml(item.altText||option.label)}" decoding="async"></button>${item.caption?`<figcaption>${escHtml(item.caption)}</figcaption>`:''}</figure>`).join('')}</div>`;
 }
 
+function publicWorkGalleryMarkup() {
+    if (campaignType(state.detail?.campaign) !== 'jury_scoring') return '';
+    const works = Array.isArray(state.publicWorks) ? state.publicWorks : [];
+    return `<section class="svp-aux svp-public-work-gallery" data-svp-public-work-gallery aria-labelledby="svp-public-work-gallery-title"><div><p class="sv-eyebrow">ผลงานที่เข้าประกวด</p><h2 id="svp-public-work-gallery-title">Public Work Gallery</h2><p>พนักงานทุกคนดูผลงานได้แบบอ่านอย่างเดียว การดูผลงานไม่ได้ให้สิทธิ์เข้าตัดสิน</p></div>${works.length ? `<div class="svp-card-grid">${works.map(work => `<article class="svp-campaign-card svp-public-work-card"><strong>${escHtml(work.title || work.workCode || 'ผลงาน')}</strong><span>${escHtml(work.workCode || '')}</span>${work.description ? `<p>${escHtml(work.description)}</p>` : ''}${candidateGalleryMarkup({ id: work.id, candidateId: work.id, label: work.title || work.workCode, gallery: work.gallery || [] }, 0)}</article>`).join('')}</div>` : '<p class="svp-note">ยังไม่มีผลงานที่เปิดให้แสดง</p>'}</section>`;
+}
+
 function submissionGalleryEditor() {
     const rows = state.submissionGallery || [];
     return `<section class="sv-work-gallery-editor" aria-labelledby="svp-submission-gallery-title"><div><h3 id="svp-submission-gallery-title">รูปผลงาน</h3><p>เพิ่มได้สูงสุด 12 รูป · JPG, PNG หรือ WebP รูปละไม่เกิน 10 MB</p></div><label class="sv-button sv-button--secondary"><span>เพิ่มรูปผลงาน</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple data-svp-submission-gallery ${rows.length>=12?'disabled':''}></label>${rows.length?`<div class="sv-work-gallery-editor__grid">${rows.map((item,index)=>`<article><img src="${escHtml(item.previewUrl||'')}" alt=""><label class="svp-field"><span>คำอธิบายภาพ</span><input maxlength="300" value="${escHtml(item.altText||'')}" data-svp-gallery-alt="${index}" required></label><label class="svp-field"><span>คำบรรยาย (ถ้ามี)</span><input maxlength="500" value="${escHtml(item.caption||'')}" data-svp-gallery-caption="${index}"></label><button type="button" class="sv-button sv-button--secondary" data-svp-gallery-remove="${index}">ลบรูป</button></article>`).join('')}</div>`:'<p class="svp-note">ยังไม่มีรูปผลงาน</p>'}</section>`;
@@ -370,7 +376,7 @@ function renderDetail() {
     const waitingForWindow = preOpen || ['Draft', 'Scheduled', 'Open'].includes(campaign.Status) && Number(campaign.VotingWindowOpen) !== 1;
     const opensAt = detail.opensAt || campaign.OpenAt || campaign.ScheduledOpenAt;
     const normalBody = state.mode === 'receipt' ? receiptMarkup() : state.mode === 'review' ? reviewMarkup() : submitted && !state.newAttempt ? participationHistoryMarkup() : previewOnly ? `<section class="svp-state svp-state--warning" role="status"><h2>โหมดตรวจสอบของผู้ดูแลระบบ</h2><p>คุณกำลังดูตัวอย่างป้ายและรายละเอียดกิจกรรม บัญชีนี้ไม่ได้อยู่ในรายชื่อผู้มีสิทธิ์ จึงไม่สามารถลงคะแนนหรือส่งรายการแทนผู้ใช้ได้</p></section>` : discoveryOnly ? `<section class="svp-state svp-state--warning" role="status"><h2>เปิดดูรายละเอียดได้ · ไม่มีสิทธิ์ลงคะแนน</h2><p>แคมเปญนี้แสดงในรายการสำหรับพนักงานทุกคน แต่บัญชีของคุณไม่อยู่ในรายชื่อผู้มีสิทธิ์ คุณจึงดูรายละเอียด กติกา และกำหนดการได้ โดยระบบจะไม่แสดงคำถามหรือปุ่มส่งคะแนน</p></section>` : detail.canSubmit ? (isBallotCampaign(campaign) ? ballotForm(detail) : workflowForm(campaign)) : waitingForWindow ? `<section class="svp-state svp-state--warning" role="status"><h2>ดูรายละเอียดได้แล้ว · ยังไม่เปิดลงคะแนน</h2><p>ป้ายนี้เปิดให้คุณดูรายละเอียด กติกา และกำหนดการล่วงหน้าได้ แต่ระบบยังปิดคำถามและปุ่มส่งคะแนน${opensAt ? ` จนถึง ${dateTime(opensAt)}` : ' จนกว่าผู้ดูแลระบบจะเปิดแคมเปญ'}</p></section>` : `<section class="svp-state svp-state--warning" role="status"><h2>กิจกรรมนี้ไม่เปิดรับรายการแล้ว</h2><p>คุณยังดูรายละเอียดและข้อกำหนดความเป็นส่วนตัวได้ แต่ไม่สามารถส่งรายการใหม่</p></section>`;
-    const body = state.liveView ? `<section class="svp-live-workspace"><div class="svp-live-actions"><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div><div data-svp-live-panel>${liveResultsMarkup(state.liveResults,{error:state.liveError,loading:state.liveInFlight,paused:state.livePaused})}</div></section>` : `${normalBody}${officialResultsMarkup(state.officialResults,campaign)}`;
+    const body = state.liveView ? `<section class="svp-live-workspace"><div class="svp-live-actions"><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svp-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div><div data-svp-live-panel>${liveResultsMarkup(state.liveResults,{error:state.liveError,loading:state.liveInFlight,paused:state.livePaused})}</div></section>` : `${publicWorkGalleryMarkup()}${normalBody}${officialResultsMarkup(state.officialResults,campaign)}`;
     const tabs = liveEnabled ? `<nav class="svp-detail-tabs" aria-label="กิจกรรม"><button type="button" data-svp-action="participation" aria-current="${!state.liveView?'page':'false'}">ลงคะแนน</button><button type="button" data-svp-action="live" aria-current="${state.liveView?'page':'false'}" ${!liveAllowed?'disabled':''}>ผลโหวตสด</button>${!liveAllowed?'<span>ส่งคะแนนก่อนจึงดูได้</span>':''}</nav>` : '';
     const promotion = detail.promotion || promotionForCampaign(campaign.id), promotionFileId = promotion?.mobileFileId || promotion?.desktopFileId;
     const promotionCover = preOpen && promotionFileId ? `<figure class="svp-preopen-cover" data-svp-media-state="loading" aria-busy="true">${promotionImageMarkup(promotionFileId, promotion.desktopFileId, promotion.altText || promotion.titleTh || campaign.TitleTh)}<figcaption>${escHtml(promotion.titleTh || campaign.TitleTh || '')}</figcaption></figure>` : '';
@@ -496,13 +502,17 @@ async function openCampaign(id) {
     stopLivePolling();
     clearObjectUrls();
     state.screen = 'detail'; state.loading = true; state.error = null; state.denied = false; state.moduleDisabled = false; state.errors = []; state.answers = {}; state.peopleLabels={}; state.receipt = null; state.requestKey = ''; state.workflowDraftId = null; state.workflowReference = ''; state.submissionGallery = []; state.submitError = null; state.officialResults = null;
-    state.page.innerHTML = loadingMarkup();
+    state.publicWorks = []; state.page.innerHTML = loadingMarkup();
     try {
         const response = await API.get(`/safety-vote/campaigns/${id}`);
         state.detail = response.data; state.mode = 'edit'; state.newAttempt = false; state.loading = false; state.liveView = false; state.liveResults = null; state.liveError = null; state.livePaused = false; state.liveFailures = 0;
         if (['Closed', 'Certified', 'Published'].includes(String(state.detail.campaign?.Status || ''))) {
             const official = await API.get(`/safety-vote/campaigns/${id}/official-results`, { suppressErrorLog: true }).catch(() => null);
             state.officialResults = official?.data || null;
+        }
+        if (campaignType(state.detail.campaign) === 'jury_scoring') {
+            const works = await API.get(`/safety-vote/campaigns/${id}/works`, { suppressErrorLog: true }).catch(() => null);
+            state.publicWorks = works?.data?.rows || [];
         }
         const candidateOptions=(state.detail.questions||[]).flatMap(question=>question.options||[]);
         await Promise.all(candidateOptions.map(async option=>{const response=await API.get(`/safety-vote/gallery/options/${Number(option.id)}`,{suppressErrorLog:true}).catch(()=>null);if(response){option.candidateId=Number(response.data.ownerId);option.gallery=response.data.items||[];}}));

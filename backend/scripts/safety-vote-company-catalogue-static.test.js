@@ -35,4 +35,4 @@ assert(ui.includes('การเข้าร่วมยังขึ้นอย
 assert(ui.includes('เปิดดูรายละเอียดได้ · ไม่มีสิทธิ์ลงคะแนน'));
 for(const marker of ['sv-observer','legacy eligible-only campaign missing from company catalogue','observerMutation.status,403','company-catalogue-browser-probe'])assert(uat.includes(marker),`Node/PHP API UAT missing ${marker}`);
 
-console.log('Safety Vote company-wide catalogue static contract: PASS (all published lifecycle campaigns, read-only detail, hidden/test exclusion, mutation denial, Node/PHP parity evidence)');\n
+console.log('Safety Vote company-wide catalogue static contract: PASS (all published lifecycle campaigns, read-only detail, hidden/test exclusion, mutation denial, Node/PHP parity evidence)');

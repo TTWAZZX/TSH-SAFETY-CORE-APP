@@ -18,6 +18,11 @@
     "verify:safety-vote-company-user-ux-phase5": "npm --prefix backend run verify:safety-vote-company-user-ux-phase5",
     "verify:safety-vote-company-visibility-remediation": "npm --prefix backend run verify:safety-vote-company-visibility-remediation",
     "verify:safety-vote-company-visibility-final": "npm --prefix backend run verify:safety-vote-company-visibility-final",
+    "verify:safety-vote-adaptive-wizard-phase5a": "npm --prefix backend run verify:safety-vote-adaptive-wizard-phase5a",
+    "verify:safety-vote-jury-work-items-atomic-media-phase5b6": "npm --prefix backend run verify:safety-vote-jury-work-items-atomic-media-phase5b6",
+    "verify:safety-vote-jury-matrix-atomic-frontend-phase5c6": "npm --prefix backend run verify:safety-vote-jury-matrix-atomic-frontend-phase5c6",
+    "verify:safety-vote-final-acceptance-phase7": "npm --prefix backend run verify:safety-vote-final-acceptance-phase7",
+    "preflight:safety-vote-phase7-controlled-production": "npm --prefix backend run preflight:safety-vote-phase7-controlled-production",
     "verify:safety-vote-phase6": "npm --prefix backend run verify:safety-vote-phase6",
     "verify:safety-vote-phase7": "npm --prefix backend run verify:safety-vote-phase7",
     "verify:safety-vote-phase831": "npm --prefix backend run verify:safety-vote-phase831",
@@ -106,6 +111,7 @@
     "uat:machine-safety-responsive": "npm --prefix backend run uat:machine-safety-responsive",
     "smoke:ky-email": "npm --prefix backend run smoke:ky-email",
     "smoke:remote": "npm --prefix backend run smoke:remote",
+    "uat:safety-vote-jury-work-items-browser": "npm --prefix backend run uat:safety-vote-jury-work-items-browser",
     "uat:preflight": "npm --prefix backend run uat:preflight"
   },
   "dependencies": {

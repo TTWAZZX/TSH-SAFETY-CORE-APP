@@ -36,6 +36,7 @@ require __DIR__ . '/handlers/safety_vote_live_results.php';
 require __DIR__ . '/handlers/safety_vote_eligibility_amendments.php';
 require __DIR__ . '/handlers/safety_vote_company_visibility_remediation.php';
 require __DIR__ . '/handlers/safety_vote_gallery.php';
+require __DIR__ . '/handlers/safety_vote_work_items.php';
 require __DIR__ . '/handlers/bbs_smart_card.php';
 require __DIR__ . '/handlers/bbs_checklists.php';
 require __DIR__ . '/handlers/bbs_observations.php';
@@ -743,6 +744,7 @@ try {
     handle_safety_vote_eligibility_amendment_routes($method, $path);
     handle_safety_vote_company_visibility_remediation_routes($method, $path);
     handle_safety_vote_gallery_routes($method, $path);
+    handle_safety_vote_work_item_routes($method, $path);
     sv104_guard_completed_campaign_activation($method, $path);
     handle_safety_vote_phase10_4_routes($method, $path);
     handle_safety_vote_phase7_routes($method, $path);

@@ -80,9 +80,17 @@ function validationMarkup() {
     return state.errors.length ? `<section class="svp-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบคะแนน</h2><ul>${state.errors.map(error => `<li><a href="#svj-score-${error.key.replace(':', '-')}">${escHtml(error.message)}</a></li>`).join('')}</ul></section>` : '';
 }
 
+function matrixSummaryMarkup() {
+    const matrix = state.detail?.matrix || {};
+    const works = Number(matrix.workCount ?? state.detail?.candidates?.length ?? 0);
+    const criteria = Number(matrix.criteriaCount ?? state.detail?.criteria?.length ?? 0);
+    const cells = Number(matrix.cellCount ?? works * criteria);
+    return `<section class="svj-matrix-contract" data-sv-jury-matrix="${escHtml(matrix.contractVersion || '2026-10-25-jury-work-criteria-matrix-r1')}" aria-label="สรุปตารางผลงานและเกณฑ์"><div><p class="sv-eyebrow">WORK × CRITERIA MATRIX</p><h2>ให้คะแนน ${works} ผลงาน ตาม ${criteria} เกณฑ์</h2><p>ต้องกรอกครบ ${cells} ช่องก่อนส่ง คะแนนที่ยืนยันแล้วจะถูกใช้เป็นข้อมูลต้นทางของ Frozen Result โดยตรง</p></div><dl><div><dt>ผลงาน</dt><dd>${works}</dd></div><div><dt>เกณฑ์</dt><dd>${criteria}</dd></div><div><dt>น้ำหนักรวม</dt><dd>${Number(matrix.weightTotal || 0)}%</dd></div></dl></section>`;
+}
+
 function editMarkup() {
     const progress = scoreProgress(state.detail, state.scores);
-    return `${validationMarkup()}<section class="svj-sheet-summary"><div><strong>${progress.completed}/${progress.total}</strong><span>รายการที่ให้คะแนนแล้ว</span></div><div class="svj-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.completed}" aria-label="ความคืบหน้าการให้คะแนน"><span style="width:${progress.percent}%"></span></div><p data-svj-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage || 'ยังไม่มีการแก้ไข')}</p></section><form class="svj-score-form" data-svj-form novalidate>${(state.detail.candidates || []).map((candidate, index) => `<fieldset class="svj-candidate"><legend><span>${index + 1}</span>${escHtml(candidate.displayName)}</legend><p class="svj-candidate__code">รหัสรายการ ${escHtml(candidate.candidateNo)}</p>${candidateGallery(candidate)}${(state.detail.criteria || []).map(criterion => scoreControl(candidate, criterion)).join('')}</fieldset>`).join('')}</form>`;
+    return `${validationMarkup()}${matrixSummaryMarkup()}<section class="svj-sheet-summary"><div><strong>${progress.completed}/${progress.total}</strong><span>รายการที่ให้คะแนนแล้ว</span></div><div class="svj-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.completed}" aria-label="ความคืบหน้าการให้คะแนน"><span style="width:${progress.percent}%"></span></div><p data-svj-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage || 'ยังไม่มีการแก้ไข')}</p></section><form class="svj-score-form" data-svj-form data-sv-result-binding="submitted_score_rows_to_frozen_result" novalidate>${(state.detail.candidates || []).map((candidate, index) => `<fieldset class="svj-candidate"><legend><span>${index + 1}</span>${escHtml(candidate.displayName)}</legend><p class="svj-candidate__code">รหัสรายการ ${escHtml(candidate.candidateNo)}</p>${candidateGallery(candidate)}${(state.detail.criteria || []).map(criterion => scoreControl(candidate, criterion)).join('')}</fieldset>`).join('')}</form>`;
 }
 
 function reviewMarkup() {

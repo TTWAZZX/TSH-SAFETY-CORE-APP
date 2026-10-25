@@ -56,6 +56,7 @@ app.use('/api/safety-vote',safetyVoteRoutes);
 app.use('/api/safety-vote',safetyVoteEligibilityAmendmentRoutes);
 app.use('/api/safety-vote',require('../routes/safety-vote-company-visibility-remediation'));
 app.use('/api/safety-vote',require('../routes/safety-vote-gallery'));
+app.use('/api/safety-vote',require('../routes/safety-vote-work-items'));
 app.use('/api/safety-vote',require('../routes/safety-vote-engagement'));
 app.use('/api/safety-vote',require('../routes/safety-vote-planning'));
 app.use('/api/safety-vote',require('../routes/safety-vote-analytics'));

@@ -30,6 +30,7 @@ require_once __DIR__.'/../../api/handlers/safety_vote_live_results.php';
 require_once __DIR__.'/../../api/handlers/safety_vote_eligibility_amendments.php';
 require_once __DIR__.'/../../api/handlers/safety_vote_company_visibility_remediation.php';
 require_once __DIR__.'/../../api/handlers/safety_vote_gallery.php';
+require_once __DIR__.'/../../api/handlers/safety_vote_work_items.php';
 $path=$requestPath;
 if($path==='/__ready')json_response(['success'=>true]);
 if(strpos($path,'/api')===0)$path=substr($path,4)?:'/';
@@ -41,6 +42,7 @@ if(handle_safety_vote_live_results_routes((string)($_SERVER['REQUEST_METHOD']??'
 if(handle_safety_vote_eligibility_amendment_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_company_visibility_remediation_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_gallery_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
+if(handle_safety_vote_work_item_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase10_4_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase7_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;
 if(handle_safety_vote_phase6_routes((string)($_SERVER['REQUEST_METHOD']??'GET'),$path))exit;

@@ -44,4 +44,4 @@ let admin,db;
     if(db)await db.end().catch(()=>{});
     if(admin&&guard.test(databaseName))await admin.query(`DROP DATABASE IF EXISTS \`${databaseName}\``).catch(()=>{});
     if(admin)await admin.end().catch(()=>{});
-});\n
+});

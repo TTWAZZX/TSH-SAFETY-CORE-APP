@@ -117,6 +117,7 @@ const safetyVoteAnalyticsRoutes = require('./routes/safety-vote-analytics');
 const safetyVoteLiveResultsRoutes = require('./routes/safety-vote-live-results');
 const safetyVoteEligibilityAmendmentRoutes = require('./routes/safety-vote-eligibility-amendments');
 const safetyVoteGalleryRoutes = require('./routes/safety-vote-gallery');
+const safetyVoteWorkItemRoutes = require('./routes/safety-vote-work-items');
 const { createBbsRolloutAccessMiddleware } = require('./services/bbs-rollout-access');
 
 // =================================================================
@@ -871,7 +872,7 @@ app.post('/api/register', registerLimiter, async (req, res) => {
                         Department: department,
                         Unit: unit,
                         Position: position,
-                        Password: 'PENDING_REGISTRATION_PASSWORD',
+                        Password: password,
                         MustChangePassword: 0,
                     },
                     { EmployeeName: employeeName, Department: department, Unit: unit, Position: position },
@@ -2069,6 +2070,7 @@ app.use('/api/safety-vote',       authenticateToken, safetyVoteLiveResultsRoutes
 app.use('/api/safety-vote',       authenticateToken, safetyVoteEligibilityAmendmentRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteCompanyVisibilityRemediationRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVoteGalleryRoutes);
+app.use('/api/safety-vote',       authenticateToken, safetyVoteWorkItemRoutes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase104Routes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase7Routes);
 app.use('/api/safety-vote',       authenticateToken, safetyVotePhase6Routes);

@@ -38,6 +38,7 @@ const { pathToFileURL } = require('node:url');
     assert(workspace.includes('/official-results'), 'Admin preview must load the authoritative official-result endpoint');
     assert(!workspace.includes("if (isSecretCampaign(state.campaign) && current?.published)"), 'Official preview must not be limited to secret elections');
     assert(workspace.includes('data-svr-no-result'), 'Admin preview must expose explicit no-result state');
-    for (const source of [workspace, adminFoundation, adminEntry, main, html]) assert(source.includes('20261025-result-release-policy-r1'), 'Phase 0/1 cache chain is incomplete');
+    for (const source of [workspace, adminFoundation]) assert(source.includes('20261025-result-release-policy-r1'), 'Official Results cache chain is incomplete');
+    for (const source of [adminFoundation, adminEntry, main, html]) assert(source.includes('20261025-adaptive-wizard-phase5a-r1'), 'Adaptive Wizard cache chain is incomplete');
     console.log('Safety Vote Phase 0/1 workflow and Official Results preview: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

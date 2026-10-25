@@ -1,14 +1,14 @@
-export const WIZARD_STEPS = Object.freeze([
-    ['type', 'ประเภทแคมเปญ'],
-    ['details', 'ข้อมูลทั่วไป'],
-    ['privacy', 'ความเป็นส่วนตัว'],
-    ['content', 'เนื้อหา'],
-    ['jury', 'เกณฑ์และกรรมการ'],
-    ['eligibility', 'ผู้มีสิทธิ์'],
-    ['schedule', 'กำหนดเวลา'],
-    ['results', 'การแสดงผล'],
-    ['review', 'ตรวจสอบและเปิดใช้งาน']
-]);
+import { resolveWorkflowProfile, wizardStepsFor as profileWizardStepsFor } from './safety-vote-workflow-profile.mjs';
+
+export function workflowProfileFor(draft = {}) {
+    return resolveWorkflowProfile(draft, { workSource: draft.workSource });
+}
+
+export function wizardStepsFor(draft = {}) {
+    return profileWizardStepsFor(draft, { workSource: draft.workSource }).map(step => Object.freeze([...step]));
+}
+
+export const WIZARD_STEPS = Object.freeze(wizardStepsFor({ campaignType: 'survey' }));
 
 export const CORE_TEMPLATES = Object.freeze([
     { key: 'survey', label: 'แบบสำรวจความคิดเห็น', description: 'เก็บคำตอบหนึ่งข้อหรือหลายข้อ', privacyMode: 'identified', questionType: 'rating' },
@@ -83,14 +83,19 @@ export function defaultQuestion(type = 'survey', index = 0) {
     };
 }
 
+export function defaultWork(index = 0) {
+    return { id: null, workCode: `WORK-${index + 1}`, title: '', description: '', sourceCandidateId: null, gallery: [] };
+}
+
 export function createWizardDraft() {
     return {
         campaignType: 'survey', campaignCode: '', titleTh: '', titleEn: '', summary: '', description: '',
+        workSource: null,
         privacyMode: 'identified', privacyThreshold: 5, maxParticipationAttempts: 1, discoveryMode: 'public_listing',
         openAt: '', closeAt: '', resultVisibility: 'hidden_until_close', officialResultTopN: 5, resultReleasePolicy: 'automatic',
         liveLeaderboardEnabled: false, liveLeaderboardTopN: 5, liveLeaderboardScoreMode: 'count_percentage',
         liveLeaderboardVisibility: 'after_submit', liveLeaderboardRefreshSeconds: 15, liveLeaderboardPrivacyThreshold: 5,
-        questions: [defaultQuestion('survey')],
+        questions: [defaultQuestion('survey')], works: [],
         juryCriteria: defaultJuryCriteria(), juryAssignments: [], juryStages: [],
         juryScoring: { method: 'weighted_jury', minJurors: 1, tieBreak: 'candidate_id' },
         juryBlind: true, juryConfigured: false,
@@ -132,11 +137,12 @@ export function applyTemplate(draft, type) {
     return {
         ...draft,
         campaignType: template.key,
+        workSource: template.key === 'jury_scoring' ? 'admin_curated' : null,
         privacyMode: template.privacyMode,
         maxParticipationAttempts: template.privacyMode === 'secret_ballot' ? 1 : Number(draft.maxParticipationAttempts || 1),
         resultVisibility: template.key === 'secret_election' ? 'certified_only' : 'hidden_until_close',
         liveLeaderboardEnabled: false,
-        questions: [defaultQuestion(template.key)],
+        questions: [defaultQuestion(template.key)], works: template.key === 'jury_scoring' ? [defaultWork()] : [],
         eligibilityPreview: null,
         eligibilityFrozen: false
     };
@@ -176,6 +182,18 @@ export function contentValid(draft) {
 }
 
 export function contentValidationErrors(draft) {
+    if (draft.campaignType === 'jury_scoring') {
+        const works = Array.isArray(draft.works) ? draft.works : [], errors = [];
+        if (draft.workSource === 'admin_curated' && !works.length) errors.push('ต้องมีผลงานที่เข้าประกวดอย่างน้อยหนึ่งรายการ');
+        if (works.length > 100) errors.push('เพิ่มผลงานได้สูงสุด 100 รายการ');
+        const codes = works.map((work,index) => String(work.workCode || `WORK-${index+1}`).trim().toUpperCase());
+        if (new Set(codes).size !== codes.length) errors.push('รหัสผลงานต้องไม่ซ้ำกัน');
+        works.forEach((work,index) => {
+            if (!String(work.title || '').trim()) errors.push(`ผลงาน ${index+1}: กรุณาระบุชื่อผลงาน`);
+            if (draft.workSource === 'imported' && !Number(work.sourceCandidateId)) errors.push(`ผลงาน ${index+1}: กรุณาเลือกผลงานต้นทาง`);
+        });
+        return errors;
+    }
     if (!Array.isArray(draft.questions) || !draft.questions.length) return ['ต้องมีคำถามอย่างน้อยหนึ่งข้อ'];
     const errors=[];
     if(draft.questions.length>50)errors.push('เพิ่มคำถามได้สูงสุด 50 ข้อ');
@@ -199,14 +217,15 @@ export function privacyValid(draft) {
 
 export function validateStep(step, draft) {
     const errors = [];
+    const profile = workflowProfileFor(draft);
     if (step === 0 && !CORE_TEMPLATES.some(item => item.key === draft.campaignType)) errors.push('กรุณาเลือกประเภทแคมเปญ');
     if (step === 1) {
         if (!draft.titleTh.trim()) errors.push('กรุณาระบุชื่อแคมเปญภาษาไทย');
     }
     if (step === 2 && !privacyValid(draft)) errors.push('บัตรลงคะแนนลับไม่สามารถแสดงผลระหว่างกิจกรรมได้');
     if (step === 3) errors.push(...contentValidationErrors(draft));
-    if (step === 4) errors.push(...juryValidationErrors(draft));
-    if (step === 5) {
+    if (step === 4 && profile.juryRequired) errors.push(...juryValidationErrors(draft));
+    if (step === 5 && profile.eligibilityRequired) {
         if (!draft.rules.length) errors.push('ต้องมีกฎผู้มีสิทธิ์อย่างน้อยหนึ่งข้อ');
         if (!Number(draft.eligibilityPreview?.eligibleCount)) errors.push('ต้องตรวจสอบแล้วพบผู้มีสิทธิ์อย่างน้อยหนึ่งคน');
         if (!draft.eligibilityFrozen) errors.push('กรุณายืนยันและตรึงรายชื่อผู้มีสิทธิ์ก่อนดำเนินการต่อ');
@@ -227,12 +246,13 @@ export function validateStep(step, draft) {
 
 export function readinessItems(draft, persisted = {}) {
     const template = templateFor(draft.campaignType);
+    const profile = workflowProfileFor(draft);
     return [
         { key: 'details', label: 'ข้อมูลทั่วไปบันทึกแล้ว', pass: Boolean(persisted.campaignId && draft.campaignCode.trim() && draft.titleTh.trim()) },
         { key: 'privacy', label: 'ความเป็นส่วนตัวและการแสดงผลสอดคล้องกัน', pass: privacyValid(draft) },
         { key: 'content', label: 'เนื้อหาผ่านการตรวจสอบและบันทึกแล้ว', pass: Boolean(persisted.builderSaved && contentValid(draft)) },
-        { key: 'jury', label: draft.campaignType === 'jury_scoring' ? 'กำหนดเกณฑ์และกรรมการแล้ว' : 'แคมเปญนี้ไม่ต้องตั้งค่าคณะกรรมการ', pass: draft.campaignType !== 'jury_scoring' || Boolean(draft.juryConfigured && !juryValidationErrors(draft).length) },
-        { key: 'eligibility', label: 'ตรวจสอบและตรึงรายชื่อผู้มีสิทธิ์แล้ว', pass: Boolean(draft.eligibilityFrozen && Number(draft.eligibilityPreview?.eligibleCount) > 0) },
+        { key: 'operation', label: profile.juryRequired ? 'กำหนดเกณฑ์ตัดสินและรายชื่อกรรมการแล้ว' : `${profile.operationLabel}พร้อมใช้งาน`, pass: !profile.juryRequired || Boolean(draft.juryConfigured && !juryValidationErrors(draft).length) },
+        { key: 'eligibility', label: profile.eligibilityRequired ? `ตรวจสอบและตรึง${profile.participantLabel}แล้ว` : `ไม่ต้องตรึง${profile.participantLabel}สำหรับแหล่งผลงานนี้`, pass: !profile.eligibilityRequired || Boolean(draft.eligibilityFrozen && Number(draft.eligibilityPreview?.eligibleCount) > 0) },
         { key: 'schedule', label: 'กำหนดเวลาเปิดและปิดถูกต้อง', pass: scheduleValid(draft) },
         { key: 'advanced', label: template.advancedRequired ? 'ตั้งค่าขั้นสูงตามประเภทแคมเปญในพื้นที่จัดการ' : 'ไม่ต้องตั้งค่าขั้นสูงเพิ่มเติม', pass: !template.advancedRequired }
     ];

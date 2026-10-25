@@ -6,4 +6,4 @@ INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES
 ('company_wide_campaign_visibility_enabled','0','migration')
 ON DUPLICATE KEY UPDATE
   SettingValue=IF(SettingKey='company_wide_campaign_visibility_contract',VALUES(SettingValue),SettingValue),
-  UpdatedBy='migration';\n
+  UpdatedBy='migration';

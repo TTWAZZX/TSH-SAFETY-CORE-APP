@@ -9,7 +9,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
 const ENABLE_ARGUMENT = '--enable-local-uat';
-const LATEST_SCHEMA = '2026-10-25-result-release-policy-r1';
+const LATEST_SCHEMA = '2026-10-25-jury-work-items-atomic-media-r1';
 const GATES = [
     'module_enabled',
     'engagement_enabled',
@@ -35,6 +35,7 @@ const MIGRATIONS = [
     '20261024_safety_vote_candidate_submission_gallery.sql',
     '20261025_safety_vote_official_topn_next_cycle.sql',
     '20261025_safety_vote_result_release_policy.sql',
+    '20261025_safety_vote_jury_work_items_atomic_media.sql',
 ];
 const REQUIRED_TABLES = [
     'SafetyVote_Settings',
@@ -151,7 +152,8 @@ async function main() {
 
         for (const migration of MIGRATIONS) {
             const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', migration), 'utf8');
-            await db.query(sql);
+            try { await db.query(sql); }
+            catch (error) { throw new Error(`Local UAT migration failed at ${migration}: ${error.message}`); }
         }
         await db.query(
             `INSERT INTO SafetyVote_Settings(SettingKey,SettingValue,UpdatedBy) VALUES

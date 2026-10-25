@@ -29,4 +29,4 @@ assert.match(migration,/company_wide_campaign_visibility_enabled','0'/);
 assert.doesNotMatch(migration,/UPDATE\s+SafetyVote_Campaigns|DELETE\s+FROM\s+SafetyVote_Campaigns/i);
 assert.doesNotMatch(rollback,/DROP\s+TABLE|DELETE\s+FROM|UPDATE\s+SafetyVote_Campaigns/i);
 
-console.log('Safety Vote company-wide visibility static contract: PASS (central contract, fail-closed gate, company-wide new default, participation remains eligibility-gated)');\n
+console.log('Safety Vote company-wide visibility static contract: PASS (central contract, fail-closed gate, company-wide new default, participation remains eligibility-gated)');

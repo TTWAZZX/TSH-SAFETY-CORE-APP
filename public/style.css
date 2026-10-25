@@ -883,6 +883,12 @@ body {
 .svj-blind-notice { display: flex; align-items: center; gap: .75rem; margin: 1rem 0; padding: .85rem 1rem; border: 1px solid #a5b4fc; border-radius: .8rem; background: #eef2ff; color: #312e81; }
 .svj-main { width: min(100%, 88rem); margin: 1rem auto 0; }
 .svj-sheet-summary { display: grid; grid-template-columns: auto minmax(180px, 1fr) auto; gap: .8rem; align-items: center; margin-bottom: .8rem; padding: .85rem 1rem; border: 1px solid #dbe4ee; border-radius: .8rem; background: #fff; }
+.svj-matrix-contract { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: center; margin-bottom: .8rem; padding: 1rem; border: 1px solid #99f6e4; border-radius: .9rem; background: #f0fdfa; }
+.svj-matrix-contract h2, .svj-matrix-contract p { margin: .2rem 0; }
+.svj-matrix-contract dl { display: grid; grid-template-columns: repeat(3, minmax(74px, 1fr)); gap: .5rem; margin: 0; }
+.svj-matrix-contract dl div { padding: .55rem; border-radius: .65rem; background: #fff; text-align: center; }
+.svj-matrix-contract dt { color: #64748b; font-size: .75rem; }
+.svj-matrix-contract dd { margin: .1rem 0 0; color: #065f46; font-weight: 800; }
 .svj-sheet-summary > div:first-child { display: grid; }
 .svj-sheet-summary strong { font-size: 1.25rem; }
 .svj-sheet-summary span, .svj-sheet-summary p { margin: 0; color: #64748b; font-size: .8rem; }
@@ -926,7 +932,7 @@ body {
     .svj-shell { padding: .7rem; padding-bottom: calc(10rem + env(safe-area-inset-bottom)); }
     .svj-hero { align-items: stretch; flex-direction: column; }
     .svj-progress-card { min-width: 0; }
-    .svj-toolbar, .svj-card-grid, .svj-sheet-summary, .svj-review-grid, .svj-receipt dl { grid-template-columns: 1fr; }
+    .svj-toolbar, .svj-card-grid, .svj-sheet-summary, .svj-matrix-contract, .svj-review-grid, .svj-receipt dl { grid-template-columns: 1fr; }
     .svj-tabs { order: 2; }
     .svj-detail-header { grid-template-columns: 44px minmax(0, 1fr); }
     .svj-detail-header > .sv-status-badge { grid-column: 2; justify-self: start; }

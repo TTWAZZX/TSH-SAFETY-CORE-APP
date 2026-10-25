@@ -81,7 +81,7 @@ export async function apiFetch(endpoint, options = {}) {
 
 // Multipart upload helper with progress reporting. Keep normal reads and JSON
 // writes on fetch; XHR is used only when the caller needs upload progress.
-export function apiUpload(endpoint, body, { method = 'POST', onProgress = null, suppressErrorLog = false } = {}) {
+export function apiUpload(endpoint, body, { method = 'POST', onProgress = null, suppressErrorLog = false, headers = {} } = {}) {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open(method, `${API_BASE}${endpoint}`);
@@ -89,6 +89,7 @@ export function apiUpload(endpoint, body, { method = 'POST', onProgress = null, 
         const token = TSHSession.getToken();
         if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         xhr.setRequestHeader('Accept', 'application/json');
+        Object.entries(headers || {}).forEach(([name, value]) => { if (value !== undefined && value !== null) xhr.setRequestHeader(name, String(value)); });
         xhr.upload.addEventListener('progress', event => {
             if (!event.lengthComputable || typeof onProgress !== 'function') return;
             onProgress(Math.max(0, Math.min(100, Math.round(event.loaded / event.total * 100))), event);

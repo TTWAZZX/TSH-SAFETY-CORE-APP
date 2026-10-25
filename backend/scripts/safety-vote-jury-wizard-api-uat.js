@@ -22,7 +22,8 @@ const migrations = [
     '20261010_safety_vote_ux_phase9c_engagement_analytics.sql', '20261015_safety_vote_live_results.sql',
     '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql',
     '20261020_safety_vote_eligibility_amendments.sql', '20261024_safety_vote_question_images.sql',
-    '20261024_safety_vote_candidate_submission_gallery.sql'
+    '20261024_safety_vote_candidate_submission_gallery.sql', '20261025_safety_vote_official_topn_next_cycle.sql',
+    '20261025_safety_vote_result_release_policy.sql', '20261025_safety_vote_jury_work_items_atomic_media.sql'
 ];
 
 async function seed(name) {
@@ -65,6 +66,25 @@ async function lifecycle(label, base, name) {
     response = await call(base, '/admin/campaigns', { method: 'POST', body: { titleTh: `Jury Wizard ${label}`, campaignType: 'jury_scoring', privacyMode: 'confidential', resultVisibility: 'certified_only', privacyThreshold: 5 } });
     assert.strictEqual(response.status, 201, JSON.stringify(response.data));
     const campaignId = Number(response.data.data.id);
+    response = await call(base, `/admin/campaigns/${campaignId}/works`, { method: 'PUT', body: { workSource: 'admin_curated', works: [{ workCode:'WORK-01', title:'Work one', description:'Phase 5B governed work item' },{ workCode:'WORK-02', title:'Work two', description:'Second governed work item' }] } });
+    assert.strictEqual(response.status, 200, JSON.stringify(response.data));
+    assert.strictEqual(response.data.data.serverConfirmed, true);
+    const workId = Number(response.data.data.rows[0].id);
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+    const uploadDirectory = label === 'node' ? path.join(root, 'backend', 'private-uploads', 'safety-vote') : path.join(root, 'api', 'private', 'safety-vote');
+    const filesBeforeRejectedUpload = new Set(await fs.promises.readdir(uploadDirectory).catch(() => []));
+    const rejectedForm = new FormData(); rejectedForm.append('scopeType', 'work_cover'); rejectedForm.append('scopeId', '999999999'); rejectedForm.append('altText', 'Missing work'); rejectedForm.append('file', new Blob([png], { type: 'image/png' }), 'missing-work.png');
+    const rejectedUpload = await fetch(`${base}/admin/campaigns/${campaignId}/media/atomic`, { method: 'POST', headers: { Authorization: 'Bearer sv-admin', 'Idempotency-Key': `missing-work-${label}` }, body: rejectedForm });
+    assert.strictEqual(rejectedUpload.status, 404, await rejectedUpload.text());
+    assert.deepStrictEqual(new Set(await fs.promises.readdir(uploadDirectory).catch(() => [])), filesBeforeRejectedUpload, 'Rejected atomic upload must not leave private bytes');
+    const uploadWorkCover = async () => { const form = new FormData(); form.append('scopeType', 'work_cover'); form.append('scopeId', String(workId)); form.append('altText', 'Work one cover'); form.append('file', new Blob([png], { type: 'image/png' }), 'work-one.png'); const uploaded = await fetch(`${base}/admin/campaigns/${campaignId}/media/atomic`, { method: 'POST', headers: { Authorization: 'Bearer sv-admin', 'Idempotency-Key': `work-cover-${label}` }, body: form }); return { status: uploaded.status, data: await uploaded.json() }; };
+    response = await uploadWorkCover();
+    assert.strictEqual(response.status, 201, JSON.stringify(response.data));
+    assert.strictEqual(response.data.data.serverConfirmed, true);
+    const coverFileId = Number(response.data.data.fileId);
+    response = await uploadWorkCover();
+    assert.strictEqual(response.status, 200, JSON.stringify(response.data));
+    assert.strictEqual(response.data.data.replayed, true);
     response = await call(base, `/admin/campaigns/${campaignId}/stages`, { method: 'PUT', body: { stages: [{ stageKey: 'JURY_FINAL', stageName: 'รอบตัดสิน', stageType: 'jury', sequenceNo: 1, advanceRule: { blind: true }, resultVisibility: 'admin_only', status: 'Draft' }] } });
     assert.strictEqual(response.status, 200, JSON.stringify(response.data));
     const stageId = Number(response.data.data.rows[0].id);
@@ -81,7 +101,20 @@ async function lifecycle(label, base, name) {
     assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments`, { method: 'POST', body: { stageId, jurorEmployeeId: 'SV-USER' } })).status, 409);
 
     const db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: name });
+    await db.query("UPDATE SafetyVote_CampaignVersions SET OpenAt=DATE_SUB(NOW(),INTERVAL 1 HOUR),CloseAt=DATE_ADD(NOW(),INTERVAL 1 DAY) WHERE id=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?)", [campaignId]);
+    response = await call(base, `/admin/campaigns/${campaignId}/readiness`);
+    assert.strictEqual(response.status, 200, JSON.stringify(response.data));
+    assert.strictEqual(response.data.data.workflowProfile.eligibilityRequired, false);
+    assert.strictEqual(response.data.data.ready, true, JSON.stringify(response.data.data.blockers));
+    assert(response.data.data.checks.some(check => check.code === 'ELIGIBILITY_NOT_REQUIRED' && check.ok === true));
+    assert(!response.data.data.blockers.some(check => String(check.code).startsWith('ELIGIB')));
     await db.query("UPDATE SafetyVote_Campaigns SET Status='Open' WHERE id=?", [campaignId]);
+    response = await call(base, `/campaigns/${campaignId}/works`);
+    assert.strictEqual(response.status, 200, JSON.stringify(response.data));
+    assert.strictEqual(response.data.data.readOnly, true);
+    assert.strictEqual(response.data.data.rows.length, 2);
+    const fileResponse = await fetch(`${base}/files/${coverFileId}`, { headers: { Authorization: 'Bearer sv-user' } });
+    assert.strictEqual(fileResponse.status, 200, await fileResponse.text());
     response = await call(base, `/admin/campaigns/${campaignId}/jury/assignments`, { method: 'POST', body: { stageId, jurorEmployeeId: 'SV-USER2' } });
     assert.strictEqual(response.status, 201, JSON.stringify(response.data));
     const liveId = Number(response.data.data.id);
@@ -96,12 +129,14 @@ async function lifecycle(label, base, name) {
     assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${liveId}`, { method: 'DELETE' })).status, 200);
     await db.query("UPDATE SafetyVote_JuryAssignments SET Status='Submitted' WHERE id=?", [immutableId]);
     assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${immutableId}`, { method: 'DELETE' })).status, 409);
-    const [[proof]] = await db.query("SELECT (SELECT COUNT(*) FROM SafetyVote_JuryAssignments WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?)) assignments,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE CampaignID=? AND Action IN ('SAFETY_VOTE_JURY_ASSIGN','SAFETY_VOTE_JURY_REVOKE')) auditRows,(SELECT COUNT(*) FROM SafetyVote_CampaignRoles WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) AND CampaignRole='jury' AND IsActive=1) activeRoles", [campaignId, campaignId, campaignId]);
+    const [[proof]] = await db.query("SELECT (SELECT COUNT(*) FROM SafetyVote_JuryAssignments WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?)) assignments,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE CampaignID=? AND Action IN ('SAFETY_VOTE_JURY_ASSIGN','SAFETY_VOTE_JURY_REVOKE')) auditRows,(SELECT COUNT(*) FROM SafetyVote_CampaignRoles WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) AND CampaignRole='jury' AND IsActive=1) activeRoles,(SELECT COUNT(*) FROM SafetyVote_MediaMutations WHERE CampaignID=?) mediaMutations,(SELECT COUNT(*) FROM SafetyVote_Files WHERE CampaignID=?) mediaFiles", [campaignId, campaignId, campaignId, campaignId, campaignId]);
     assert.strictEqual(Number(proof.assignments), 2);
     assert(Number(proof.auditRows) >= 4);
     assert.strictEqual(Number(proof.activeRoles), 1);
+    assert.strictEqual(Number(proof.mediaMutations), 1);
+    assert.strictEqual(Number(proof.mediaFiles), 1);
     await db.end();
-    console.log(`PASS ${label} master search, persisted stage ID, live add/revoke/restore and immutable submitted assignment`);
+    console.log(`PASS ${label} adaptive readiness without participant eligibility, master search, persisted stage ID, live add/revoke/restore and immutable submitted assignment`);
 }
 
 (async () => {
@@ -120,5 +155,5 @@ async function lifecycle(label, base, name) {
 })().catch(error => { console.error(error.stack || error); process.exitCode = 1; }).finally(async () => {
     for (const child of children) if (child.exitCode === null) child.kill();
     await sleep(200);
-    if (admin) { for (const name of Object.values(names)) if (guard.test(name)) await admin.query(`DROP DATABASE IF EXISTS \`${name}\``).catch(() => {}); await admin.end(); }
+    if (admin) { for (const [runtime,name] of Object.entries(names)) if (guard.test(name)) { const [files] = await admin.query(`SELECT StoredName FROM \`${name}\`.SafetyVote_Files`).catch(() => [[]]); const directory = runtime === 'node' ? path.join(root, 'backend', 'private-uploads', 'safety-vote') : path.join(root, 'api', 'private', 'safety-vote'); for (const file of files) await fs.promises.unlink(path.join(directory, path.basename(file.StoredName))).catch(() => {}); await admin.query(`DROP DATABASE IF EXISTS \`${name}\``).catch(() => {}); } await admin.end(); }
 });

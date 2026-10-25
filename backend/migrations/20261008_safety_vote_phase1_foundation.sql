@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS SafetyVote_CampaignVersions (
     ContractVersion VARCHAR(80) NOT NULL,
     TemplateKey VARCHAR(50) NOT NULL DEFAULT 'blank',
     CampaignType VARCHAR(40) NOT NULL DEFAULT 'popular_vote',
+    -- Kept in the clean-install baseline; the governed Phase 5B migration adds
+    -- the same column idempotently for existing installations.
+    WorkSource VARCHAR(32) NULL,
     PrivacyMode VARCHAR(24) NOT NULL DEFAULT 'identified',
     TitleTh VARCHAR(200) NOT NULL,
     TitleEn VARCHAR(200) NULL,

@@ -18,7 +18,7 @@ const ok = (value, label) => { assert(value, label); checks.push(label); };
     const css = read('public/style.css');
     const model = await import(`${pathToFileURL(path.join(root, 'public/js/pages/safety-vote-wizard-model.mjs')).href}?jury=${Date.now()}`);
 
-    ok(model.WIZARD_STEPS.length === 9 && model.WIZARD_STEPS[4][0] === 'jury', 'nine-step wizard includes Jury Criteria and Assignment');
+    ok(model.WIZARD_STEPS.length === 9 && model.wizardStepsFor({ campaignType:'jury_scoring' })[4][0] === 'operation', 'nine-step adaptive wizard includes Jury Criteria and Assignment operation');
     const draft = model.applyTemplate(model.createWizardDraft(), 'jury_scoring');
     ok(draft.juryCriteria.length === 3 && draft.juryCriteria.reduce((sum, item) => sum + item.weight, 0) === 100, 'production-safe default weighted criteria');
     ok(model.juryValidationErrors(draft).some(error => error.includes('กรรมการ')), 'jury validation requires an individual assignment');
