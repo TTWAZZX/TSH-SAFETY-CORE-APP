@@ -132,8 +132,11 @@ async function connectChrome() {
     assert.ok(choices.options.some(option => /R1(?:\D|$)/.test(option.text)), 'R1 is missing from the monthly selector');
     assert.ok(choices.options.some(option => /R2(?:\D|$)/.test(option.text)), 'R2 is missing from the monthly selector');
     assert.ok(choices.options.some(option => option.type === 'compensation'), 'Past schedule group is missing');
-    assert.ok(choices.options.some(option => option.type === 'normal'), 'Today schedule group is missing');
     assert.ok(choices.options.filter(option => option.type === 'future').every(option => option.disabled), 'Future schedules must remain read-only');
+    const modeAvailability = await evaluate(`(()=>({normalDisabled:document.querySelector('#sc-type-normal')?.disabled,compensationDisabled:document.querySelector('#sc-type-comp')?.disabled,saveDisabled:document.querySelector('#self-checkin-form button[type="submit"]')?.disabled}))()`);
+    assert.strictEqual(modeAvailability.normalDisabled, !choices.options.some(option => option.type === 'normal'), 'Normal mode availability must follow today schedule availability');
+    assert.strictEqual(modeAvailability.compensationDisabled, !choices.options.some(option => option.type === 'compensation'), 'Makeup mode availability must follow overdue schedule availability');
+    assert.strictEqual(modeAvailability.saveDisabled, false, 'Save must remain enabled for the selected actionable schedule');
 
     const compensation = choices.options.find(option => option.type === 'compensation');
     const changed = await evaluate(`(()=>{const select=document.querySelector('#sc-session');select.value=${JSON.stringify(choices.options.find(option => option.type === 'compensation')?.value || '')};select.dispatchEvent(new Event('change',{bubbles:true}));return {selected:select.value,type:document.querySelector('input[name="sc-type"]:checked')?.value,date:document.querySelector('#sc-date')?.value,area:document.querySelector('#sc-area-text')?.textContent.trim()}})()`);
