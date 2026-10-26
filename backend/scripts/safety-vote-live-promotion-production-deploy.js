@@ -1,4 +1,5 @@
 'use strict';
+require('./production-deployment-policy').refuseArchivedProductionDeploy(__filename);
 const assert=require('node:assert/strict'),crypto=require('node:crypto'),fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:child_process');
 require('dotenv').config({path:path.join(__dirname,'..','.env'),quiet:true});
 const root=path.resolve(__dirname,'..','..'),ftpsHelper=path.join(__dirname,'patrol-checkin-v2-ftps.ps1'),helperTemplate=path.join(__dirname,'safety-vote-live-promotion-production-helper.php.template');

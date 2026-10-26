@@ -1,4 +1,5 @@
 'use strict';
+require('./production-deployment-policy').refuseArchivedProductionDeploy(__filename);
 
 const assert = require('assert');
 const crypto = require('crypto');

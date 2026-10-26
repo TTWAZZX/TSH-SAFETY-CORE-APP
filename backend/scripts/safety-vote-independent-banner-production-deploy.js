@@ -1,4 +1,5 @@
 'use strict';
+require('./production-deployment-policy').refuseArchivedProductionDeploy(__filename);
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');

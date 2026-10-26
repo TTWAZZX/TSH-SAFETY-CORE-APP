@@ -172,6 +172,8 @@
     "test:safety-vote-people-picker": "node scripts/safety-vote-people-picker-static.test.js",
     "verify:safety-vote-people-picker": "npm run test:safety-vote-people-picker && npm run test:safety-vote-jury-wizard && npm run uat:safety-vote-jury-wizard-api && npm run verify:php74-compatibility",
     "verify:php74-compatibility": "node scripts/php74-compatibility-static.test.js",
+    "generate:production-dependency-manifest": "node scripts/production-dependency-manifest.js --write",
+    "test:production-dependency-closure": "node scripts/production-dependency-manifest.js && node scripts/production-dependency-closure.test.js && node scripts/production-deployment-policy.test.js",
     "test:safety-vote-company-wide-visibility": "node scripts/safety-vote-company-wide-visibility-static.test.js",
     "test:safety-vote-company-wide-visibility-migration": "node scripts/safety-vote-company-wide-visibility-migration.test.js",
     "migrate:safety-vote-company-wide-visibility-local": "node scripts/safety-vote-company-wide-visibility-migrate-local.js",

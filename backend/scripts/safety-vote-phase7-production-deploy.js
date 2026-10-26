@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { expandRuntimeClosure } = require('./production-dependency-closure');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 
 const root = path.resolve(__dirname, '..', '..');
@@ -13,7 +14,7 @@ const confirmation = 'DEPLOY_SAFETY_VOTE_PHASE7_FINAL_PRODUCTION';
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const helperTemplate = path.join(__dirname, 'safety-vote-phase7-production-helper.php.template');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
-const runtime = [
+const runtime = expandRuntimeClosure([
     'api/lib/safety_vote_company_visibility_remediation.php', 'api/lib/safety_vote_gallery.php',
     'api/lib/safety_vote_next_cycle.php', 'api/lib/safety_vote_participation_authorization.php',
     'api/lib/safety_vote_phase1.php', 'api/lib/safety_vote_phase2.php', 'api/lib/safety_vote_phase3.php',
@@ -37,7 +38,7 @@ const runtime = [
     'public/js/pages/safety-vote-people-picker.js', 'public/js/pages/safety-vote.js',
     'public/js/api.js', 'public/style.css', 'api/bootstrap.php', 'api/handlers/safety_vote.php', 'api/index.php',
     'public/js/pages/admin.js', 'public/js/main.js', 'index.html',
-];
+]);
 const migrations = [
     '20261024_safety_vote_question_images.sql', '20261024_safety_vote_candidate_submission_gallery.sql',
     '20261024_safety_vote_company_wide_visibility.sql', '20261024_safety_vote_eligibility_removal_policy.sql',

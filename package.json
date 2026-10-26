@@ -6,6 +6,8 @@
     "build:css": "tailwindcss -c tailwind.config.cjs -i ./src/tailwind.css -o ./public/tailwind.production.css --minify",
     "test:production-css": "npm run build:css && node backend/scripts/production-css-static.test.js && npm --prefix backend run test:app-bootstrap",
     "test:vendor-lazy-loading": "npm --prefix backend run test:vendor-lazy-loading",
+    "generate:production-dependency-manifest": "npm --prefix backend run generate:production-dependency-manifest",
+    "test:production-dependency-closure": "npm --prefix backend run test:production-dependency-closure",
     "uat:vendor-lazy-loading": "npm --prefix backend run uat:vendor-lazy-loading",
     "uat:app-bootstrap-network": "npm --prefix backend run uat:app-bootstrap-network",
     "inspect:safety-vote-phase1-schema": "npm --prefix backend run inspect:safety-vote-phase1-schema",
