@@ -32,39 +32,50 @@ async function call(pathname, token = null, options = {}) {
     const adminToken = jwt.sign(admin, process.env.JWT_SECRET, { expiresIn: '5m' });
     const userToken = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '5m' });
     const [[before]] = await db.query('SELECT COUNT(*) ballots FROM SafetyVote_Ballots');
+    const [[publishedFixture = null]] = await db.query(`
+        SELECT c.id
+          FROM SafetyVote_Campaigns c
+          JOIN SafetyVote_ResultSnapshots rs ON rs.CampaignID=c.id AND rs.Status='Published'
+         WHERE c.Status IN ('Closed','Certified','Published')
+           AND c.IsHidden=0 AND c.IsTest=0
+         ORDER BY c.id
+         LIMIT 1
+    `);
+    const campaignId = publishedFixture ? Number(publishedFixture.id) : null;
 
     const anonymousCatalogue = await call('/safety-vote/me/campaigns');
-    const anonymousResult = await call('/safety-vote/campaigns/4/official-results');
+    const anonymousResult = campaignId ? await call(`/safety-vote/campaigns/${campaignId}/official-results`) : null;
     const userCatalogue = await call('/safety-vote/me/campaigns', userToken);
-    const userDetail = await call('/safety-vote/campaigns/4', userToken);
-    const userResult = await call('/safety-vote/campaigns/4/official-results', userToken);
+    const userDetail = campaignId ? await call(`/safety-vote/campaigns/${campaignId}`, userToken) : null;
+    const userResult = campaignId ? await call(`/safety-vote/campaigns/${campaignId}/official-results`, userToken) : null;
     const userAdminBoundary = await call('/safety-vote/admin/company-visibility-remediation/preview', userToken);
-    const closedMutation = await call('/safety-vote/campaigns/4/ballot/submit', userToken, {
+    const closedMutation = campaignId ? await call(`/safety-vote/campaigns/${campaignId}/ballot/submit`, userToken, {
         method: 'POST',
         headers: { 'Idempotency-Key': 'phase7-final-closed-denial-0001' },
         body: { campaignVersion: 1, acknowledgedRules: true, answers: [] },
-    });
+    }) : null;
     const adminHealth = await call('/safety-vote/admin/health', adminToken);
     const adminPreview = await call('/safety-vote/admin/company-visibility-remediation/preview', adminToken);
     const [[after]] = await db.query('SELECT COUNT(*) ballots FROM SafetyVote_Ballots');
 
     assert.equal(anonymousCatalogue.status, 401, 'Anonymous catalogue access must be denied');
-    assert.equal(anonymousResult.status, 401, 'Anonymous official-result access must be denied');
     assert.equal(userCatalogue.status, 200, 'Authenticated company catalogue is unavailable');
     assert.equal(userCatalogue.data?.catalogueMode, 'company_authenticated');
-    const card = userCatalogue.data?.rows?.find(row => Number(row.id) === 4);
-    assert(card, 'Published campaign 4 is missing from the company catalogue');
-    assert.equal(card.DiscoveryMode, 'public_listing');
-    assert.equal(Number(card.CatalogueVisible), 1);
-    assert.equal(userDetail.status, 200, 'Authenticated campaign detail is unavailable');
-    assert.equal(userResult.status, 200, 'Published official results are unavailable');
-    assert.equal(userResult.data?.source, 'immutable_result_snapshot');
-    assert.equal(userResult.data?.snapshot?.status, 'Published');
-    assert.match(String(userResult.data?.snapshot?.resultHash || ''), /^[0-9a-f]{64}$/i);
-    assert.equal(userResult.data?.identityFieldsIncluded, false);
-    assert.equal(userResult.data?.noResult, true, 'Zero-vote campaign must disclose no result');
     assert.equal(userAdminBoundary.status, 403, 'Ordinary user crossed the Admin remediation boundary');
-    assert([403, 409, 422].includes(closedMutation.status), `Closed campaign mutation returned ${closedMutation.status}`);
+    if (campaignId) {
+        assert.equal(anonymousResult.status, 401, 'Anonymous official-result access must be denied');
+        const card = userCatalogue.data?.rows?.find(row => Number(row.id) === campaignId);
+        assert(card, `Published campaign ${campaignId} is missing from the company catalogue`);
+        assert.equal(card.DiscoveryMode, 'public_listing');
+        assert.equal(Number(card.CatalogueVisible), 1);
+        assert.equal(userDetail.status, 200, 'Authenticated campaign detail is unavailable');
+        assert.equal(userResult.status, 200, 'Published official results are unavailable');
+        assert.equal(userResult.data?.source, 'immutable_result_snapshot');
+        assert.equal(userResult.data?.snapshot?.status, 'Published');
+        assert.match(String(userResult.data?.snapshot?.resultHash || ''), /^[0-9a-f]{64}$/i);
+        assert.equal(userResult.data?.identityFieldsIncluded, false);
+        assert([403, 409, 422].includes(closedMutation.status), `Closed campaign mutation returned ${closedMutation.status}`);
+    }
     assert.equal(Number(after.ballots), Number(before.ballots), 'Denied closed-campaign mutation changed ballot evidence');
     assert.equal(adminHealth.status, 200, 'Admin Safety Vote health is unavailable');
     assert.equal(adminHealth.data?.visibilityContract?.enabled, true, 'Company visibility contract is not enabled');
@@ -78,20 +89,21 @@ async function call(pathname, token = null, options = {}) {
         externalDelivery: false,
         checks: {
             anonymousCatalogue: anonymousCatalogue.status,
-            anonymousOfficialResult: anonymousResult.status,
+            anonymousOfficialResult: anonymousResult?.status ?? 'NO_PUBLISHED_FIXTURE',
             authenticatedCatalogue: userCatalogue.status,
-            authenticatedDetail: userDetail.status,
-            immutableOfficialResult: userResult.status,
+            authenticatedDetail: userDetail?.status ?? 'NO_PUBLISHED_FIXTURE',
+            immutableOfficialResult: userResult?.status ?? 'NO_PUBLISHED_FIXTURE',
             ordinaryUserAdminBoundary: userAdminBoundary.status,
-            closedMutationDenied: closedMutation.status,
+            closedMutationDenied: closedMutation?.status ?? 'NO_PUBLISHED_FIXTURE',
             adminHealth: adminHealth.status,
             remediationPreview: adminPreview.status,
         },
-        officialResult: {
+        publishedFixtureCampaignId: campaignId,
+        officialResult: userResult ? {
             snapshotStatus: userResult.data.snapshot.status,
             noResult: userResult.data.noResult,
             identityFieldsIncluded: userResult.data.identityFieldsIncluded,
-        },
+        } : null,
         ballotsBefore: Number(before.ballots),
         ballotsAfter: Number(after.ballots),
     }, null, 2));

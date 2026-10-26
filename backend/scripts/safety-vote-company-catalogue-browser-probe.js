@@ -40,4 +40,4 @@ async function screenshot(name){const result=await cdp.command('Page.captureScre
     }
     assert.deepStrictEqual(errors,[]);
     console.log(`Safety Vote company-wide catalogue Browser UAT: PASS (390, 768, 1366; ${evidence})`);
-})().catch(error=>{console.error(error.stack||error);process.exitCode=1;}).finally(async()=>{try{cdp?.close();}catch(_){}try{chrome?.kill();}catch(_){}await fs.promises.rm(profile,{recursive:true,force:true}).catch(()=>{});});\n
+})().catch(error=>{console.error(error.stack||error);process.exitCode=1;}).finally(async()=>{try{cdp?.close();}catch(_){}try{chrome?.kill();}catch(_){}await fs.promises.rm(profile,{recursive:true,force:true}).catch(()=>{});});

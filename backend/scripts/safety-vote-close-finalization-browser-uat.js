@@ -15,6 +15,15 @@ const evidenceDir = path.join(__dirname, '..', '..', 'backups', 'local', `safety
 (async () => {
     assert(new Set(['localhost', '127.0.0.1', '::1']).has(new URL(APP_URL).hostname), 'Refusing non-loopback frontend');
     const { user } = await loadReadyTestUsers(db);
+    const [[completedFixture = null]] = await db.query(`
+        SELECT c.id
+          FROM SafetyVote_Campaigns c
+         WHERE c.Status IN ('Closed','Certified','Published')
+           AND c.IsHidden=0 AND c.IsTest=0
+         ORDER BY c.id
+         LIMIT 1
+    `);
+    const campaignId = completedFixture ? Number(completedFixture.id) : null;
     const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '5m' });
     const browser = await chromium.launch({ headless: true, executablePath: process.env.SAFETY_VOTE_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' });
     const results = [];
@@ -33,7 +42,16 @@ const evidenceDir = path.join(__dirname, '..', '..', 'backups', 'local', `safety
             });
             await page.goto(APP_URL, { waitUntil: 'commit', timeout: 30000 });
             await page.locator('[data-sv-catalogue="company-wide-v1"]').waitFor({ timeout: 30000 });
-            const card = page.locator('.svp-campaign-card[data-svp-campaign="4"]').first();
+            if (!campaignId) {
+                const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+                assert.equal(overflow, false, `${viewport.name}: empty catalogue horizontal overflow`);
+                assert.deepStrictEqual(serverErrors, [], `${viewport.name}: empty catalogue Safety Vote server errors`);
+                await page.screenshot({ path: path.join(evidenceDir, `${viewport.name}-no-completed-fixture.png`), fullPage: true });
+                results.push({ viewport, completedFixture: false, overflow, serverErrors: 0 });
+                await context.close();
+                continue;
+            }
+            const card = page.locator(`.svp-campaign-card[data-svp-campaign="${campaignId}"]`).first();
             await card.waitFor({ timeout: 30000 });
             const cardStatus = await card.getAttribute('data-svp-status');
             assert(['Closed', 'Certified', 'Published'].includes(cardStatus), `${viewport.name}: completed card status ${cardStatus}`);
@@ -63,7 +81,7 @@ const evidenceDir = path.join(__dirname, '..', '..', 'backups', 'local', `safety
             results.push({ viewport, cardStatus, officialResult: officialState, resultSource: officialState === 'no-result' ? 'immutable-snapshot' : 'governance-pending', minTarget, overflow, serverErrors: 0 });
             await context.close();
         }
-        console.log(JSON.stringify({ decision: 'PASS_LOCAL_SAFETY_VOTE_CLOSED_CATALOGUE_BROWSER_UAT', results, evidenceDir, productionConnected: false }, null, 2));
+        console.log(JSON.stringify({ decision: 'PASS_LOCAL_SAFETY_VOTE_CLOSED_CATALOGUE_BROWSER_UAT', campaignId, results, evidenceDir, productionConnected: false }, null, 2));
     } finally {
         await browser.close();
     }

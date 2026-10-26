@@ -38,7 +38,7 @@
     "test:safety-vote-phase7-migration": "node scripts/safety-vote-phase7-migration.test.js",
     "test:safety-vote-phase7-release-gates": "node scripts/safety-vote-phase7-release-gates.js",
     "uat:safety-vote-phase7-api": "node scripts/safety-vote-phase7-api-uat.js",
-    "uat:safety-vote-phase7-browser": "node scripts/safety-vote-phase7-browser-uat.js",
+    "uat:safety-vote-phase7-browser": "node scripts/safety-vote-ux-phase7-browser-uat.js",
     "verify:safety-vote-phase7": "npm run test:safety-vote-phase7-parity && npm run test:safety-vote-phase7-migration && npm run verify:safety-vote-phase6 && npm run uat:safety-vote-phase7-api && npm run test:safety-vote-phase7-release-gates && npm run uat:safety-vote-phase7-browser",
     "test:safety-vote-phase831-disabled": "node scripts/safety-vote-phase831-disabled-gate.test.js",
     "verify:safety-vote-phase831": "npm run test:safety-vote-phase831-disabled && npm run verify:safety-vote-phase7",

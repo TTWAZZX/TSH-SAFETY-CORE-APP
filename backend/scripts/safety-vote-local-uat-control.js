@@ -17,6 +17,7 @@ const GATES = [
     'eligibility_amendment_enabled',
     'eligibility_removal_enabled',
     'company_wide_campaign_visibility_enabled',
+    'company_visibility_remediation_enabled',
 ];
 const MIGRATIONS = [
     '20261008_safety_vote_phase6_secret_election.sql',
@@ -33,6 +34,7 @@ const MIGRATIONS = [
     '20261024_safety_vote_question_images.sql',
     '20261024_safety_vote_company_wide_visibility.sql',
     '20261024_safety_vote_candidate_submission_gallery.sql',
+    '20261025_safety_vote_company_visibility_remediation.sql',
     '20261025_safety_vote_official_topn_next_cycle.sql',
     '20261025_safety_vote_result_release_policy.sql',
     '20261025_safety_vote_jury_work_items_atomic_media.sql',
@@ -60,6 +62,8 @@ const REQUIRED_TABLES = [
     'SafetyVote_AcceptanceEvidence',
     'SafetyVote_OperationalAlerts',
     'SafetyVote_MediaLinks',
+    'SafetyVote_VisibilityRemediationBatches',
+    'SafetyVote_VisibilityRemediationItems',
 ];
 const REQUIRED_VERSION_COLUMNS = [
     'ParentVersionID',
@@ -162,7 +166,8 @@ async function main() {
              ('phase7_integrations_enabled','1','local-uat-activation'),
              ('eligibility_amendment_enabled','1','local-uat-activation'),
              ('eligibility_removal_enabled','1','local-uat-activation'),
-             ('company_wide_campaign_visibility_enabled','1','local-uat-activation')
+             ('company_wide_campaign_visibility_enabled','1','local-uat-activation'),
+             ('company_visibility_remediation_enabled','1','local-uat-activation')
              ON DUPLICATE KEY UPDATE SettingValue=VALUES(SettingValue),UpdatedBy=VALUES(UpdatedBy)`
         );
 
