@@ -50,6 +50,12 @@ assert.match(ui, /checkinType: date < today \? 'compensation' : \(date === today
 assert.match(ui, /รอบค้าง \/ เดินซ่อม/);
 assert.match(ui, /data-type=/);
 assert.match(ui, /optionType === 'compensation'/);
+assert.match(ui, /submitBtn\.disabled = !opt \|\| !\['normal', 'compensation'\]\.includes\(optionType\)/);
+assert.doesNotMatch(ui, /submitBtn\.disabled = !option/);
+assert.match(ui, /const hasNormalSchedule = actionableSchedule\.some\(item => item\.checkinType === 'normal'\)/);
+assert.match(ui, /const hasCompensationSchedule = actionableSchedule\.some\(item => item\.checkinType === 'compensation'\)/);
+assert.match(ui, /\$\{hasNormalSchedule \? '' : 'disabled'\}/);
+assert.match(ui, /\$\{hasCompensationSchedule \? '' : 'disabled'\}/);
 assert.match(ui, /max-height:\$\{isSupervisorPersonal \? '315px' : '200px'\}/);
 assert.match(ui, /รอบนี้ยังไม่ถึงกำหนด/);
 

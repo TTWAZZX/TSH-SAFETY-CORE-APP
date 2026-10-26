@@ -32,7 +32,7 @@ check(index.includes("root.dataset.appBootstrap = 'error'"), 'Slow bootstrap mus
 check(index.includes('const appShellWatchdogMs = 60000;'), 'App-shell watchdog must allow constrained mobile delivery');
 check(index.includes("root.dataset.appBootstrap = 'ready'"), 'Successful bootstrap must expose ready state');
 check(index.includes('public/js/session.js?v=20261019-app-bootstrap-timeout-r1'), 'Session cache key must match timeout release');
-check(index.includes('public/js/main.js?v=20261025-result-release-policy-r1'), 'Main module cache key must match current release');
+check(index.includes('public/js/main.js?v=20261026-patrol-mode-state-r1'), 'Main module cache key must match current release');
 check(main.includes("__TSH_APP_BOOTSTRAP__?.setMessage('กำลังโหลดการตั้งค่าองค์กร…')"), 'Branding phase message missing');
 check(main.includes("__TSH_APP_BOOTSTRAP__?.setMessage('กำลังตรวจสอบการเข้าสู่ระบบ…')"), 'Session phase message missing');
 check(main.includes('APP_BOOTSTRAP_TIMEOUTS = Object.freeze({ branding: 4000, session: 8000 })'), 'Bounded bootstrap timeouts missing');

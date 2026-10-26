@@ -55,7 +55,7 @@ assert.match(nodeService, /req\.path === '\/access'/);
 assert.match(phpService, /\$path === '\/bbs\/access'/);
 assert.match(frontend, /apiFetch\('\/bbs\/access'/);
 assert.doesNotMatch(frontend, /apiFetch\('\/bbs\/me\/context', \{ suppressErrorLog: true \}\)/);
-assert.match(html, /main\.js\?v=20261026-bbs-access-discovery-r1/);
+assert.match(html, /main\.js\?v=20261026-patrol-mode-state-r1/);
 
 (async () => {
     const participantDb = {

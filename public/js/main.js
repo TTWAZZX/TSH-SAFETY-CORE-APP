@@ -15,7 +15,7 @@ const lazyPage = (modulePath, exportName) => async (...args) => {
 };
 const loadPolicyPage = lazyPage('./pages/policy.js?v=20261011-design-system-a11y-r1', 'loadPolicyPage');
 const loadCommitteePage = lazyPage('./pages/committee.js?v=20260715-phase32d-remaining-async-ux', 'loadCommitteePage');
-const loadPatrolPage = lazyPage('./pages/patrol.js?v=20261011-design-system-a11y-r1', 'loadPatrolPage');
+const loadPatrolPage = lazyPage('./pages/patrol.js?v=20261026-patrol-mode-state-r1', 'loadPatrolPage');
 const loadCccfPage = lazyPage('./pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2', 'loadCccfPage');
 const loadKpiPage = lazyPage('./pages/kpi.js?v=20261011-design-system-a11y-r1', 'loadKpiPage');
 const loadYokotenPage = lazyPage('./pages/yokoten.js?v=20260825-yokoten-department-relevance-r1', 'loadYokotenPage');

@@ -7995,6 +7995,8 @@ window._scOnScheduleChange = function() {
     }
     const type = optionType === 'compensation' ? 'compensation' : 'normal';
     if (dateInput && opt?.dataset?.date) dateInput.value = type === 'compensation' ? patrolDateOnly(new Date()) : opt.dataset.date;
+    const submitBtn = document.querySelector('#self-checkin-form button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = !opt || !['normal', 'compensation'].includes(optionType);
     const area = opt?.dataset?.area || '';
     const areaValue = document.getElementById('sc-area-value');
     const areaText = document.getElementById('sc-area-text');
@@ -8014,8 +8016,6 @@ window._scOnTypeChange = function() {
         const type = document.querySelector('input[name="sc-type"]:checked')?.value || 'normal';
         const option = [...select.options].find(item => item.dataset.type === type && !item.disabled);
         if (option) select.value = option.value;
-        const submitBtn = document.querySelector('#self-checkin-form button[type="submit"]');
-        if (submitBtn) submitBtn.disabled = !option;
     }
     window._scOnScheduleChange?.();
 };
@@ -8068,6 +8068,8 @@ function openSelfCheckinModal(selectedSessionId = '') {
     const actionableSchedule = openSchedule.filter(item => item.checkinType !== 'future');
     const hasScheduleChoices = openSchedule.length > 0;
     const hasOpenSchedule = actionableSchedule.length > 0;
+    const hasNormalSchedule = actionableSchedule.some(item => item.checkinType === 'normal');
+    const hasCompensationSchedule = actionableSchedule.some(item => item.checkinType === 'compensation');
     const firstActionable = actionableSchedule[0] || null;
     const initialPatrolType = !isFlexible && firstActionable?.checkinType === 'compensation' ? 'compensation' : 'normal';
     const initialScheduleOptions = openSchedule;
@@ -8111,13 +8113,13 @@ function openSelfCheckinModal(selectedSessionId = '') {
           <div class="${isFlexible ? 'hidden' : ''}">
             <label class="block text-xs font-semibold text-slate-500 mb-1.5">รูปแบบการเช็คอิน</label>
             <div class="grid grid-cols-2 gap-2">
-              <label class="cursor-pointer rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 has-[:checked]:ring-2 has-[:checked]:ring-emerald-400 transition-all">
-                <input type="radio" name="sc-type" id="sc-type-normal" value="normal" class="sr-only" ${initialPatrolType === 'normal' ? 'checked' : ''} onchange="window._scOnTypeChange()">
+              <label class="${hasNormalSchedule ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'} rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 has-[:checked]:ring-2 has-[:checked]:ring-emerald-400 transition-all">
+                <input type="radio" name="sc-type" id="sc-type-normal" value="normal" class="sr-only" ${initialPatrolType === 'normal' ? 'checked' : ''} ${hasNormalSchedule ? '' : 'disabled'} onchange="window._scOnTypeChange()">
                 <span class="block text-xs font-bold text-emerald-700">ปกติ</span>
                 <span class="block text-[10px] text-emerald-600/70">ตรงรอบที่เลือก</span>
               </label>
-              <label class="cursor-pointer rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 has-[:checked]:ring-2 has-[:checked]:ring-violet-400 transition-all">
-                <input type="radio" name="sc-type" id="sc-type-comp" value="compensation" class="sr-only" ${initialPatrolType === 'compensation' ? 'checked' : ''} onchange="window._scOnTypeChange()">
+              <label class="${hasCompensationSchedule ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'} rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 has-[:checked]:ring-2 has-[:checked]:ring-violet-400 transition-all">
+                <input type="radio" name="sc-type" id="sc-type-comp" value="compensation" class="sr-only" ${initialPatrolType === 'compensation' ? 'checked' : ''} ${hasCompensationSchedule ? '' : 'disabled'} onchange="window._scOnTypeChange()">
                 <span class="block text-xs font-bold text-violet-700">เดินซ่อม</span>
                 <span class="block text-[10px] text-violet-600/70">ผูกกับรอบที่ค้าง</span>
               </label>
