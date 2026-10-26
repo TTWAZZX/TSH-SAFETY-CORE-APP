@@ -855,8 +855,8 @@ async function refreshBbsNavigation() {
     if (!nav) return;
     nav.classList.add('hidden');
     try {
-        const response = await apiFetch('/bbs/me/context', { suppressErrorLog: true });
-        if (AppState.isAdmin || response?.data?.pilot?.inPilot) nav.classList.remove('hidden');
+        const response = await apiFetch('/bbs/access', { suppressErrorLog: true });
+        if (response?.data?.available) nav.classList.remove('hidden');
     } catch (_) {}
 }
 

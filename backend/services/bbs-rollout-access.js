@@ -87,12 +87,26 @@ function createBbsRolloutAccessMiddleware(db, dependencies = {}) {
             const rollout = await loadBbsRolloutMode(db);
             req.bbsRolloutMode = rollout.mode;
 
-            if (rollout.mode === BBS_ROLLOUT_MODE.COMPANY_WIDE) return next();
-
             const headerValue = rollout.mode === BBS_ROLLOUT_MODE.ADMIN_ONLY
                 ? 'staged-admin-only'
-                : 'controlled-pilot';
+                : (rollout.mode === BBS_ROLLOUT_MODE.CONTROLLED_PILOT ? 'controlled-pilot' : 'company-wide');
             res.setHeader('X-BBS-Rollout-Mode', headerValue);
+
+            if (req.path === '/access') {
+                return authenticate(req, res, () => {
+                    if (rollout.mode === BBS_ROLLOUT_MODE.COMPANY_WIDE || isAdminUser(req.user)) {
+                        return res.json({ success: true, data: { available: true, rolloutMode: rollout.mode } });
+                    }
+                    if (rollout.mode === BBS_ROLLOUT_MODE.ADMIN_ONLY) {
+                        return res.json({ success: true, data: { available: false, rolloutMode: rollout.mode } });
+                    }
+                    return participantCheck(db, employeeIdFromUser(req.user))
+                        .then(available => res.json({ success: true, data: { available, rolloutMode: rollout.mode } }))
+                        .catch(next);
+                });
+            }
+
+            if (rollout.mode === BBS_ROLLOUT_MODE.COMPANY_WIDE) return next();
 
             return authenticate(req, res, () => {
                 if (rollout.mode === BBS_ROLLOUT_MODE.ADMIN_ONLY) {

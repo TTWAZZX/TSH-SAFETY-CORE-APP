@@ -755,7 +755,7 @@ try {
     handle_safety_vote_phase3_routes($method, $path);
     handle_safety_vote_phase2_routes($method, $path);
     handle_safety_vote_routes($method, $path);
-    if (strpos($path, '/bbs/') === 0) bbs_enforce_rollout_access();
+    if (strpos($path, '/bbs/') === 0) bbs_enforce_rollout_access($path);
     handle_bbs_card_designer_routes($method, $path);
     handle_bbs_card_routes($method, $path);
     handle_bbs_community_routes($method, $path);

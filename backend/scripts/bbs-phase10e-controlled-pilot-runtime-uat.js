@@ -41,6 +41,8 @@ async function call(base, path, token, options = {}) {
         await new Promise(resolve => server.once('listening', resolve));
         const base = `http://127.0.0.1:${server.address().port}/api`;
         const results = [
+            ['Approved inspector access discovery', await call(base, '/bbs/access', tokenFor(inspector)), 200],
+            ['Excluded account access discovery', await call(base, '/bbs/access', tokenFor(excluded)), 200],
             ['Admin context', await call(base, '/bbs/me/context', tokenFor(admin)), 200],
             ['Approved inspector context', await call(base, '/bbs/me/context', tokenFor(inspector)), 200],
             ['Excluded same-scope account', await call(base, '/bbs/me/context', tokenFor(excluded)), 403],
@@ -51,8 +53,10 @@ async function call(base, path, token, options = {}) {
             if (result.status !== expected) throw new Error(`${name}: expected ${expected}, received ${result.status}`);
             if (result.mode !== 'controlled-pilot') throw new Error(`${name}: rollout response header is missing.`);
             if (name.startsWith('Excluded') && result.body.code !== 'BBS_PILOT_ACCESS_REQUIRED') {
-                throw new Error(`${name}: expected BBS_PILOT_ACCESS_REQUIRED.`);
+                if (name === 'Excluded account access discovery' && result.body?.data?.available === false) continue;
+                throw new Error(`${name}: expected unavailable discovery or BBS_PILOT_ACCESS_REQUIRED.`);
             }
+            if (name === 'Approved inspector access discovery' && result.body?.data?.available !== true) throw new Error(`${name}: expected available discovery.`);
         }
         console.log(JSON.stringify(results.map(([name, result, expected]) => ({ name, status: result.status, expected, mode: result.mode })), null, 2));
         console.log('BBS Phase 10E controlled Pilot runtime UAT: PASS');

@@ -3,6 +3,7 @@
 const path = require('node:path');
 
 const activeProductionDeployScripts = Object.freeze([
+    'bbs-access-discovery-production-deploy.js',
     'safety-vote-phase7-production-deploy.js',
     'safety-vote-phase96-guarded-feature-deploy.js',
     'safety-vote-wizard-layout-production-deploy.js',

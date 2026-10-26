@@ -17,6 +17,8 @@ const nodeService = fs.readFileSync(path.join(root, 'backend/services/bbs-rollou
 const phpService = fs.readFileSync(path.join(root, 'api/lib/bbs_rollout_access.php'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'backend/server.js'), 'utf8');
 const phpIndex = fs.readFileSync(path.join(root, 'api/index.php'), 'utf8');
+const frontend = fs.readFileSync(path.join(root, 'public/js/main.js'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
 assert.strictEqual(resolveBbsRolloutMode({ staged_admin_only: '1', pilot_scope_only: '1' }), BBS_ROLLOUT_MODE.ADMIN_ONLY);
 assert.strictEqual(resolveBbsRolloutMode({ staged_admin_only: '0', pilot_scope_only: '1' }), BBS_ROLLOUT_MODE.CONTROLLED_PILOT);
@@ -48,7 +50,12 @@ assert.match(phpService, /BBS_Inspector_Enrollments/);
 assert.match(phpService, /BBS_Hierarchy_Assignments/);
 assert.match(phpService, /BBS_Pilot_Scopes/);
 assert.match(server, /createBbsRolloutAccessMiddleware\(pool\)/);
-assert.match(phpIndex, /bbs_enforce_rollout_access\(\)/);
+assert.match(phpIndex, /bbs_enforce_rollout_access\(\$path\)/);
+assert.match(nodeService, /req\.path === '\/access'/);
+assert.match(phpService, /\$path === '\/bbs\/access'/);
+assert.match(frontend, /apiFetch\('\/bbs\/access'/);
+assert.doesNotMatch(frontend, /apiFetch\('\/bbs\/me\/context', \{ suppressErrorLog: true \}\)/);
+assert.match(html, /main\.js\?v=20261026-bbs-access-discovery-r1/);
 
 (async () => {
     const participantDb = {
@@ -100,6 +107,27 @@ assert.match(phpIndex, /bbs_enforce_rollout_access\(\)/);
         assert.strictEqual(res.statusCode, fixture[3]);
         assert.strictEqual(res.headers['X-BBS-Rollout-Mode'], 'controlled-pilot');
         if (!fixture[2]) assert.strictEqual(res.payload.code, 'BBS_PILOT_ACCESS_REQUIRED');
+    }
+    for (const fixture of [
+        [{ id: 'ADMIN', role: 'Admin' }, false, true],
+        [{ id: '002671', role: 'User' }, true, true],
+        [{ id: '111111', role: 'User' }, false, false],
+    ]) {
+        let nextCalled = false;
+        const req = { fixtureUser: fixture[0], path: '/access' };
+        const res = response();
+        const middleware = createBbsRolloutAccessMiddleware(middlewareDb, {
+            authenticateToken: authenticate,
+            isAdmin: requireAdmin,
+            isEffectivePilotParticipant: async () => fixture[1],
+        });
+        await middleware(req, res, error => { if (error) throw error; nextCalled = true; });
+        await new Promise(resolve => setImmediate(resolve));
+        assert.strictEqual(nextCalled, false);
+        assert.strictEqual(res.statusCode, 200);
+        assert.strictEqual(res.payload.success, true);
+        assert.strictEqual(res.payload.data.available, fixture[2]);
+        assert.strictEqual(res.payload.data.rolloutMode, 'controlled_pilot');
     }
     const adminOnlyDb = {
         async query(sql) {

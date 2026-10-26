@@ -68,9 +68,18 @@ function bbs_is_effective_pilot_participant(string $employeeId, ?string $asOf = 
     return $row !== null;
 }
 
-function bbs_enforce_rollout_access(): void
+function bbs_enforce_rollout_access(string $path = ''): void
 {
     $mode = bbs_load_rollout_mode();
+    if ($path === '/bbs/access') {
+        $user = require_user();
+        $available = $mode === 'company_wide' || bbs_rollout_is_admin($user);
+        if (!$available && $mode === 'controlled_pilot') {
+            $available = bbs_is_effective_pilot_participant(bbs_rollout_employee_id($user));
+        }
+        header('X-BBS-Rollout-Mode: ' . ($mode === 'admin_only' ? 'staged-admin-only' : ($mode === 'controlled_pilot' ? 'controlled-pilot' : 'company-wide')));
+        json_response(['success' => true, 'data' => ['available' => $available, 'rolloutMode' => $mode]]);
+    }
     if ($mode === 'company_wide') return;
 
     header('X-BBS-Rollout-Mode: ' . ($mode === 'admin_only' ? 'staged-admin-only' : 'controlled-pilot'));
