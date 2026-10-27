@@ -33,6 +33,6 @@ for (const marker of ['แคมเปญทั้งหมด', 'เปิด�
 assert(!page.includes('legacyOfficialResultsMarkup'), 'legacy recomputed result rendering must not remain reachable');
 for (const marker of ["view === 'read_only'", "view === 'results'", "['Closed', 'Certified', 'Published'].includes(status)"]) assert(participationModel.includes(marker), `campaign filter contract missing ${marker}`);
 for (const marker of ['.svp-result-integrity', '.svp-official-results__ranking', 'min-height:44px']) assert(style.includes(marker), `responsive result styling missing ${marker}`);
-assert(index.includes('20261025-company-user-ux-phase5-r1'), 'Phase 5 frontend cache key is stale');
+assert(/20261025-company-user-ux-phase5-r1|20261027-safety-vote-(?:jury-work-media-r2|preview-parity-r1)/.test(index), 'Phase 5 frontend cache key is stale');
 
 console.log('Safety Vote company User UX Phase 5 static contract: PASS (all campaigns, read-only detail, immutable official results, lifecycle filters and responsive integrity panel)');

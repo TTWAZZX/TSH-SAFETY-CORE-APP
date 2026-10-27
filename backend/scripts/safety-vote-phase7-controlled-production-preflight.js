@@ -20,7 +20,7 @@ const allowedExact = new Set([
 const allowedPatterns = [
     /^api\/(handlers|lib)\/safety_vote[^/]*\.php$/,
     /^backend\/migrations\/202610(08_safety_vote_phase1_foundation|24_safety_vote_(company_wide_visibility|eligibility_removal_policy)|25_safety_vote_jury_work_items_atomic_media)(\.rollback)?\.sql$/,
-    /^backend\/(routes|services|scripts)\/safety-vote[^/]*\.(?:js|php)$/,
+    /^backend\/(routes|services|scripts)\/safety-vote[^/]*\.(?:js|mjs|php)$/,
     /^docs\/safety-vote[^/]*\.md$/,
     /^public\/js\/pages\/(admin-safety-vote[^/]*|safety-vote[^/]*)(\.mjs|\.js)$/,
 ];

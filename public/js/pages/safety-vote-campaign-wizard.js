@@ -1,6 +1,6 @@
 import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
-import { openSafetyVoteConfirmDialog, safetyVoteCampaignPreview, safetyVoteJourneyNav } from './safety-vote-ux-components.js?v=20261019-safety-vote-account-advisory-r1';
+import { bindSafetyVoteCampaignPreview, openSafetyVoteConfirmDialog, safetyVoteCampaignPreview, safetyVoteJourneyNav } from './safety-vote-ux-components.js?v=20261027-safety-vote-preview-parity-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261027-safety-vote-jury-work-media-r1';
 import { formatThaiDateTime, formatThaiTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
@@ -151,8 +151,8 @@ function stepResults(draft) {
 function liveLeaderboardPreview(draft) {
     if (!draft.liveLeaderboardEnabled) return '';
     const count = Number(draft.liveLeaderboardTopN) === 10 ? 10 : 5, labels = (draft.questions[0]?.options || []).map(option => option.label).filter(Boolean);
-    const rows = Array.from({ length: count }, (_, index) => ({ label: labels[index] || `ตัวเลือก ${index + 1}`, votes: Math.max(1, 24 - index * 2), rank: index + 1 }));
-    return `<section class="sv-live-board sv-live-board--preview" aria-label="ตัวอย่าง Live Leaderboard"><div class="sv-live-board__heading"><div><span class="sv-eyebrow">Preview · ข้อมูลจำลอง</span><h3>ผลโหวตสด</h3></div><span>Top ${count}</span></div><p class="sv-live-board__notice">ตำแหน่งที่ผู้ใช้จะเห็น · ${draft.liveLeaderboardVisibility==='admin_only'?'Admin เท่านั้น':draft.liveLeaderboardVisibility==='always'?'เห็นตลอดกิจกรรม':'หลังส่งคะแนนแล้ว'}</p>${rows.map(row=>`<div class="sv-live-row"><strong>#${row.rank}</strong><span>${escHtml(row.label)}</span><span>${draft.liveLeaderboardScoreMode==='percentage'?'—%':`${row.votes} โหวต${draft.liveLeaderboardScoreMode==='count_percentage'?' · —%':''}`}</span></div>`).join('')}<small>ตัวอย่างนี้ไม่ดึงคะแนนจริงและไม่สร้างข้อมูลการลงคะแนน</small></section>`;
+    const rows = labels.slice(0, count);
+    return `<section class="sv-live-board sv-live-board--preview" data-sv-preview-statistics="unavailable-in-draft" aria-label="โครงสร้าง Live Leaderboard"><div class="sv-live-board__heading"><div><span class="sv-eyebrow">Preview · ยังไม่มีสถิติจริงใน Draft</span><h3>ผลโหวตสด</h3></div><span>Top ${count}</span></div><p class="sv-live-board__notice">ตำแหน่งที่ผู้ใช้จะเห็น · ${draft.liveLeaderboardVisibility==='admin_only'?'Admin เท่านั้น':draft.liveLeaderboardVisibility==='always'?'เห็นตลอดกิจกรรม':'หลังส่งคะแนนแล้ว'}</p>${rows.length ? rows.map(label=>`<div class="sv-live-row"><strong>—</strong><span>${escHtml(label)}</span><span>${draft.liveLeaderboardScoreMode==='percentage'?'—%':`— โหวต${draft.liveLeaderboardScoreMode==='count_percentage'?' · —%':''}`}</span></div>`).join('') : '<p class="svp-note">ยังไม่มีรายการจริงสำหรับแสดงผล</p>'}<small>Preview แสดงเฉพาะการตั้งค่าและชื่อรายการจริง ระบบจะมีจำนวนและอันดับหลังรับข้อมูลจริงเท่านั้น</small></section>`;
 }
 
 function participantPreview(draft, previewUserView, previewSubmitted) {
@@ -161,7 +161,7 @@ function participantPreview(draft, previewUserView, previewSubmitted) {
     const scenario = liveEnabled && draft.liveLeaderboardVisibility === 'after_submit'
         ? `<div class="svw-preview-tabs" role="group" aria-label="จำลองสถานะผู้เข้าร่วม"><button type="button" data-svw-preview-submitted="false" aria-selected="${!previewSubmitted}">ก่อนส่งคะแนน</button><button type="button" data-svw-preview-submitted="true" aria-selected="${previewSubmitted}">หลังส่งคะแนน</button></div>`
         : '';
-    const preview = safetyVoteCampaignPreview({ campaign: draft, questions: draft.questions, mode: 'user', userView: previewUserView, liveMarkup: liveLeaderboardPreview(draft), liveEnabled, liveAllowed, previewSubmitted });
+    const preview = safetyVoteCampaignPreview({ campaign: draft, questions: draft.questions, works: draft.works, criteria: draft.juryCriteria, mode: 'user', userView: previewUserView, liveMarkup: liveLeaderboardPreview(draft), liveEnabled, liveAllowed, previewSubmitted });
     return `${scenario}${preview}`;
 }
 
@@ -186,10 +186,12 @@ function stepJury(draft, persisted) {
 
 function stepReview(draft, persisted, previewMode, previewUserView, previewSubmitted) {
     const items = readinessItems(draft, persisted), ready = items.every(item => item.pass), advanced = templateFor(draft.campaignType).advancedRequired;
-    const preview = previewMode === 'user'
+    const secondaryMode = draft.campaignType === 'jury_scoring' ? 'juror' : 'admin';
+    const effectiveMode = previewMode === 'user' ? 'user' : secondaryMode;
+    const preview = effectiveMode === 'user'
         ? participantPreview(draft, previewUserView, previewSubmitted)
-        : safetyVoteCampaignPreview({ campaign: draft, questions: draft.questions, mode: previewMode });
-    return `<div class="svw-review-grid"><section class="svw-readiness" aria-labelledby="svw-readiness-title"><div class="svw-section-heading"><div><p class="sv-eyebrow">Readiness checklist</p><h3 id="svw-readiness-title">ความพร้อมก่อนเปิดใช้งาน</h3></div><span class="sv-status-badge ${ready?'sv-status-badge--open':'sv-status-badge--scheduled'}"><span class="sv-status-dot"></span>${ready?'พร้อมเปิด':'ยังไม่พร้อม'}</span></div><ul>${items.map(item=>`<li class="${item.pass?'is-pass':'is-block'}"><span aria-hidden="true">${item.pass?'✓':'!'}</span><span>${escHtml(item.label)}</span></li>`).join('')}</ul>${advanced?'<div class="svw-readiness__advanced" role="status"><strong>ต้องตั้งค่าตามประเภทแคมเปญต่อ</strong><p>ระบบจะพาไปยังพื้นที่จัดการเดิมสำหรับการเลือกตั้งลับ ผลงาน การเสนอชื่อ หรือกรรมการ โดยยังไม่เปิดแคมเปญอัตโนมัติ</p></div>':''}</section><section class="svw-preview-panel"><div class="svw-preview-tabs" role="tablist" aria-label="ตัวอย่างหน้าจอตามบทบาท"><button type="button" role="tab" data-svw-preview="user" aria-selected="${previewMode==='user'}">ผู้เข้าร่วม</button><button type="button" role="tab" data-svw-preview="juror" aria-selected="${previewMode==='juror'}">กรรมการ</button></div>${preview}</section></div>`;
+        : safetyVoteCampaignPreview({ campaign: draft, questions: draft.questions, works: draft.works, criteria: draft.juryCriteria, mode: effectiveMode });
+    return `<div class="svw-review-grid"><section class="svw-readiness" aria-labelledby="svw-readiness-title"><div class="svw-section-heading"><div><p class="sv-eyebrow">Readiness checklist</p><h3 id="svw-readiness-title">ความพร้อมก่อนเปิดใช้งาน</h3></div><span class="sv-status-badge ${ready?'sv-status-badge--open':'sv-status-badge--scheduled'}"><span class="sv-status-dot"></span>${ready?'พร้อมเปิด':'ยังไม่พร้อม'}</span></div><ul>${items.map(item=>`<li class="${item.pass?'is-pass':'is-block'}"><span aria-hidden="true">${item.pass?'✓':'!'}</span><span>${escHtml(item.label)}</span></li>`).join('')}</ul>${advanced?'<div class="svw-readiness__advanced" role="status"><strong>ต้องตั้งค่าตามประเภทแคมเปญต่อ</strong><p>ระบบจะพาไปยังพื้นที่จัดการเดิมสำหรับการเลือกตั้งลับ ผลงาน การเสนอชื่อ หรือกรรมการ โดยยังไม่เปิดแคมเปญอัตโนมัติ</p></div>':''}</section><section class="svw-preview-panel"><div class="svw-preview-tabs" role="tablist" aria-label="ตัวอย่างหน้าจอตามบทบาท"><button type="button" role="tab" data-svw-preview="user" aria-selected="${effectiveMode==='user'}">หน้าผู้ใช้จริง</button><button type="button" role="tab" data-svw-preview="${secondaryMode}" aria-selected="${effectiveMode===secondaryMode}">${secondaryMode==='juror'?'หน้ากรรมการจริง':'การตั้งค่า Admin'}</button></div>${preview}</section></div>`;
 }
 
 function stepMarkup(step, draft, persisted, previewMode, previewUserView, previewSubmitted) {
@@ -198,7 +200,7 @@ function stepMarkup(step, draft, persisted, previewMode, previewUserView, previe
 
 export function renderSafetyVoteCampaignWizard(container, { campaignId = null, initialTemplateKey = null, initialConfig = null, sourceLabel = '', onClose = () => {}, onComplete = () => {}, onOpenAdvanced = () => {}, onNavigate = null } = {}) {
     let recoveryKey = `safetyVoteAdminDraft:v1:${campaignId ? Number(campaignId) : 'new'}`;
-    const state = { step: 0, maxStep: 0, draft: createWizardDraft(), persisted: { campaignId: null, versionId: null, rowVersion: null, campaignStatus: 'Draft', builderSaved: false, preservedMedia: [], serverUpdatedAt: null }, liveJuryMode: false, saveState: 'idle', saveMessage: 'ยังไม่ได้บันทึก', errors: [], previewMode: 'user', previewUserView: 'participation', previewSubmitted: false, dirty: false, timer: null, saveChain: Promise.resolve(), objectUrls: new Set(), hydratingFiles: new Set(), recovery: null, peoplePickerCleanup: null };
+    const state = { step: 0, maxStep: 0, draft: createWizardDraft(), persisted: { campaignId: null, versionId: null, rowVersion: null, campaignStatus: 'Draft', builderSaved: false, preservedMedia: [], serverUpdatedAt: null }, liveJuryMode: false, saveState: 'idle', saveMessage: 'ยังไม่ได้บันทึก', errors: [], previewMode: 'user', previewUserView: 'participation', previewSubmitted: false, dirty: false, timer: null, saveChain: Promise.resolve(), objectUrls: new Set(), hydratingFiles: new Set(), workMediaUploads: new Set(), recovery: null, peoplePickerCleanup: null };
 
     const clone = value => JSON.parse(JSON.stringify(value));
     const configDraft = config => {
@@ -617,22 +619,44 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
     const revokeJuror = assignmentId => openSafetyVoteConfirmDialog({title:'ยืนยันการถอนกรรมการ',description:'กรรมการที่ยังไม่ส่งคะแนนจะถูกถอนสิทธิ์ทันทีและระบบบันทึก Audit หากมีคะแนนแล้วระบบจะไม่อนุญาตให้ถอน',confirmLabel:'ถอนกรรมการ',tone:'danger',onConfirm:async()=>{await API.delete(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/jury/assignments/${assignmentId}`);await refreshJuryAssignments();state.dirty=false;clearRecovery();setSaveState('saved','ถอนกรรมการแล้ว');render();}});
 
     const uploadWorkImage = async input => {
-        const work = state.draft.works?.[Number(input.dataset.workIndex)], file = input.files?.[0];
-        if (!work || !file) return;
+        const workIndex = Number(input.dataset.workIndex), file = input.files?.[0], scope = input.dataset.svwWorkImage === 'cover' ? 'work_cover' : 'work_gallery';
+        if (!state.draft.works?.[workIndex] || !file || state.workMediaUploads.has(workIndex)) return;
+        if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) { input.value=''; return showToast('รองรับเฉพาะ JPG, PNG หรือ WebP ไม่เกิน 10 MB','error'); }
+        state.workMediaUploads.add(workIndex);
+        const card = input.closest('.svw-work-item');
+        card?.setAttribute('aria-busy','true');
+        card?.querySelectorAll('[data-svw-work-image]').forEach(control=>{control.disabled=true;});
         try {
+            clearTimeout(state.timer);
+            await state.saveChain;
             readFields();
-            if (!work.id) { if (!await saveBuilder()) return; }
-            const current = state.draft.works?.[Number(input.dataset.workIndex)];
+            let current = state.draft.works?.[workIndex];
+            const preservePendingDraft = Boolean(current?.id && (state.dirty || !state.persisted.builderSaved));
+            if (!current?.id) {
+                const validationErrors = contentValidationErrors(state.draft);
+                if (validationErrors.length) throw new Error(`ยังบันทึกผลงานเพื่อเพิ่มรูปไม่ได้: ${validationErrors[0]}`);
+                if (!await saveBuilder()) throw new Error('ยังบันทึกผลงานเพื่อเพิ่มรูปไม่ได้');
+            }
+            current = state.draft.works?.[workIndex];
             if (!current?.id) throw new Error('กรุณาบันทึกผลงานก่อนเพิ่มรูป');
             const form = new FormData();
-            form.append('file', file); form.append('scopeType', input.dataset.svwWorkImage === 'cover' ? 'work_cover' : 'work_gallery'); form.append('scopeId', String(current.id)); form.append('altText', current.title || current.workCode || 'ภาพผลงาน');
+            form.append('file', file); form.append('scopeType', scope); form.append('scopeId', String(current.id)); form.append('altText', current.title || current.workCode || 'ภาพผลงาน');
             const requestKey = `work-media-${state.persisted.campaignId}-${current.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
             setSaveState('saving','กำลังอัปโหลดและผูกไฟล์กับผลงาน…');
             const response = await API.upload(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/media/atomic`, form, { headers: { 'Idempotency-Key': requestKey } });
             if (!response.data?.serverConfirmed) throw new Error('เซิร์ฟเวอร์ยังไม่ยืนยันการบันทึกไฟล์');
             const refreshed = await API.get(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/works`);
-            state.draft.works = refreshed.data?.rows || state.draft.works; state.dirty=false; clearRecovery(); setSaveState('saved','อัปโหลดและบันทึกรูปแล้ว'); render();
+            const serverRows = refreshed.data?.rows || [];
+            if (preservePendingDraft) {
+                const serverById = new Map(serverRows.map(work=>[Number(work.id),work]));
+                state.draft.works = state.draft.works.map(work=>serverById.has(Number(work.id))?{...work,gallery:serverById.get(Number(work.id)).gallery||[]}:work);
+                state.dirty=true; state.persisted.builderSaved=false; writeRecovery(); setSaveState('dirty','บันทึกรูปแล้ว · ข้อมูลอื่นยังไม่ได้บันทึก');
+            } else {
+                state.draft.works = serverRows.length ? serverRows : state.draft.works; state.dirty=false; state.persisted.builderSaved=true; clearRecovery(); setSaveState('saved','อัปโหลดและบันทึกรูปแล้ว');
+            }
+            showToast(scope==='work_cover'?'บันทึก Cover แล้ว':'เพิ่มรูปใน Gallery แล้ว','success'); input.value=''; render();
         } catch (error) { setSaveState('error','อัปโหลดรูปไม่สำเร็จ — ไม่มีการผูกไฟล์ค้าง'); showToast(error?.message||'อัปโหลดรูปผลงานไม่สำเร็จ','error'); input.value=''; }
+        finally { state.workMediaUploads.delete(workIndex); if(card?.isConnected){card.removeAttribute('aria-busy');card.querySelectorAll('[data-svw-work-image]').forEach(control=>{control.disabled=false;});} }
     };
 
     const removeWorkImage = async (workIndex, scopeType) => {
@@ -666,6 +690,7 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         renderQuestionImageEditors();
         bind();
         if ([3,8].includes(state.step)) bindSafetyVoteImageGallery(container);
+        if (state.step === 8) bindSafetyVoteCampaignPreview(container);
         if ([3,8].includes(state.step)) hydrateSafetyVoteImages(container);
         if ([3,8].includes(state.step)) hydrateOptionImages();
         if ([3,8].includes(state.step)) hydrateQuestionImages();

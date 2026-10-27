@@ -14,7 +14,9 @@ const phpBuilder = read('api/handlers/safety_vote_phase2.php');
 const nodePhase3Builder = read('backend/routes/safety-vote-phase3.js');
 const phpPhase3Builder = read('api/handlers/safety_vote_phase3.php');
 const wizard = read('public/js/pages/safety-vote-campaign-wizard.js');
+const previewComponents = read('public/js/pages/safety-vote-ux-components.js');
 const workspace = read('public/js/pages/safety-vote-jury-workspace.js');
+const userWorkspace = read('public/js/pages/safety-vote-page-ux1.js');
 const css = read('public/style.css');
 
 for (const source of [nodePhase4, phpRules]) {
@@ -55,7 +57,26 @@ assert(wizard.includes('workMediaEditor(work,index)') && wizard.includes('ระ
 assert(wizard.includes('Gallery ตรงนี้เป็นชุดรูปของผลงานนี้ภายในแคมเปญ ไม่ใช่คลังรูปทั้งหมดของโมดูล Safety Vote'), 'Work Gallery scope must be explicit');
 assert(wizard.includes('data-svw-work-image="cover"') && wizard.includes('data-svw-work-image="gallery"'), 'Jury Work Cover and Gallery pickers must always render');
 assert(wizard.includes('hydrateSafetyVoteImages(container)') && wizard.includes('data-sv-auth-file="${Number(item.fileId)}"'), 'Saved Jury work media must render through authenticated previews');
+assert(wizard.includes('clearTimeout(state.timer)') && wizard.includes('await state.saveChain') && wizard.includes('state.workMediaUploads.has(workIndex)'), 'Jury work media upload must serialize behind autosave and reject concurrent selection');
+assert(wizard.includes("state.persisted.builderSaved=true") && wizard.includes("showToast(scope==='work_cover'?'บันทึก Cover แล้ว':'เพิ่มรูปใน Gallery แล้ว','success')"), 'Jury work media upload must confirm authoritative refresh visibly');
+assert(wizard.includes('const preservePendingDraft = Boolean(current?.id') && wizard.includes('serverById.get(Number(work.id)).gallery'), 'Existing Jury work media upload must preserve unrelated unsaved Work Item fields');
+assert(wizard.includes('ยังบันทึกผลงานเพื่อเพิ่มรูปไม่ได้: ${validationErrors[0]}'), 'New Jury work media targets must expose the exact blocking Work Item validation error');
+assert(wizard.includes('works: draft.works, criteria: draft.juryCriteria'), 'Final review must pass authoritative Draft Work Items and Jury Criteria to both role previews');
+assert(previewComponents.includes("campaignType === 'jury_scoring'"), 'Jury preview must select the governed Work Item renderer');
+assert(previewComponents.includes('data-sv-jury-preview="participant"') && previewComponents.includes('Public Work Gallery · อ่านอย่างเดียว'), 'Participant preview must render the read-only Work Gallery');
+assert(previewComponents.includes('data-sv-jury-preview="juror"') && previewComponents.includes('Work × Criteria Matrix · Preview หน้าจอจริง'), 'Juror preview must render the Work × Criteria Matrix');
+assert(previewComponents.includes('criterion.minScore') && previewComponents.includes('criterion.maxScore') && previewComponents.includes('criterion.weight'), 'Juror preview must use the configured scoring range and weight');
+assert(previewComponents.includes('data-sv-auth-file=') && previewComponents.includes('safetyVotePreviewWorkGallery'), 'Both previews must render authenticated Cover and Gallery media');
+assert(!previewComponents.includes('เกณฑ์ตัวอย่าง') && !previewComponents.includes('value="8" aria-label="คะแนนตัวอย่าง"'), 'Hard-coded sample criterion and score must not remain in final preview');
+assert(previewComponents.includes('resolveWorkflowProfile') && previewComponents.includes('profile.participantLabel') && previewComponents.includes('profile.contentLabel'), 'Every preview must resolve role labels through the shared six-workflow profile contract');
+assert(previewComponents.includes("mode === 'admin'") && previewComponents.includes('data-sv-admin-preview='), 'Non-Jury workflows must expose a real Draft Admin configuration preview');
+assert(previewComponents.includes('safetyVoteWorkflowFormPreview') && previewComponents.includes('safetyVotePreviewQuestionImage') && previewComponents.includes('safetyVotePreviewOptionGallery'), 'All user workflow previews must use their real form/media projection');
+assert(userWorkspace.includes('workflowRequirementsMarkup()') && userWorkspace.includes('ข้อกำหนดจากผู้จัดกิจกรรม'), 'Submission and Nomination user forms must display the configured campaign requirements');
+assert(previewComponents.includes('bindSafetyVoteCampaignPreview') && wizard.includes('bindSafetyVoteCampaignPreview(container)'), 'Final Preview must apply the same conditional-question visibility behavior as the real user form');
+assert(wizard.includes('data-sv-preview-statistics="unavailable-in-draft"') && wizard.includes('ยังไม่มีสถิติจริงใน Draft'), 'Draft Live Leaderboard preview must disclose unavailable statistics');
+assert(!wizard.includes('Math.max(1, 24 - index * 2)') && !wizard.includes('Preview · ข้อมูลจำลอง'), 'Preview must never manufacture vote counts or rankings');
 assert(css.includes('.svw-work-media-editor') && css.includes('.svw-work-media-grid'), 'Jury work media editor styling is missing');
+assert(css.includes('.sv-live-preview__matrix-work') && css.includes('.sv-live-preview__criterion'), 'Responsive Jury preview matrix styling is missing');
 assert(workspace.includes('WORK × CRITERIA MATRIX'));
 assert(workspace.includes('data-sv-jury-matrix'));
 assert(workspace.includes('data-sv-result-binding="submitted_score_rows_to_frozen_result"'));
