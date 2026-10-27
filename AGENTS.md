@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Phase 7 Production Deployment (PASS, 2026-10-27)
+
+- Immutable commit `820e97ab38602eb9d748745b537502d0d991814a` was deployed to the PHP shared-hosting Production target. The guarded release uploaded 167 runtime files after per-file remote double-download SHA-256 checks and created a matching runtime rollback package.
+- Production advanced from `2026-10-24-candidate-submission-gallery-r1` to `2026-10-25-jury-work-items-atomic-media-r1` through eight additive/idempotent migrations. Protected counts were preserved at 7 campaigns, 7 versions, 12 eligibility snapshots, 30,563 eligible voters, 5 ballots, 0 result snapshots/rows/certifications/reports and 67 files.
+- Company-wide campaign visibility, governed visibility remediation and eligibility removal gates are enabled. Authenticated health reports Question Images, Candidate/Submission Gallery, Jury Work Items, Atomic Media and Company-wide Campaign Visibility ready; company campaign total is 7.
+- Fresh full database backup evidence: `backups/production/full-db-local-sync-20261027160917/`, SHA-256 `60e71e1562609e41df54768a1cd87d67977ebd42be9487466633622a9a48adf8`; read-only export, double-download, and public-access denial passed. Runtime rollback manifest SHA-256: `c40ccfb257350369702c188b904300b5d480f5810749d71fd80b5abc8fbcf456` under `backups/production/safety-vote-phase7-final-deploy-20261027161514/`.
+- HTTPS entry-chain and branding verification passed. Temporary helper residue is zero, `.htaccess` was restored byte-exact, external delivery configuration was unchanged. Decision: `PASS_SAFETY_VOTE_PHASE7_FINAL_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Completed Campaign Non-destructive Next-cycle Guard (PASS, Local only, 2026-10-27)
 
 - Direct Draft revision activation is now denied for every `Closed`, `Certified` and `Published` campaign in both Node and PHP, independent of company-catalogue settings or existing result-snapshot counts. The stable `409 NEXT_CYCLE_REQUIRED` response directs Admin to the governed `activate-next-cycle` workflow.
