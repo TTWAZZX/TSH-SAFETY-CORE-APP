@@ -45,10 +45,19 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || (fs.existsSync(
             assert.strictEqual(layout.actionButtonsMeetTarget, true);
             await page.keyboard.press('ArrowRight');
             assert.strictEqual(await page.locator('#sv-gallery-position').textContent(), 'รูปที่ 3 จาก 3');
+            assert.strictEqual(await page.locator('[data-sv-gallery-next]').isDisabled(), true);
+            await page.keyboard.press('ArrowRight');
+            assert.strictEqual(await page.locator('#sv-gallery-position').textContent(), 'รูปที่ 3 จาก 3');
             await page.keyboard.press('ArrowLeft');
             assert.strictEqual(await page.locator('#sv-gallery-position').textContent(), 'รูปที่ 2 จาก 3');
             await page.locator('[data-sv-gallery-stage]').evaluate(stage => {
                 const touch = (clientX, clientY) => new Touch({ identifier: 1, target: stage, clientX, clientY });
+                stage.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, changedTouches: [touch(250, 100)] }));
+                stage.dispatchEvent(new TouchEvent('touchend', { bubbles: true, changedTouches: [touch(100, 105)] }));
+            });
+            assert.strictEqual(await page.locator('#sv-gallery-position').textContent(), 'รูปที่ 3 จาก 3');
+            await page.locator('[data-sv-gallery-stage]').evaluate(stage => {
+                const touch = (clientX, clientY) => new Touch({ identifier: 2, target: stage, clientX, clientY });
                 stage.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, changedTouches: [touch(250, 100)] }));
                 stage.dispatchEvent(new TouchEvent('touchend', { bubbles: true, changedTouches: [touch(100, 105)] }));
             });

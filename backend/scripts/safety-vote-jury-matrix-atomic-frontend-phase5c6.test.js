@@ -51,6 +51,11 @@ assert(wizard.includes('await loadPrivateImagePreview(option,option.fileId)'), '
 assert(!wizard.includes('option.previewUrl=URL.createObjectURL(file)'), 'Option preview must not depend on the transient file-input object');
 assert(wizard.includes('ขนาดแนะนำ 1600 × 900 พิกเซล (กว้าง × สูง, 16:9 แนวนอน)'), 'Question-image guidance must state the recommended dimensions');
 assert(wizard.includes("setSaveState('saved','ลบรูปผลงานและบันทึกแล้ว')"));
+assert(wizard.includes('workMediaEditor(work,index)') && wizard.includes('ระบบจะบันทึกรายการผลงานก่อนอัปโหลดให้อัตโนมัติ'), 'Unsaved Jury work items must expose the direct media picker with automatic save guidance');
+assert(wizard.includes('Gallery ตรงนี้เป็นชุดรูปของผลงานนี้ภายในแคมเปญ ไม่ใช่คลังรูปทั้งหมดของโมดูล Safety Vote'), 'Work Gallery scope must be explicit');
+assert(wizard.includes('data-svw-work-image="cover"') && wizard.includes('data-svw-work-image="gallery"'), 'Jury Work Cover and Gallery pickers must always render');
+assert(wizard.includes('hydrateSafetyVoteImages(container)') && wizard.includes('data-sv-auth-file="${Number(item.fileId)}"'), 'Saved Jury work media must render through authenticated previews');
+assert(css.includes('.svw-work-media-editor') && css.includes('.svw-work-media-grid'), 'Jury work media editor styling is missing');
 assert(workspace.includes('WORK × CRITERIA MATRIX'));
 assert(workspace.includes('data-sv-jury-matrix'));
 assert(workspace.includes('data-sv-result-binding="submitted_score_rows_to_frozen_result"'));

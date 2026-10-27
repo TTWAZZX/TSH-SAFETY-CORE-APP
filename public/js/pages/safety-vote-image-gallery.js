@@ -55,6 +55,8 @@ export function openSafetyVoteImageGallery(root, initialTrigger) {
         position.textContent = `รูปที่ ${index + 1} จาก ${triggers.length}`;
         stage.classList.toggle('is-single', triggers.length < 2);
         previous.hidden = next.hidden = triggers.length < 2;
+        previous.disabled = index === 0;
+        next.disabled = index === triggers.length - 1;
         const input = choiceInput(trigger);
         actions.hidden = !input;
         if (input) {
@@ -68,7 +70,7 @@ export function openSafetyVoteImageGallery(root, initialTrigger) {
     };
     const move = delta => {
         if (triggers.length < 2) return;
-        index = (index + delta + triggers.length) % triggers.length;
+        index = Math.max(0, Math.min(triggers.length - 1, index + delta));
         render();
     };
     const close = () => {

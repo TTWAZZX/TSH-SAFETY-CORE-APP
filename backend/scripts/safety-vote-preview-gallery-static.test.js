@@ -22,12 +22,13 @@ const checks = [
     [participant.includes('bindSafetyVoteImageGallery(state.page)') && participant.includes('data-sv-gallery-group="question-cover-${Number(question.id)}"'), 'participant page must bind the same question-scoped gallery'],
     [gallery.includes('รูปที่ ${index + 1} จาก ${triggers.length}'), 'gallery must announce image position'],
     [gallery.includes("event.key === 'ArrowLeft'") && gallery.includes("event.key === 'ArrowRight'") && gallery.includes("event.key === 'Escape'"), 'gallery keyboard navigation is incomplete'],
+    [gallery.includes('Math.max(0, Math.min(triggers.length - 1, index + delta))') && gallery.includes('next.disabled = index === triggers.length - 1'), 'gallery navigation must stop at the first and last image'],
     [gallery.includes("addEventListener('touchstart'") && gallery.includes("addEventListener('touchend'") && gallery.includes('Math.abs(dx) >= 50'), 'gallery swipe navigation is incomplete'],
     [gallery.includes("document.body.style.overflow = 'hidden'") && gallery.includes('restoreTarget.focus()'), 'gallery modal lifecycle or focus restoration is incomplete'],
     [participant.includes('question-options-${Number(questionId)}') && participant.includes('data-sv-gallery-choice-value'), 'participant option images must share a question gallery and expose their choice'],
     [gallery.includes('data-sv-gallery-select') && gallery.includes('data-sv-gallery-confirm') && gallery.includes("input.dispatchEvent(new Event('change'"), 'gallery selection and confirmation controls are incomplete'],
     [css.includes('.svp-gallery__nav--previous') || css.includes('.svp-gallery__nav'), 'gallery navigation styling is missing'],
-    [/202610(?:1[56]-safety-vote-(?:preview-gallery|preview-parity)|24-(?:safety-vote-(?:question-images|gallery|people-picker)|eligibility-individual-add)|27-safety-vote-gallery-lightbox)-r1|20261027-safety-vote-gallery-choice-r2/.test(html), 'top-level cache key was not advanced']
+    [/202610(?:1[56]-safety-vote-(?:preview-gallery|preview-parity)|24-(?:safety-vote-(?:question-images|gallery|people-picker)|eligibility-individual-add)|27-safety-vote-gallery-lightbox)-r1|20261027-safety-vote-(?:gallery-(?:choice-r2|bounded-r3)|jury-work-media-r1)/.test(html), 'top-level cache key was not advanced']
 ];
 
 for (const [value, message] of checks) assert(value, message);
