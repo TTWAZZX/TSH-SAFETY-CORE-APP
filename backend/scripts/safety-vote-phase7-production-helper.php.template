@@ -183,7 +183,11 @@ try {
     }
     if ($action !== 'migrate') respond(['success' => false, 'code' => 'UNKNOWN_ACTION'], 400);
     $before = counts($pdo);
-    $allowed = ['2026-10-20-eligibility-amendments-r1', '2026-10-25-jury-work-items-atomic-media-r1'];
+    $allowed = [
+        '2026-10-20-eligibility-amendments-r1',
+        '2026-10-24-candidate-submission-gallery-r1',
+        '2026-10-25-jury-work-items-atomic-media-r1',
+    ];
     if (!in_array(setting($pdo, 'schema_version'), $allowed, true)) throw new RuntimeException('UNEXPECTED_SCHEMA_VERSION');
     $decoded = base64_decode(MIGRATIONS_JSON_B64, true);
     $migrations = $decoded === false ? null : json_decode($decoded, true);

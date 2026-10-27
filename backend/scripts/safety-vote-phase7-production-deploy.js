@@ -11,7 +11,9 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 const root = path.resolve(__dirname, '..', '..');
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
 const confirmation = 'DEPLOY_SAFETY_VOTE_PHASE7_FINAL_PRODUCTION';
+const productionSchemaBefore = '2026-10-24-candidate-submission-gallery-r1';
 const productionSchema = '2026-10-25-jury-work-items-atomic-media-r1';
+const fullDatabaseBackup = 'backups/production/full-db-local-sync-20261027160917';
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const helperTemplate = path.join(__dirname, 'safety-vote-phase7-production-helper.php.template');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
@@ -97,7 +99,7 @@ function prepare(commit) {
         if (!remoteExists(relative)) { remove.push({ path: relative }); continue; }
         const before = doubleDownload(relative, 'remote-before'), rollback = under(path.join(rollbackRoot, 'runtime-before'), relative); fs.mkdirSync(path.dirname(rollback), { recursive: true }); fs.copyFileSync(before.source, rollback); restore.push({ path: relative, bytes: before.bytes, sha256: before.sha256, rollback });
     }
-    const manifest = { contract: '2026-10-26-safety-vote-phase7-final-production-r1', commit, runtime: candidate.map(({ target: ignored, ...item }) => item), restore: restore.map(({ rollback: ignored, ...item }) => item), remove, fullDatabaseBackup: 'full-db-local-sync-20261025172836' };
+    const manifest = { contract: '2026-10-26-safety-vote-phase7-final-production-r1', commit, runtime: candidate.map(({ target: ignored, ...item }) => item), restore: restore.map(({ rollback: ignored, ...item }) => item), remove, fullDatabaseBackup };
     const manifestPath = path.join(rollbackRoot, 'manifest.json'); fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`); return { candidate, restore, remove, manifestSha256: fileSha(manifestPath) };
 }
 
@@ -120,12 +122,12 @@ function write(name, value) { fs.mkdirSync(evidence, { recursive: true }); const
 async function main() {
     assert.equal(process.argv[2], '--execute'); assert.equal(process.argv[3], confirmation);
     const branch = String(git(['branch', '--show-current'])).trim(), commit = String(git(['rev-parse', 'HEAD'])).trim(), origin = String(git(['rev-parse', 'origin/main'])).trim(); assert.equal(branch, 'main'); assert.equal(commit, origin); assert.equal(String(git(['status', '--porcelain'])).trim(), '');
-    const token = await login(), before = await smoke(token, productionSchema); prepared = prepare(commit); prepareHelper();
+    const token = await login(), before = await smoke(token, productionSchemaBefore); prepared = prepare(commit); prepareHelper();
     assert.equal((await fetch(helperUrl)).status, 405); assert.equal((await helper('inspect', 'invalid')).status, 401);
     const migration = await helper('migrate'); assert.equal(migration.status, 200, JSON.stringify(migration.body)); assert.equal(migration.body?.protectedCountsPreserved, true);
     const activation = await helper('enable'); assert.equal(activation.status, 200, JSON.stringify(activation.body));
     upload(); const deployed = verify(), https = await verifyHttps(commit), after = await smoke(token, productionSchema); assert.equal(after.capabilities?.juryWorkItems, true); assert.equal(after.capabilities?.atomicMedia, true); const cleaned = await cleanup();
-    const result = { decision: 'PASS_SAFETY_VOTE_PHASE7_FINAL_PRODUCTION_DEPLOYMENT', generatedAt: new Date().toISOString(), commit, runtimeFiles: runtime.length, migration: migration.body, activation: activation.body, before, after, deployment: { doubleDownloadVerified: deployed.length, httpsVerified: https }, rollbackPackage: { manifestSha256: prepared.manifestSha256, restoreFiles: prepared.restore.length, removeOnRollback: prepared.remove.length, fullDatabaseBackup: 'backups/production/full-db-local-sync-20261025172836' }, cleanup: cleaned, externalDeliveryChanged: false, rollback: { attempted: false } }; const digest = write('result.json', result); process.stdout.write(`${JSON.stringify({ evidence: path.relative(root, evidence).replaceAll('\\', '/'), decision: result.decision, commit, runtimeFiles: runtime.length, migration: { schemaVersion: migration.body.schemaVersion, protectedCountsPreserved: true }, activation: result.activation, after: result.after, rollbackPackage: result.rollbackPackage, cleanup: cleaned, resultSha256: digest }, null, 2)}\n`);
+    const result = { decision: 'PASS_SAFETY_VOTE_PHASE7_FINAL_PRODUCTION_DEPLOYMENT', generatedAt: new Date().toISOString(), commit, runtimeFiles: runtime.length, migration: migration.body, activation: activation.body, before, after, deployment: { doubleDownloadVerified: deployed.length, httpsVerified: https }, rollbackPackage: { manifestSha256: prepared.manifestSha256, restoreFiles: prepared.restore.length, removeOnRollback: prepared.remove.length, fullDatabaseBackup }, cleanup: cleaned, externalDeliveryChanged: false, rollback: { attempted: false } }; const digest = write('result.json', result); process.stdout.write(`${JSON.stringify({ evidence: path.relative(root, evidence).replaceAll('\\', '/'), decision: result.decision, commit, runtimeFiles: runtime.length, migration: { schemaVersion: migration.body.schemaVersion, protectedCountsPreserved: true }, activation: result.activation, after: result.after, rollbackPackage: result.rollbackPackage, cleanup: cleaned, resultSha256: digest }, null, 2)}\n`);
 }
 
 main().catch(async error => { let rollback = { attempted: false }, cleanupResult = { helperResidue: true }; try { rollback = rollbackRuntime(); } catch (caught) { rollback = { attempted: true, pass: false, error: caught.message }; } try { cleanupResult = await cleanup(); } catch (caught) { cleanupResult = { helperResidue: true, error: caught.message }; } const failure = { decision: rollback.attempted && rollback.pass && cleanupResult.helperResidue === false ? 'HOLD_DEPLOYMENT_FAILED_RUNTIME_ROLLED_BACK_SCHEMA_ADDITIVE_RETAINED' : 'HOLD_DEPLOYMENT_ROLLBACK_INCOMPLETE', error: error.message, rollback, cleanup: cleanupResult }; write('failure.json', failure); console.error(JSON.stringify(failure)); process.exitCode = 1; });
