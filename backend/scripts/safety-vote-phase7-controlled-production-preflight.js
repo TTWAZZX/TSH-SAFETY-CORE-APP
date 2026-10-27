@@ -16,6 +16,7 @@ const forbiddenNames = new Set(['.env', 'backend/.env']);
 const allowedExact = new Set([
     'AGENTS.md', 'index.html', 'package.json', 'backend/package.json', 'backend/server.js',
     'api/index.php', 'public/js/api.js', 'public/js/main.js', 'public/js/pages/admin.js', 'public/style.css',
+    'backend/scripts/safety-vote-phase7-production-helper.php.template',
 ]);
 const allowedPatterns = [
     /^api\/(handlers|lib)\/safety_vote[^/]*\.php$/,

@@ -11,6 +11,7 @@ The gate requires:
 - `.env`, private uploads, business files and backup evidence to remain outside the commit;
 - a bounded secret-pattern scan and `git diff --check` to pass;
 - the current additive migration and data-preserving rollback to be present;
+- the temporary PHP deployment helper template to be explicitly included in the Phase 7 release scope and linted before upload;
 - Local configuration to remain loopback-only during candidate preparation;
 - a deterministic SHA-256 manifest for every candidate file.
 

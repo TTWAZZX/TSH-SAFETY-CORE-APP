@@ -42,6 +42,7 @@ function database(): PDO
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
+        PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true,
     ]);
 }
 
@@ -50,6 +51,7 @@ function setting(PDO $pdo, string $key): ?string
     $stmt = $pdo->prepare('SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey=?');
     $stmt->execute([$key]);
     $value = $stmt->fetchColumn();
+    $stmt->closeCursor();
     return $value === false ? null : (string) $value;
 }
 
@@ -57,7 +59,9 @@ function exists_table(PDO $pdo, string $table): bool
 {
     $stmt = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?');
     $stmt->execute([$table]);
-    return (int) $stmt->fetchColumn() === 1;
+    $exists = (int) $stmt->fetchColumn() === 1;
+    $stmt->closeCursor();
+    return $exists;
 }
 
 function counts(PDO $pdo): array
@@ -76,9 +80,13 @@ function counts(PDO $pdo): array
     ];
     $result = [];
     foreach ($tables as $key => $table) {
-        $result[$key] = exists_table($pdo, $table)
-            ? (int) $pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn()
-            : 0;
+        if (!exists_table($pdo, $table)) {
+            $result[$key] = 0;
+            continue;
+        }
+        $stmt = $pdo->query('SELECT COUNT(*) FROM `' . $table . '`');
+        $result[$key] = (int) $stmt->fetchColumn();
+        $stmt->closeCursor();
     }
     return $result;
 }
@@ -120,6 +128,18 @@ function statements(string $sql): array
     if ($statement !== '') $result[] = $statement;
     if ($quote !== '') throw new RuntimeException('SQL_QUOTE_UNCLOSED');
     return $result;
+}
+
+function execute_statement(PDO $pdo, string $sql): void
+{
+    $stmt = $pdo->query($sql);
+    if (!$stmt instanceof PDOStatement) throw new RuntimeException('MIGRATION_STATEMENT_FAILED');
+    do {
+        if ($stmt->columnCount() > 0) {
+            while ($stmt->fetch(PDO::FETCH_ASSOC) !== false) {}
+        }
+    } while ($stmt->nextRowset());
+    $stmt->closeCursor();
 }
 
 function schema_ready(PDO $pdo): bool
@@ -172,7 +192,7 @@ try {
     foreach ($migrations as $migration) {
         $sql = base64_decode((string) ($migration['sql'] ?? ''), true);
         if ($sql === false) throw new RuntimeException('MIGRATION_DECODE_FAILED');
-        foreach (statements($sql) as $statement) $pdo->exec($statement);
+        foreach (statements($sql) as $statement) execute_statement($pdo, $statement);
         $executed[] = (string) ($migration['name'] ?? 'unknown');
     }
     $after = counts($pdo);
