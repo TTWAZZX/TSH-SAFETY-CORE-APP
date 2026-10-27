@@ -5,7 +5,7 @@ import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=202
 import { formatThaiDateTime, formatThaiTime, joinBangkokInput, splitBangkokInput, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
 import {
-    WIZARD_STEPS, CORE_TEMPLATES, applyTemplate, builderPayload, campaignPayload, contentValid,
+    WIZARD_STEPS, CORE_TEMPLATES, applyTemplate, builderPayload, campaignPayload, contentValid, contentValidationErrors,
     createWizardDraft, defaultOptionsForType, defaultQuestion, defaultValidationForType, defaultWork, hasOptions, juryValidationErrors,
     questionTypeAllowedForPrivacy, questionTypesFor, questionValidationErrors, readinessItems, scheduleValid,
     templateFor, validateStep, wizardStepsFor, workflowProfileFor
@@ -477,13 +477,46 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         delete target.imageUnavailable;
     };
 
-    const flushBuilderBeforeMediaMutation = async () => {
+    const flushBuilderBeforeMediaMutation = async (questionIndex, optionIndex = null) => {
+        readFields();
+        const originalQuestion = state.draft.questions[questionIndex];
+        const questionCode = originalQuestion?.questionCode || `Q${questionIndex + 1}`;
+        const originalOption = optionIndex === null ? null : originalQuestion?.options?.[optionIndex];
+        const optionCode = originalOption?.optionCode || (optionIndex === null ? null : `O${optionIndex + 1}`);
+        const hadPendingDraft = state.dirty || !state.persisted.builderSaved;
         clearTimeout(state.timer);
         await state.saveChain;
         readFields();
-        if (state.dirty || !state.persisted.builderSaved) {
-            if (!await saveBuilder()) throw new Error('กรุณากรอกข้อมูลคำถามและตัวเลือกให้ครบก่อนเพิ่มรูป');
+        let question = state.draft.questions.find(item => item.questionCode === questionCode) || state.draft.questions[questionIndex];
+        let target = optionIndex === null ? question : question?.options?.find(item => item.optionCode === optionCode) || question?.options?.[optionIndex];
+        if (!target?.id) {
+            const errors = contentValidationErrors(state.draft);
+            if (errors.length) {
+                state.errors = errors;
+                render();
+                container.querySelector('.svw-validation')?.focus();
+                throw new Error(errors[0]);
+            }
+            if (!await saveBuilder()) throw new Error('ยังไม่สามารถบันทึกรายการเพื่อเพิ่มรูปได้');
+            question = state.draft.questions.find(item => item.questionCode === questionCode) || state.draft.questions[questionIndex];
+            target = optionIndex === null ? question : question?.options?.find(item => item.optionCode === optionCode) || question?.options?.[optionIndex];
         }
+        return { target, hadPendingDraft };
+    };
+
+    const finishMediaMutation = (hadPendingDraft, savedMessage) => {
+        if (hadPendingDraft) {
+            state.dirty = true;
+            state.persisted.builderSaved = false;
+            writeRecovery();
+            setSaveState('dirty', `${savedMessage} · ข้อมูลอื่นยังไม่ได้บันทึก`);
+            if (contentValid(state.draft)) enqueueSave();
+            return;
+        }
+        state.dirty = false;
+        state.persisted.builderSaved = true;
+        clearRecovery();
+        setSaveState('saved', savedMessage);
     };
 
     const deleteOptionFile = async option => {
@@ -533,13 +566,13 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
     const uploadQuestionImage = async input => {
         const index=Number(input.dataset.svwQuestionImage),file=input.files?.[0];if(!file)return;
         if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024){showToast('รองรับเฉพาะ JPG, PNG หรือ WebP ขนาดไม่เกิน 10 MB','error');input.value='';return;}
-        try{await flushBuilderBeforeMediaMutation();const question=state.draft.questions[index];if(!question?.id)throw new Error('ยังไม่สามารถระบุคำถามที่จะผูกรูปได้');const form=new FormData(),altText=String(question.imageAltText||question.title||`ภาพประกอบคำถามข้อ ${index+1}`).trim();form.append('file',file);form.append('scopeType','question_image');form.append('scopeId',String(question.id));form.append('altText',altText);const requestKey=`question-image-${state.persisted.campaignId}-${question.id}-${Date.now()}`;setSaveState('saving','กำลังอัปโหลดและบันทึกรูปคำถาม…');const response=await API.upload(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/media/atomic`,form,{headers:{'Idempotency-Key':requestKey}});if(!response.data?.serverConfirmed)throw new Error('Server did not confirm question image upload.');question.imageFileId=Number(response.data.fileId);question.imageAltText=altText;question.fileName=file.name;await loadPrivateImagePreview(question,question.imageFileId);state.dirty=false;state.persisted.builderSaved=true;clearRecovery();setSaveState('saved','อัปโหลดรูปคำถามและบันทึกแล้ว');render();}catch(error){setSaveState('error','อัปโหลดรูปคำถามไม่สำเร็จ');showToast(error?.message||'อัปโหลดรูปคำถามไม่สำเร็จ','error');input.value='';}
+        try{const prepared=await flushBuilderBeforeMediaMutation(index),question=prepared.target;if(!question?.id)throw new Error('ยังไม่สามารถระบุคำถามที่จะผูกรูปได้');const form=new FormData(),altText=String(question.imageAltText||question.title||`ภาพประกอบคำถามข้อ ${index+1}`).trim();form.append('file',file);form.append('scopeType','question_image');form.append('scopeId',String(question.id));form.append('altText',altText);const requestKey=`question-image-${state.persisted.campaignId}-${question.id}-${Date.now()}`;setSaveState('saving','กำลังอัปโหลดและบันทึกรูปคำถาม…');const response=await API.upload(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/media/atomic`,form,{headers:{'Idempotency-Key':requestKey}});if(!response.data?.serverConfirmed)throw new Error('Server did not confirm question image upload.');question.imageFileId=Number(response.data.fileId);question.imageAltText=altText;question.fileName=file.name;await loadPrivateImagePreview(question,question.imageFileId);finishMediaMutation(prepared.hadPendingDraft,'อัปโหลดรูปคำถามและบันทึกแล้ว');render();}catch(error){setSaveState('error','อัปโหลดรูปคำถามไม่สำเร็จ');showToast(error?.message||'อัปโหลดรูปคำถามไม่สำเร็จ','error');input.value='';}
     };
 
     const uploadOptionImage = async input => {
         readFields();const questionIndex=Number(input.dataset.questionIndex),optionIndex=Number(input.dataset.optionIndex),file=input.files?.[0];if(!file)return;
         if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024){showToast('รองรับเฉพาะ JPG, PNG หรือ WebP ขนาดไม่เกิน 10 MB','error');input.value='';return;}
-        try{await flushBuilderBeforeMediaMutation();const option=state.draft.questions[questionIndex]?.options?.[optionIndex];if(!option?.id)throw new Error('ยังไม่สามารถระบุตัวเลือกที่จะผูกรูปได้');const form=new FormData(),altText=String(option.label||`ภาพตัวเลือก ${optionIndex+1}`).trim();form.append('file',file);form.append('scopeType','option_image');form.append('scopeId',String(option.id));form.append('altText',altText);const requestKey=`option-image-${state.persisted.campaignId}-${option.id}-${Date.now()}`;setSaveState('saving','กำลังอัปโหลดและบันทึกรูปตัวเลือก…');const response=await API.upload(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/media/atomic`,form,{headers:{'Idempotency-Key':requestKey}});if(!response.data?.serverConfirmed)throw new Error('Server did not confirm option image upload.');option.fileId=Number(response.data.fileId);option.fileName=file.name;await loadPrivateImagePreview(option,option.fileId);state.dirty=false;state.persisted.builderSaved=true;clearRecovery();setSaveState('saved','อัปโหลดรูปตัวเลือกและบันทึกแล้ว');render();}catch(error){setSaveState('error','อัปโหลดรูปตัวเลือกไม่สำเร็จ');showToast(error?.message||'อัปโหลดรูปตัวเลือกไม่สำเร็จ','error');input.value='';}
+        try{const prepared=await flushBuilderBeforeMediaMutation(questionIndex,optionIndex),option=prepared.target;if(!option?.id)throw new Error('ยังไม่สามารถระบุตัวเลือกที่จะผูกรูปได้');const form=new FormData(),altText=String(option.label||`ภาพตัวเลือก ${optionIndex+1}`).trim();form.append('file',file);form.append('scopeType','option_image');form.append('scopeId',String(option.id));form.append('altText',altText);const requestKey=`option-image-${state.persisted.campaignId}-${option.id}-${Date.now()}`;setSaveState('saving','กำลังอัปโหลดและบันทึกรูปตัวเลือก…');const response=await API.upload(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/media/atomic`,form,{headers:{'Idempotency-Key':requestKey}});if(!response.data?.serverConfirmed)throw new Error('Server did not confirm option image upload.');option.fileId=Number(response.data.fileId);option.fileName=file.name;await loadPrivateImagePreview(option,option.fileId);finishMediaMutation(prepared.hadPendingDraft,'อัปโหลดรูปตัวเลือกและบันทึกแล้ว');render();}catch(error){setSaveState('error','อัปโหลดรูปตัวเลือกไม่สำเร็จ');showToast(error?.message||'อัปโหลดรูปตัวเลือกไม่สำเร็จ','error');input.value='';}
     };
 
     const moveItem = (items, index, direction) => { const target = index + (direction === 'up' ? -1 : 1); if (target < 0 || target >= items.length) return false; [items[index], items[target]] = [items[target], items[index]]; return true; };

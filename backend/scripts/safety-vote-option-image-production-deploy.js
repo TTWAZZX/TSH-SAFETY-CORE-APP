@@ -17,8 +17,6 @@ const evidence = path.join(root, 'backups', 'production', `safety-vote-option-im
 const candidateRoot = path.join(evidence, 'candidate');
 const rollbackRoot = path.join(evidence, 'rollback-package', 'runtime-before');
 const runtime = [
-    'api/handlers/safety_vote_phase2.php',
-    'api/handlers/safety_vote_phase3.php',
     'public/js/pages/safety-vote-campaign-wizard.js',
     'public/js/pages/admin-safety-vote-ux1.js',
     'public/js/pages/admin.js',
@@ -57,7 +55,7 @@ function prepare(commit, parent) {
         const rollback = under(rollbackRoot, relative); fs.mkdirSync(path.dirname(rollback), { recursive: true }); fs.copyFileSync(before.source, rollback);
         candidates.push({ path: relative, target, bytes: bytes.length, sha256: sha256(bytes) }); restore.push({ path: relative, rollback, bytes: before.bytes, sha256: before.sha256 });
     }
-    const manifest = { contract: '2026-10-27-safety-vote-option-image-autosave-hotfix-r1', commit, parent, runtime: candidates.map(({ target, ...item }) => item), restore: restore.map(({ rollback, ...item }) => item), schemaChanged: false, businessDataChanged: false, externalDeliveryChanged: false };
+    const manifest = { contract: '2026-10-27-safety-vote-option-image-autosave-hotfix-r2', commit, parent, runtime: candidates.map(({ target, ...item }) => item), restore: restore.map(({ rollback, ...item }) => item), schemaChanged: false, businessDataChanged: false, externalDeliveryChanged: false };
     return { candidates, restore, manifestSha256: writeJson('rollback-manifest.json', manifest) };
 }
 async function verifyHttps(commit) { const verified = []; for (const file of prepared.candidates.filter(item => publicFiles.has(item.path))) { const response = await fetch(`${base}/${file.path}?release=${commit.slice(0, 12)}-${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } }); const bytes = Buffer.from(await response.arrayBuffer()); assert.equal(response.status, 200, `HTTPS read failed: ${file.path}`); assert.equal(sha256(bytes), file.sha256, `HTTPS checksum mismatch: ${file.path}`); verified.push({ path: file.path, sha256: file.sha256 }); } return verified; }
