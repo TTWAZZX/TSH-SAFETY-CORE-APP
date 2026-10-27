@@ -32,7 +32,7 @@ ok(duplicateFlow.includes('/campaigns/${Number(campaignId)}/duplicate'), 'duplic
 ok(!duplicateFlow.includes('/config-copy') && !duplicateFlow.includes('/builder`') && !duplicateFlow.includes('/eligibility/rules`'), 'duplicate action performs no client-side partial copy writes');
 ok(duplicateFlow.includes("state.view = 'draft'") && duplicateFlow.includes('state.selectedId = newCampaignId') && duplicateFlow.includes('await load()'), 'duplicate action returns to and selects the new Draft');
 ok(!duplicateFlow.includes('openCampaignWizard('), 'duplicate action does not redirect into the creation wizard');
-ok(admin.includes('safety-vote-campaign-wizard.js?v=20261025-jury-matrix-phase5c6-r1'), 'lifecycle cache-bust chain');
+ok(admin.includes('safety-vote-campaign-wizard.js?v=20261027-safety-vote-option-image-r1'), 'lifecycle cache-bust chain');
 ok(admin.includes('/safety-vote/admin/permissions') && admin.includes('duplicateCampaign: false'), 'permission capability fails closed in the UI');
 ok(duplicateFlow.includes('เป็นฉบับร่างครบถ้วนแล้ว'), 'duplicate completion is explicit');
 

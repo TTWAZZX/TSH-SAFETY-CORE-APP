@@ -126,7 +126,7 @@ assert(juryWorkspace.includes('WORK × CRITERIA MATRIX'), 'Juror matrix workspac
 assert(juryWorkspace.includes('data-sv-result-binding="submitted_score_rows_to_frozen_result"'), 'Juror result binding marker is missing');
 assert(css.includes('.svj-matrix-contract'), 'Responsive Jury Matrix styling is missing');
 for (const source of [index, main, adminEntry, wizard, userPage]) {
-    assert(source.includes('20261025-safety-vote-final-phase7-r1'), 'Frontend Final Acceptance cache chain is stale');
+    assert(source.includes('20261025-safety-vote-final-phase7-r1') || source.includes('20261027-safety-vote-option-image-r1'), 'Frontend Final Acceptance cache chain is stale');
 }
 assert(!/fetch\s*\(\s*['"]https?:\/\//i.test(`${wizard}\n${userPage}\n${juryWorkspace}`), 'Safety Vote UI must not call an external origin');
 for (const migration of ['20261025_safety_vote_official_topn_next_cycle.sql', '20261025_safety_vote_result_release_policy.sql', '20261025_safety_vote_jury_work_items_atomic_media.sql']) {

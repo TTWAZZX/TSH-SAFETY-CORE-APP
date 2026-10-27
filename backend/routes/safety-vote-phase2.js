@@ -93,16 +93,20 @@ router.use(ready);
 router.put('/admin/campaigns/:id/builder',permit('SAFETY_VOTE_MANAGE'),async(req,res)=>{
  const id=p2.int(req.params.id),parsed=p2.normalizeBuilder(req.body?.questions);
  if(!id||!parsed.ok)return fail(res,400,'VALIDATION_FAILED','Question builder is invalid.',parsed.errors);
- const fileIds=[...new Set(parsed.questions.flatMap(q=>[q.imageFileId,...q.options.map(o=>o.fileId)].filter(Boolean)))];
- if(fileIds.length){
-  const[files]=await db.query("SELECT id FROM SafetyVote_Files WHERE CampaignID=? AND Status='Active' AND id IN (?)",[id,fileIds]);
-  if(files.length!==fileIds.length)return fail(res,400,'VALIDATION_FAILED','Every question and option image must be an active private file from this campaign.');
- }
  const cx=await db.getConnection();
  try{
   await cx.beginTransaction();const c=await campaign(id,cx,true);
   if(!c){await cx.rollback();return fail(res,404,'CAMPAIGN_NOT_FOUND','Campaign was not found.');}
   if(c.Status!=='Draft'||c.VersionStatus!=='Draft'){await cx.rollback();return fail(res,409,'CAMPAIGN_STATE_CONFLICT','Builder is editable only in Draft.');}
+  // Preserve active atomic-media bindings when an autosave carries a stale/null
+  // file field. Explicit removal clears the database binding first, so it is
+  // never resurrected by this merge.
+  const[bindings]=await cx.query("SELECT q.QuestionCode questionCode,qf.id questionFileId,q.ImageAltText imageAltText,o.OptionCode optionCode,ofl.id optionFileId FROM SafetyVote_Questions q LEFT JOIN SafetyVote_Files qf ON qf.id=q.ImageFileID AND qf.Status='Active' LEFT JOIN SafetyVote_Options o ON o.QuestionID=q.id AND o.Status='Active' LEFT JOIN SafetyVote_Files ofl ON ofl.id=o.FileID AND ofl.Status='Active' WHERE q.CampaignVersionID=? AND q.Status='Active' FOR UPDATE",[c.CurrentVersionID]);
+  const questionMedia=new Map(),optionMedia=new Map();
+  for(const binding of bindings){const questionCode=String(binding.questionCode||'').toUpperCase();if(binding.questionFileId&&!questionMedia.has(questionCode))questionMedia.set(questionCode,{fileId:Number(binding.questionFileId),altText:binding.imageAltText||null});if(binding.optionCode&&binding.optionFileId)optionMedia.set(`${questionCode}|${String(binding.optionCode).toUpperCase()}`,Number(binding.optionFileId));}
+  for(const q of parsed.questions){const preservedQuestion=questionMedia.get(q.questionCode);if(!q.imageFileId&&preservedQuestion){q.imageFileId=preservedQuestion.fileId;q.imageAltText=q.imageAltText||preservedQuestion.altText;}for(const o of q.options)if(!o.fileId)o.fileId=optionMedia.get(`${q.questionCode}|${o.optionCode}`)||null;}
+  const fileIds=[...new Set(parsed.questions.flatMap(q=>[q.imageFileId,...q.options.map(o=>o.fileId)].filter(Boolean)))];
+  if(fileIds.length){const[files]=await cx.query("SELECT id FROM SafetyVote_Files WHERE CampaignID=? AND CampaignVersionID=? AND Status='Active' AND id IN (?)",[id,c.CurrentVersionID,fileIds]);if(files.length!==fileIds.length){await cx.rollback();return fail(res,400,'VALIDATION_FAILED','Every question and option image must be an active private file from this campaign.');}}
   await cx.query('DELETE c FROM SafetyVote_Candidates c JOIN SafetyVote_Options o ON o.id=c.OptionID JOIN SafetyVote_Questions q ON q.id=o.QuestionID WHERE q.CampaignVersionID=?',[c.CurrentVersionID]);
   await cx.query('DELETE o FROM SafetyVote_Options o JOIN SafetyVote_Questions q ON q.id=o.QuestionID WHERE q.CampaignVersionID=?',[c.CurrentVersionID]);
   await cx.query('DELETE FROM SafetyVote_Questions WHERE CampaignVersionID=?',[c.CurrentVersionID]);
