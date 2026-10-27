@@ -37,10 +37,11 @@ export function openSafetyVoteImageGallery(root, initialTrigger) {
     const render = () => {
         const trigger = triggers[index], source = trigger.querySelector('img');
         const label = trigger.dataset.svGalleryLabel || source.alt || 'รูปตัวเลือก';
-        image.src = source.src;
+        image.src = source.currentSrc || source.src;
         image.alt = label;
         title.textContent = label;
         position.textContent = `รูปที่ ${index + 1} จาก ${triggers.length}`;
+        stage.classList.toggle('is-single', triggers.length < 2);
         previous.hidden = next.hidden = triggers.length < 2;
     };
     const move = delta => {

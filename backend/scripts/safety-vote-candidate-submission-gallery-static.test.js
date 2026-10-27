@@ -35,12 +35,14 @@ for (const relative of ['backend/routes/safety-vote-gallery.js', 'api/handlers/s
 const nodeRoute = read('backend/routes/safety-vote-gallery.js');
 assert(!nodeRoute.includes('router.use(ready)'), 'gallery readiness gate must not intercept unrelated Safety Vote routes');
 assert(nodeRoute.includes("rules.int(req.params.id) !== Number(owner.CampaignID)"));
+assert(nodeRoute.includes('candidateBacked: false') && nodeRoute.includes('ownerId: null') && nodeRoute.includes('items: []'), 'ordinary options must return an empty gallery without a 404');
 assert(nodeRoute.includes("path.dirname(path.resolve(file.path)) === privateDir"));
 assert(nodeRoute.includes("owner.CampaignStatus !== 'Draft'"));
 assert(nodeRoute.includes("['Draft', 'RevisionRequested'].includes(owner.Status)"));
 
 const phpRoute = read('api/handlers/safety_vote_gallery.php');
 assert(phpRoute.includes("(int)$candidate['CampaignID']!==(int)$candidateUpload['id']"));
+assert(phpRoute.includes("'candidateBacked'=>false") && phpRoute.includes("'ownerId'=>null") && phpRoute.includes("'items'=>[]"), 'PHP ordinary options must return an empty gallery without a 404');
 assert(phpRoute.includes("in_array($submission['Status'],['Draft','RevisionRequested'],true)"));
 
 const participant = read('public/js/pages/safety-vote-page-ux1.js');

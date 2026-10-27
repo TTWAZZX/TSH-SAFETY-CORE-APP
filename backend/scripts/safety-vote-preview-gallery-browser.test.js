@@ -53,6 +53,24 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || (fs.existsSync(
             await page.keyboard.press('Escape');
             assert.strictEqual(await page.locator('[data-sv-image-gallery-dialog]').count(), 0);
             assert.strictEqual(await second.evaluate(element => document.activeElement === element), true);
+
+            const single = page.locator('[data-sv-gallery-group="q2"]');
+            await single.click();
+            const singleLayout = await page.evaluate(() => {
+                const stage = document.querySelector('[data-sv-gallery-stage]').getBoundingClientRect();
+                const image = document.querySelector('[data-sv-gallery-stage] img').getBoundingClientRect();
+                return {
+                    single: document.querySelector('[data-sv-gallery-stage]').classList.contains('is-single'),
+                    controlsHidden: [...document.querySelectorAll('.svp-gallery__nav')].every(node => node.hidden),
+                    imageWidthRatio: image.width / stage.width,
+                    centered: Math.abs((image.left + image.width / 2) - (stage.left + stage.width / 2)) < 2
+                };
+            });
+            assert.strictEqual(singleLayout.single, true);
+            assert.strictEqual(singleLayout.controlsHidden, true);
+            assert.ok(singleLayout.imageWidthRatio > .8, 'single gallery image must use the large-image stage');
+            assert.strictEqual(singleLayout.centered, true);
+            await page.keyboard.press('Escape');
             assert.deepStrictEqual(errors, []);
             await page.close();
         }

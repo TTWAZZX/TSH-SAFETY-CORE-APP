@@ -25,7 +25,7 @@ const checks = [
     [gallery.includes("addEventListener('touchstart'") && gallery.includes("addEventListener('touchend'") && gallery.includes('Math.abs(dx) >= 50'), 'gallery swipe navigation is incomplete'],
     [gallery.includes("document.body.style.overflow = 'hidden'") && gallery.includes('restoreTarget.focus()'), 'gallery modal lifecycle or focus restoration is incomplete'],
     [css.includes('.svp-gallery__nav--previous') || css.includes('.svp-gallery__nav'), 'gallery navigation styling is missing'],
-    [/202610(?:1[56]-safety-vote-(?:preview-gallery|preview-parity)|24-(?:safety-vote-(?:question-images|gallery|people-picker)|eligibility-individual-add))-r1/.test(html), 'top-level cache key was not advanced']
+    [/202610(?:1[56]-safety-vote-(?:preview-gallery|preview-parity)|24-(?:safety-vote-(?:question-images|gallery|people-picker)|eligibility-individual-add)|27-safety-vote-gallery-lightbox)-r1/.test(html), 'top-level cache key was not advanced']
 ];
 
 for (const [value, message] of checks) assert(value, message);

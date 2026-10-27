@@ -44,13 +44,14 @@ async function seed(name) {
     const [stage] = await db.query("INSERT INTO SafetyVote_Stages(CampaignVersionID,StageKey,StageName,StageType,SequenceNo,AdvanceRuleJson,CreatedBy,UpdatedBy) VALUES(?,'JURY','Jury','jury',1,?,'SV-ADMIN','SV-ADMIN')", [version.insertId, JSON.stringify({ blind: true })]);
     const [question] = await db.query("INSERT INTO SafetyVote_Questions(CampaignVersionID,StageID,QuestionCode,QuestionType,Title,CreatedBy,UpdatedBy) VALUES(?,?,'WORK','single_choice','Work','SV-ADMIN','SV-ADMIN')", [version.insertId, stage.insertId]);
     const [option] = await db.query("INSERT INTO SafetyVote_Options(QuestionID,OptionCode,Label,CreatedBy,UpdatedBy) VALUES(?,'A','Alice Work','SV-ADMIN','SV-ADMIN')", [question.insertId]);
+    const [ordinaryOption] = await db.query("INSERT INTO SafetyVote_Options(QuestionID,OptionCode,Label,CreatedBy,UpdatedBy) VALUES(?,'B','Ordinary option','SV-ADMIN','SV-ADMIN')", [question.insertId]);
     const [candidate] = await db.query("INSERT INTO SafetyVote_Candidates(CampaignVersionID,StageID,OptionID,CandidateNo,DisplayName,SortOrder,CreatedBy,UpdatedBy) VALUES(?,?,?,'A01','Alice Real Name',1,'SV-ADMIN','SV-ADMIN')", [version.insertId, stage.insertId, option.insertId]);
     await db.query("INSERT INTO SafetyVote_JuryAssignments(CampaignVersionID,StageID,CandidateID,JurorEmployeeID,Status,ConflictState,AssignedBy) VALUES(?,?,?,'SV-USER','Draft','clear','SV-ADMIN')", [version.insertId, stage.insertId, candidate.insertId]);
     const [submission] = await db.query("INSERT INTO SafetyVote_Submissions(CampaignID,CampaignVersionID,SubmitterEmployeeID,SubmissionCode,Title,Description,Status) VALUES(?,?,?,'SUB-UAT-001','Submission Work','Detail','Draft')", [campaign.insertId, version.insertId, 'SV-USER']);
     const [snapshot] = await db.query("INSERT INTO SafetyVote_EligibilitySnapshots(CampaignVersionID,SnapshotNo,RuleHash,RowsHash,EligibleCount,AccountReadyCount,WarningCount,Status,FrozenAt,FrozenBy,CreatedBy) VALUES(?,1,REPEAT('a',64),REPEAT('b',64),1,1,0,'frozen',NOW(),'SV-ADMIN','SV-ADMIN')", [version.insertId]);
     await db.query("INSERT INTO SafetyVote_EligibleVoters(SnapshotID,EmployeeID,EmployeeNameSnapshot,EligibilityState,InclusionSource) VALUES(?,'SV-USER','Juror One','eligible','rule')", [snapshot.insertId]);
     await db.end();
-    return { campaignId: Number(campaign.insertId), candidateId: Number(candidate.insertId), optionId: Number(option.insertId), submissionId: Number(submission.insertId) };
+    return { campaignId: Number(campaign.insertId), candidateId: Number(candidate.insertId), optionId: Number(option.insertId), ordinaryOptionId: Number(ordinaryOption.insertId), submissionId: Number(submission.insertId) };
 }
 
 async function lifecycle(label, base, ids, name) {
@@ -67,6 +68,10 @@ async function lifecycle(label, base, ids, name) {
     assert.strictEqual(result.data.data.items[0].caption, null);
     assert(!JSON.stringify(result.data.data.items).includes('Alice'));
     assert.strictEqual((await request(base, `/gallery/candidates/${ids.candidateId}`, { token: 'sv-user2' })).status, 403);
+    result = await request(base, `/gallery/options/${ids.ordinaryOptionId}`, { token: 'sv-user' });
+    assert.strictEqual(result.status, 200, `${label}: ordinary option gallery must not return 404`);
+    assert.deepStrictEqual(result.data.data.items, []);
+    assert.strictEqual(result.data.data.candidateBacked, false);
     assert.strictEqual((await request(base, `/files/${candidateItem.fileId}`, { token: 'sv-user' })).status, 200);
     assert([404, 409].includes((await upload(base, `/admin/campaigns/999999/candidates/${ids.candidateId}/gallery`)).status));
 
