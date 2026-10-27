@@ -44,7 +44,8 @@ async function wait(expression, label = expression) {
         if (await ev(expression)) return;
         await sleep(150);
     }
-    throw new Error(`Timeout waiting for ${label}`);
+    const pageState = await ev(`(async()=>{let api=null;try{const response=await fetch(location.origin+'/api/safety-vote/jury/assignments',{headers:{Authorization:'Bearer sv-jury-01'}});api={status:response.status,text:(await response.text()).slice(0,1200)}}catch(error){api={error:String(error),stack:error?.stack}}return{url:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,1200),html:(document.querySelector('#safety-vote-page')?.innerHTML||'').slice(0,1200),api}})()`).catch(() => null);
+    throw new Error(`Timeout waiting for ${label}\nPage state: ${JSON.stringify(pageState)}\nConsole errors: ${JSON.stringify(consoleErrors)}\nUnexpected HTTP errors: ${JSON.stringify(unexpectedApiErrors)}`);
 }
 
 async function click(selector) {
@@ -77,7 +78,15 @@ async function openAssignment(ordinal, assignmentId) {
 async function completeAndSubmit(viewport, ordinal, assignmentId) {
     await openAssignment(ordinal, assignmentId);
     assert.strictEqual(await ev(`document.querySelectorAll('[data-svj-score]').length`), 4, `${viewport} scoring control count`);
+    assert.strictEqual(await ev(`document.querySelectorAll('[data-svj-score-range]').length`), 4, `${viewport} score slider count`);
+    assert.strictEqual(await ev(`document.querySelectorAll('[data-svj-score-step]').length`), 8, `${viewport} score stepper count`);
+    assert(await ev(`document.querySelectorAll('[data-svj-score-quick]').length>=16`), `${viewport} quick-score choices missing`);
     if (ordinal === 0) {
+        await setValue('[data-svj-score-range]', 6);
+        assert.strictEqual(await ev(`document.querySelector('[data-svj-score]')?.value`), '6', 'slider did not synchronize numeric score');
+        await click('[data-svj-score-step="1"]');
+        assert.strictEqual(await ev(`document.querySelector('[data-svj-score]')?.value`), '7', 'score increment button did not synchronize numeric score');
+        assert(await ev(`document.querySelector('[data-svj-score-output]')?.textContent.includes('7')`), 'selected score output did not update');
         await click('[data-svj-action="review"]');
         await wait(`Boolean(document.querySelector('.svp-validation[role=alert]'))`, 'validation summary');
         assert(await ev(`document.activeElement?.classList.contains('svp-validation')`), 'validation summary must receive focus');

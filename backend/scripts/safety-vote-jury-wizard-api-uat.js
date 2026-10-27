@@ -118,14 +118,18 @@ async function lifecycle(label, base, name) {
     response = await call(base, `/admin/campaigns/${campaignId}/jury/assignments`, { method: 'POST', body: { stageId, jurorEmployeeId: 'SV-USER2' } });
     assert.strictEqual(response.status, 201, JSON.stringify(response.data));
     const liveId = Number(response.data.data.id);
+    await db.query("INSERT INTO SafetyVote_JuryScores(AssignmentID,CandidateID,CriterionID,Score,BoundedComment,Status) SELECT ?,c.id,cr.id,3,'retained draft proof','Draft' FROM SafetyVote_Candidates c JOIN SafetyVote_JuryCriteria cr ON cr.CampaignVersionID=c.CampaignVersionID WHERE c.CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) LIMIT 1", [liveId, campaignId]);
     response = await call(base, `/admin/campaigns/${campaignId}/jury/assignments`);
     assert.strictEqual(response.status, 200);
-    assert(response.data.data.rows.some(row => row.JurorName === 'Juror Two' && Number(row.id) === liveId));
-    assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${liveId}`, { method: 'DELETE' })).status, 200);
+    assert(response.data.data.rows.some(row => row.JurorName === 'Juror Two' && Number(row.id) === liveId && Number(row.ScoreCount) === 1));
+    const revokedWithDraft = await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${liveId}`, { method: 'DELETE' });
+    assert.strictEqual(revokedWithDraft.status, 200);
+    assert.strictEqual(Number(revokedWithDraft.data.data.retainedDraftScores), 1);
     response = await call(base, `/admin/campaigns/${campaignId}/jury/assignments`, { method: 'POST', body: { stageId, jurorEmployeeId: 'SV-USER2' } });
     assert.strictEqual(response.status, 200, JSON.stringify(response.data));
     assert.strictEqual(response.data.data.restored, true);
     assert.strictEqual(Number(response.data.data.id), liveId);
+    assert.strictEqual(Number((await db.query('SELECT COUNT(*) count FROM SafetyVote_JuryScores WHERE AssignmentID=?', [liveId]))[0][0].count), 1);
     assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${liveId}`, { method: 'DELETE' })).status, 200);
     await db.query("UPDATE SafetyVote_JuryAssignments SET Status='Submitted' WHERE id=?", [immutableId]);
     assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${immutableId}`, { method: 'DELETE' })).status, 409);
@@ -136,7 +140,7 @@ async function lifecycle(label, base, name) {
     assert.strictEqual(Number(proof.mediaMutations), 1);
     assert.strictEqual(Number(proof.mediaFiles), 1);
     await db.end();
-    console.log(`PASS ${label} adaptive readiness without participant eligibility, master search, persisted stage ID, live add/revoke/restore and immutable submitted assignment`);
+    console.log(`PASS ${label} adaptive readiness, live add/revoke/restore with retained Draft scores and immutable submitted assignment`);
 }
 
 (async () => {

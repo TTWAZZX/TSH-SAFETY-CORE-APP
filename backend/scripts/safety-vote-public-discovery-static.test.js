@@ -43,10 +43,10 @@ assert(ui.includes("const VIEW_LABELS = { all: 'ทั้งหมด'"), 'parti
 assert(ui.includes("view: 'all'"), 'all campaigns must be the initial discovery view');
 assert(ui.includes("participationState(item) === 'open' && Number(item.DiscoveryOnly || 0) !== 1"), 'discovery-only campaigns must not appear as actionable tasks');
 assert(participationModel.includes("if (view === 'all') return true"), 'campaign filtering must support the all-campaigns view');
-assert(/20261025-result-release-policy-r1|20261027-safety-vote-(?:jury-work-media-r2|preview-parity-r1)/.test(main), 'Safety Vote page and Admin cache keys were not advanced');
+assert(/20261025-result-release-policy-r1|20261027-safety-vote-(?:jury-work-media-r2|preview-parity-r1|jury-score-ux-r1)/.test(main), 'Safety Vote page and Admin cache keys were not advanced');
 assert(wizard.includes('พนักงานที่เข้าสู่ระบบทุกคนเห็นการ์ดและรายละเอียด'), 'wizard must explain public discovery behavior');
 assert(wizard.includes('เฉพาะผู้มีสิทธิ์ในรายชื่อที่ยืนยันแล้วเท่านั้นที่เห็นคำถามและลงคะแนนได้'), 'wizard must distinguish discovery from voting eligibility');
-assert(/20261025-result-release-policy-r1|20261027-safety-vote-(?:jury-work-media-r2|preview-parity-r1)/.test(admin), 'Admin entry cache key was not advanced');
-assert(/20261025-result-release-policy-r1|20261027-safety-vote-(?:jury-work-media-r2|preview-parity-r1)/.test(adminSafetyVote), 'Admin wizard cache chain was not advanced');
+assert(/20261025-result-release-policy-r1|20261027-safety-vote-(?:jury-work-media-r2|preview-parity-r1|jury-score-ux-r1)/.test(admin), 'Admin entry cache key was not advanced');
+assert(/20261025-result-release-policy-r1|20261027-safety-vote-(?:jury-work-media-r2|preview-parity-r1|jury-score-ux-r1)/.test(adminSafetyVote), 'Admin wizard cache chain was not advanced');
 
 console.log('Safety Vote public discovery visibility/permission contract: PASS');

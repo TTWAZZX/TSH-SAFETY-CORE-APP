@@ -39,12 +39,14 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(workspace.includes('clearStaleDrafts') && workspace.includes('clearLocalDraft'), 'local draft cleanup contract is missing');
     check(workspace.includes('บันทึกบนเซิร์ฟเวอร์เมื่อกรอกครบ'), 'local/server autosave distinction is missing');
     check(workspace.includes('validateScoreSheet') && workspace.includes('role="alert" tabindex="-1"'), 'focusable validation summary is missing');
+    check(workspace.includes('data-svj-score-range') && workspace.includes('data-svj-score-step') && workspace.includes('data-svj-score-quick'), 'accessible slider, stepper and quick-score controls are missing');
+    check(workspace.includes('syncScoreUi') && workspace.includes("inputmode=\"decimal\""), 'score controls must stay synchronized with direct numeric entry');
     check(workspace.includes('ตรวจสอบก่อนส่ง') && workspace.includes('แก้ไขไม่ได้'), 'review/immutable wording is missing');
     check(workspace.includes('safeJuryReceipt') && workspace.includes('ไม่แสดงคะแนนหรือรายละเอียดผู้สมัคร'), 'privacy-safe receipt is missing');
     check(workspace.includes('ASSIGNMENT_NOT_FOUND'), 'direct-link assignment denial is missing');
     check(workspace.includes('SAFETY_VOTE_MODULE_DISABLED'), 'module fail-closed state is missing');
     check(workspace.includes('SCORE_SHEET_LOCKED') || workspace.includes('assignmentState(current.data.assignment)'), 'authoritative submit recovery is missing');
-    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
+    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 4'), 'Phase 4 scoped CSS marker is missing');
     check(css.includes('.svj-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
     check(css.includes('min-height: 44px'), '44 px touch targets are not enforced');

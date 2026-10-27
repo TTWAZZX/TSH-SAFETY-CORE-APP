@@ -71,9 +71,20 @@ function candidateGallery(candidate) {
     const items=candidate.gallery||[];if(!items.length)return'';
     return `<div class="sv-work-gallery sv-work-gallery--jury" aria-label="ภาพผลงาน ${escHtml(candidate.displayName)}">${items.map((item,index)=>`<figure class="sv-work-gallery__item ${item.isCover?'is-cover':''}"><button type="button" class="svp-gallery-trigger" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="jury-candidate-${Number(candidate.id)}" data-sv-gallery-label="${escHtml(item.altText||candidate.displayName)}" aria-label="เปิดภาพที่ ${index+1} ของ ${escHtml(candidate.displayName)}"><img data-sv-auth-file="${Number(item.fileId)}" alt="${escHtml(item.altText||candidate.displayName)}" decoding="async"></button>${item.caption?`<figcaption>${escHtml(item.caption)}</figcaption>`:''}</figure>`).join('')}</div>`;
 }
+function scoreStep(min, max) {
+    return Number.isInteger(min) && Number.isInteger(max) ? 1 : 0.01;
+}
+function quickScoreValues(min, max) {
+    const step = scoreStep(min, max), span = max - min;
+    return [...new Set([min, min + span * .25, min + span * .5, min + span * .75, max].map(value => {
+        const normalized = step === 1 ? Math.round(value) : Math.round(value * 100) / 100;
+        return Math.max(min, Math.min(max, normalized));
+    }))];
+}
 function scoreControl(candidate, criterion) {
-    const key = scoreKey(candidate.id, criterion.id), row = state.scores[key] || {}, min = Number(criterionValue(criterion, 'MinScore')), max = Number(criterionValue(criterion, 'MaxScore'));
-    return `<article class="svj-score-row" id="svj-score-${key.replace(':', '-')}"><div><strong>${escHtml(criterionValue(criterion, 'Title'))}</strong>${criterionValue(criterion, 'Description') ? `<p>${escHtml(criterionValue(criterion, 'Description'))}</p>` : ''}<small>ช่วงคะแนน ${min}–${max} · น้ำหนัก ${Number(criterionValue(criterion, 'Weight'))}</small></div><label><span>คะแนน</span><input type="number" min="${min}" max="${max}" step="0.01" value="${escHtml(row.score ?? '')}" data-svj-score="${key}" aria-label="คะแนน ${escHtml(criterionValue(criterion, 'Title'))} สำหรับ ${escHtml(candidate.displayName)}"></label><label class="svj-comment"><span>หมายเหตุ (ไม่บังคับ)</span><textarea rows="2" maxlength="1000" data-svj-comment="${key}">${escHtml(row.comment || '')}</textarea></label></article>`;
+    const key = scoreKey(candidate.id, criterion.id), row = state.scores[key] || {}, min = Number(criterionValue(criterion, 'MinScore')), max = Number(criterionValue(criterion, 'MaxScore')), step = scoreStep(min, max), value = row.score ?? '', title = criterionValue(criterion, 'Title');
+    const quick = quickScoreValues(min, max).map(score => `<button type="button" data-svj-score-quick="${key}" data-score="${score}" aria-pressed="${String(value) === String(score)}">${score}</button>`).join('');
+    return `<article class="svj-score-row" id="svj-score-${key.replace(':', '-')}"><div class="svj-score-row__criterion"><strong>${escHtml(title)}</strong>${criterionValue(criterion, 'Description') ? `<p>${escHtml(criterionValue(criterion, 'Description'))}</p>` : ''}<small>ช่วงคะแนน ${min}–${max} · น้ำหนัก ${Number(criterionValue(criterion, 'Weight'))}%</small></div><section class="svj-score-entry" aria-label="ให้คะแนน ${escHtml(title)} สำหรับ ${escHtml(candidate.displayName)}"><div class="svj-score-entry__heading"><strong>คะแนน</strong><output data-svj-score-output="${key}" aria-live="polite">${value === '' ? 'ยังไม่เลือก' : `${escHtml(value)} / ${max}`}</output></div><input class="svj-score-slider" type="range" min="${min}" max="${max}" step="${step}" value="${value === '' ? min : escHtml(value)}" data-svj-score-range="${key}" aria-label="เลื่อนคะแนน ${escHtml(title)}"><div class="svj-score-entry__number"><button type="button" data-svj-score-step="-1" data-score-key="${key}" aria-label="ลดคะแนน ${escHtml(title)}">−</button><input type="number" inputmode="decimal" min="${min}" max="${max}" step="${step}" value="${escHtml(value)}" data-svj-score="${key}" aria-label="คะแนน ${escHtml(title)} สำหรับ ${escHtml(candidate.displayName)}" placeholder="${min}–${max}"><button type="button" data-svj-score-step="1" data-score-key="${key}" aria-label="เพิ่มคะแนน ${escHtml(title)}">+</button></div><div class="svj-score-quick" role="group" aria-label="เลือกคะแนนอย่างรวดเร็ว">${quick}</div></section><label class="svj-comment"><span>หมายเหตุ (ไม่บังคับ)</span><textarea rows="2" maxlength="1000" data-svj-comment="${key}">${escHtml(row.comment || '')}</textarea></label></article>`;
 }
 
 function validationMarkup() {
@@ -253,7 +264,27 @@ function bindList() {
 
 function bindDetail() {
     state.page.querySelector('[data-sv-role-link="user"]')?.addEventListener('click', event => { event.preventDefault(); state.onUser?.(); });
-    state.page.querySelectorAll('[data-svj-score],[data-svj-comment]').forEach(input => input.addEventListener('input', scheduleAutosave));
+    const syncScoreUi = (key, raw, schedule = false) => {
+        const number = state.page.querySelector(`[data-svj-score="${key}"]`), range = state.page.querySelector(`[data-svj-score-range="${key}"]`), output = state.page.querySelector(`[data-svj-score-output="${key}"]`);
+        if (!number || !range) return;
+        const min = Number(number.min), max = Number(number.max), numeric = Number(raw), valid = raw !== '' && Number.isFinite(numeric) && numeric >= min && numeric <= max;
+        number.value = raw;
+        number.setAttribute('aria-invalid', valid || raw === '' ? 'false' : 'true');
+        if (valid) range.value = String(numeric);
+        if (output) output.textContent = valid ? `${numeric} / ${max}` : raw === '' ? 'ยังไม่เลือก' : `ต้องอยู่ระหว่าง ${min}–${max}`;
+        state.page.querySelectorAll(`[data-svj-score-quick="${key}"]`).forEach(button => button.setAttribute('aria-pressed', valid && Number(button.dataset.score) === numeric ? 'true' : 'false'));
+        if (schedule) scheduleAutosave();
+    };
+    state.page.querySelectorAll('[data-svj-score]').forEach(input => input.addEventListener('input', () => syncScoreUi(input.dataset.svjScore, input.value, true)));
+    state.page.querySelectorAll('[data-svj-score-range]').forEach(input => input.addEventListener('input', () => syncScoreUi(input.dataset.svjScoreRange, input.value, true)));
+    state.page.querySelectorAll('[data-svj-score-step]').forEach(button => button.addEventListener('click', () => {
+        const input = state.page.querySelector(`[data-svj-score="${button.dataset.scoreKey}"]`); if (!input) return;
+        const min = Number(input.min), max = Number(input.max), step = Number(input.step || 1), current = input.value === '' ? (Number(button.dataset.svjScoreStep) > 0 ? min - step : max + step) : Number(input.value);
+        const next = Math.max(min, Math.min(max, Math.round((current + Number(button.dataset.svjScoreStep) * step) * 100) / 100));
+        syncScoreUi(button.dataset.scoreKey, String(next), true);
+    }));
+    state.page.querySelectorAll('[data-svj-score-quick]').forEach(button => button.addEventListener('click', () => syncScoreUi(button.dataset.svjScoreQuick, button.dataset.score, true)));
+    state.page.querySelectorAll('[data-svj-comment]').forEach(input => input.addEventListener('input', scheduleAutosave));
     state.page.querySelectorAll('[data-svj-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svjAction;
         if (action === 'back-list') { clearTimeout(state.saveTimer); state.screen = 'list'; state.detail = null; state.receipt = null; renderList(); }
