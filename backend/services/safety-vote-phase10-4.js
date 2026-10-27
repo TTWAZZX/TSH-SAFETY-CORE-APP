@@ -58,12 +58,16 @@ function normalizeMedia(items) {
 function editPolicy(campaignStatus, currentVersionId, versionId) {
   const live = Number(currentVersionId) === Number(versionId);
   const open = campaignStatus === 'Open';
+  const requiresNextCycle = ['Closed', 'Certified', 'Published'].includes(campaignStatus);
   return {
     campaignStatus, live,
     directEditAllowed: campaignStatus === 'Draft' && live,
     revisionEditAllowed: !live,
     createRevisionAllowed: !['Voided', 'Archived'].includes(campaignStatus),
     activateRevisionAllowed: !open && !['Voided', 'Archived'].includes(campaignStatus),
+    directActivationAllowed: !requiresNextCycle && !open && !['Voided', 'Archived'].includes(campaignStatus),
+    requiresNextCycle,
+    activationMode: requiresNextCycle ? 'next_cycle' : 'replace_revision',
     policyCode: open ? 'LIVE_CONTENT_IMMUTABLE_PREPARE_REVISION' : (live ? 'DRAFT_DIRECT_EDIT' : 'OFFLINE_REVISION_EDIT'),
     protectedWhileOpen: ['questions', 'options', 'media', 'privacyMode', 'eligibility', 'schedule', 'scoring'],
     safeOperationalMetadata: [],

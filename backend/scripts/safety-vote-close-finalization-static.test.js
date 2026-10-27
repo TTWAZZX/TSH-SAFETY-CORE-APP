@@ -36,7 +36,7 @@ for (const source of [nodeResults, phpResults]) {
     assert(source.includes("denominator") && source.includes("'no_result'"), 'Zero-vote ranking guard is missing');
 }
 for (const source of [nodeVersions, phpVersions]) {
-    assert(source.includes('REVISION_ACTIVATION_WOULD_HIDE_COMPLETED_CAMPAIGN'), 'Completed-campaign catalogue preservation guard is missing');
+    assert(source.includes('NEXT_CYCLE_REQUIRED'), 'Completed-campaign non-destructive next-cycle guard is missing');
 }
 assert(/20261027-safety-vote-(?:gallery-(?:lightbox-r1|choice-r2|bounded-r3)|jury-work-media-r1|jury-score-ux-r1)/.test(read('index.html')), 'Frontend release cache key is stale');
 assert(memberPage.includes('data-svp-official-results') && memberPage.includes('/official-results'), 'Closed campaign immutable official results are not rendered for members');

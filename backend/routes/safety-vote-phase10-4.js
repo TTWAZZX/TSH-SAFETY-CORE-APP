@@ -20,12 +20,9 @@ async function completedCampaignActivationGuard(req,res,next){
  try{
   const id=base.positiveInt(req.params.id),vid=base.positiveInt(req.params.versionId),c=await campaign(id),v=await version(id,vid);
   if(!c||!v||req.body?.confirmation!==`ACTIVATE ${c.CampaignCode} V${v.VersionNo}`)return next();
-  if(!['Closed','Certified','Published'].includes(String(c.Status)))return next();
-  const[[setting]]=await db.query("SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='company_wide_campaign_visibility_enabled' LIMIT 1");
-  if(String(setting?.SettingValue)!=='1')return next();
-  const[[evidence]]=await db.query('SELECT COUNT(*) SnapshotCount FROM SafetyVote_ResultSnapshots WHERE CampaignVersionID=?',[c.CurrentVersionID]);
-  if(!Number(evidence?.SnapshotCount))return next();
-  return fail(res,409,'REVISION_ACTIVATION_WOULD_HIDE_COMPLETED_CAMPAIGN','This completed campaign must remain visible in the company catalogue. Keep the revision offline until a non-destructive version transition is prepared.',{currentVersionId:Number(c.CurrentVersionID),draftVersionId:vid,cataloguePreserved:true});
+  const policy=phase104.editPolicy(c.Status,c.CurrentVersionID,vid);
+  if(!policy.requiresNextCycle)return next();
+  return fail(res,409,'NEXT_CYCLE_REQUIRED','A completed campaign is immutable. Create a non-destructive next cycle instead.',{currentVersionId:Number(c.CurrentVersionID),draftVersionId:vid,cataloguePreserved:true,requiredEndpoint:'activate-next-cycle'});
  }catch(e){return setupFailure(res,e);}
 }
 

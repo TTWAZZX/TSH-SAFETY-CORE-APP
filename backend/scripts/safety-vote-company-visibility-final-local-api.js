@@ -3,12 +3,43 @@
 const assert = require('node:assert/strict');
 const jwt = require('jsonwebtoken');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 
 const db = require('../db');
 const { loadReadyTestUsers } = require('./ready-test-users');
-const base = String(process.env.SAFETY_VOTE_LOCAL_UAT_URL || 'http://127.0.0.1:5000/api').replace(/\/+$/, '');
+let base = String(process.env.SAFETY_VOTE_LOCAL_UAT_URL || 'http://127.0.0.1:5000/api').replace(/\/+$/, '');
+let ownedServer = null;
+const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+async function apiIsReachable() {
+    try {
+        const response = await fetch(`${base}/safety-vote/me/campaigns`, { signal: AbortSignal.timeout(1500) });
+        return response.status > 0;
+    } catch (_) {
+        return false;
+    }
+}
+
+async function ensureLocalApi() {
+    if (await apiIsReachable()) return 'existing';
+    assert(!process.env.SAFETY_VOTE_LOCAL_UAT_URL, 'Configured Local UAT API is unreachable');
+    const port = 5199;
+    base = `http://127.0.0.1:${port}/api`;
+    ownedServer = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+        cwd: path.join(__dirname, '..', '..'),
+        env: { ...process.env, PORT: String(port) },
+        stdio: 'ignore',
+        windowsHide: true,
+    });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (await apiIsReachable()) return 'self_started';
+        if (ownedServer.exitCode !== null) break;
+        await sleep(150);
+    }
+    throw new Error('Local Safety Vote API did not become ready');
+}
 
 async function call(pathname, token = null, options = {}) {
     const response = await fetch(`${base}${pathname}`, {
@@ -28,6 +59,7 @@ async function call(pathname, token = null, options = {}) {
 (async () => {
     assert(new Set(['localhost', '127.0.0.1', '::1']).has(new URL(base).hostname), 'Refusing non-loopback API');
     assert(process.env.JWT_SECRET, 'JWT_SECRET is required');
+    const apiRuntime = await ensureLocalApi();
     const { admin, user } = await loadReadyTestUsers(db);
     const adminToken = jwt.sign(admin, process.env.JWT_SECRET, { expiresIn: '5m' });
     const userToken = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '5m' });
@@ -87,6 +119,7 @@ async function call(pathname, token = null, options = {}) {
         decision: 'PASS_LOCAL_COMPANY_WIDE_VISIBILITY_FINAL_API',
         productionConnected: false,
         externalDelivery: false,
+        apiRuntime,
         checks: {
             anonymousCatalogue: anonymousCatalogue.status,
             anonymousOfficialResult: anonymousResult?.status ?? 'NO_PUBLISHED_FIXTURE',
@@ -112,4 +145,5 @@ async function call(pathname, token = null, options = {}) {
     process.exitCode = 1;
 }).finally(async () => {
     await db.end();
+    if (ownedServer?.exitCode === null) ownedServer.kill();
 });

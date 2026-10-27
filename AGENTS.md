@@ -1,5 +1,19 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Completed Campaign Non-destructive Next-cycle Guard (PASS, Local only, 2026-10-27)
+
+- Direct Draft revision activation is now denied for every `Closed`, `Certified` and `Published` campaign in both Node and PHP, independent of company-catalogue settings or existing result-snapshot counts. The stable `409 NEXT_CYCLE_REQUIRED` response directs Admin to the governed `activate-next-cycle` workflow.
+- The existing non-destructive next-cycle path remains authoritative: it creates a separate Draft campaign and lineage while preserving the completed source campaign, current-version pointer and immutable official-result evidence. Draft activation behavior for non-completed campaigns is unchanged.
+- Phase 10.4 Node/PHP parity, next-cycle database rollback UAT, close/catalogue/schedule regression, full Phase 7 static acceptance and PHP 7.4 compatibility across 158 PHP files pass. No Production connection, deployment, commit or push occurred. Evidence: `docs/safety-vote-non-destructive-next-cycle-guard.md`. Decision: `PASS_LOCAL_COMPLETED_CAMPAIGN_NON_DESTRUCTIVE_NEXT_CYCLE_GUARD`.
+
+## Safety Vote Behavior-Freeze Final Hardening (PASS, Local only, 2026-10-27)
+
+- The accepted behavior is now frozen across Survey, Popular Vote, Secret Election, Submission Challenge, Nomination and Jury Scoring, three Jury work sources, the governed nine-step Wizard, visibility/participation separation and the current Jury add/revoke/reopen/retained-Draft-score lifecycle.
+- The central Final Acceptance gate recognizes `20261027-safety-vote-jury-score-ux-r1`. All-workflow preview parity and five-viewport Browser UAT plus the authenticated five-viewport Juror score-sheet UAT are now mandatory parts of the gate.
+- Local company-visibility API and completed-catalogue Browser tests self-start and own loopback services only when the expected Local services are unavailable, making the gate repeatable without changing runtime behavior.
+- Static/parity/PHP 7.4, additive/idempotent migration and data-preserving rollback, Node/PHP API, responsive Browser and zero-residue gates pass. Juror evidence is 5 submitted assignments, 1 recusal, 20 submitted scores and 0 forbidden rows.
+- External delivery remains queue-only. At this acceptance point the completed-live-version/offline-Draft transition was fail-closed; the subsequent non-destructive next-cycle guard above makes that governed path authoritative. No Production connection, deployment, schema/business mutation, commit or push occurred. Evidence: `docs/safety-vote-behavior-freeze-final-hardening.md`. Decision: `PASS_LOCAL_SAFETY_VOTE_BEHAVIOR_FREEZE_FINAL_HARDENING`.
+
 ## Safety Vote Phase 7 Production Deployment (PASS, 2026-10-26)
 
 - Immutable commit `b14af90277588aa31d13d95e0a9eb03fcb867f9b` was deployed to the PHP shared-hosting Production target. The guarded release uploaded 49 Safety Vote PHP/frontend runtime files with per-file rollback backup, double-download SHA-256 verification and HTTPS verification of the public entry chain.

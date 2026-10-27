@@ -17,12 +17,9 @@ function sv104_guard_completed_campaign_activation(string $method,string $path):
  if(!$campaign||!$version)return false;
  $body=json_body();
  if(($body['confirmation']??'')!=='ACTIVATE '.$campaign['CampaignCode'].' V'.$version['VersionNo'])return false;
- if(!in_array((string)$campaign['Status'],['Closed','Certified','Published'],true))return false;
- $setting=db_row("SELECT SettingValue FROM SafetyVote_Settings WHERE SettingKey='company_wide_campaign_visibility_enabled' LIMIT 1");
- if((string)($setting['SettingValue']??'')!=='1')return false;
- $evidence=db_row('SELECT COUNT(*) SnapshotCount FROM SafetyVote_ResultSnapshots WHERE CampaignVersionID=?',[(int)$campaign['CurrentVersionID']]);
- if((int)($evidence['SnapshotCount']??0)<1)return false;
- json_response(['success'=>false,'code'=>'REVISION_ACTIVATION_WOULD_HIDE_COMPLETED_CAMPAIGN','message'=>'This completed campaign must remain visible in the company catalogue. Keep the revision offline until a non-destructive version transition is prepared.','details'=>['currentVersionId'=>(int)$campaign['CurrentVersionID'],'draftVersionId'=>(int)$versionId,'cataloguePreserved'=>true]],409);
+ $policy=sv104_policy((string)$campaign['Status'],(int)$campaign['CurrentVersionID'],(int)$versionId);
+ if(!$policy['requiresNextCycle'])return false;
+ json_response(['success'=>false,'code'=>'NEXT_CYCLE_REQUIRED','message'=>'A completed campaign is immutable. Create a non-destructive next cycle instead.','details'=>['currentVersionId'=>(int)$campaign['CurrentVersionID'],'draftVersionId'=>(int)$versionId,'cataloguePreserved'=>true,'requiredEndpoint'=>'activate-next-cycle']],409);
  return true;
 }
 function handle_safety_vote_phase10_4_routes(string$method,string$path):bool{

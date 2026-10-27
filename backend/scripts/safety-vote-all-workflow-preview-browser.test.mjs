@@ -20,7 +20,7 @@ const markup = workflows.map(campaignType => {
 
 const browser = await chromium.launch({ headless: true });
 try {
-    for (const viewport of [{ width: 390, height: 844 }, { width: 1366, height: 768 }]) {
+    for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 932 }, { width: 768, height: 1024 }, { width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
         const page = await browser.newPage({ viewport });
         await page.setContent(`<style>${css}</style><main style="max-width:1000px;margin:auto;display:grid;gap:1rem">${markup}</main>`);
         await page.evaluate(`(${bindSafetyVoteCampaignPreview.toString()})(document)`);
@@ -31,16 +31,24 @@ try {
             overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
             userWorkflows: new Set([...document.querySelectorAll('[data-sv-workflow-preview]')].map(node => node.dataset.svWorkflowPreview)).size,
             adminWorkflows: document.querySelectorAll('[data-sv-admin-preview]').length,
-            juryMatrices: document.querySelectorAll('[data-sv-jury-preview="juror"] .sv-live-preview__matrix-work').length
+            juryMatrices: document.querySelectorAll('[data-sv-jury-preview="juror"] .sv-live-preview__matrix-work').length,
+            jurySliders: document.querySelectorAll('[data-sv-jury-preview="juror"] input[type="range"]').length,
+            juryNumberInputs: document.querySelectorAll('[data-sv-jury-preview="juror"] input[type="number"]').length,
+            juryQuickScores: document.querySelectorAll('[data-sv-jury-preview="juror"] .sv-live-preview__score-quick button').length,
+            enabledJuryMutationControls: document.querySelectorAll('[data-sv-jury-preview="juror"] .sv-live-preview__score-control input:not(:disabled),[data-sv-jury-preview="juror"] .sv-live-preview__score-control button:not(:disabled),[data-sv-jury-preview="juror"] footer .sv-button:not(:disabled)').length
         }));
         assert.ok(result.overflow <= 1, `${viewport.width}px all-workflow preview has horizontal overflow: ${result.overflow}px`);
         assert.equal(result.userWorkflows, 5);
         assert.equal(result.adminWorkflows, 5);
         assert.equal(result.juryMatrices, 1);
+        assert.equal(result.jurySliders, 1);
+        assert.equal(result.juryNumberInputs, 1);
+        assert.ok(result.juryQuickScores >= 2);
+        assert.equal(result.enabledJuryMutationControls, 0, 'Preview must never submit or mutate Jury scores');
         await page.close();
     }
 } finally {
     await browser.close();
 }
 
-console.log('Safety Vote all-workflow Preview Browser UAT: PASS (6 profiles, User/Admin/Juror, 390px/1366px)');
+console.log('Safety Vote all-workflow Preview Browser UAT: PASS (6 profiles, User/Admin/Juror, 5 responsive viewports)');

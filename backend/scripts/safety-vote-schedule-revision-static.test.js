@@ -25,6 +25,6 @@ for (const source of [nodePhase3, phpPhase3]) {
     assert(source.includes('VotingWindowOpen'), 'Authoritative voting-window check is missing');
 }
 assert(admin.includes('PendingDraftVersionID') && admin.includes('มี Draft V') && admin.includes('เปิด Draft V'), 'Admin pending revision badge/action is missing');
-assert(read('index.html').includes('20261025-company-user-ux-phase5-r1'), 'Frontend release cache key was not advanced');
+assert(read('index.html').includes('20261027-safety-vote-jury-score-ux-r1'), 'Frontend release cache key was not advanced');
 
 console.log('Safety Vote schedule lifecycle and Draft revision visibility static contract: PASS');

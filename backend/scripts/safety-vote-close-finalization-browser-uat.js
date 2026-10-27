@@ -3,17 +3,52 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const http = require('node:http');
+const { spawn } = require('node:child_process');
 const jwt = require('jsonwebtoken');
 const { chromium } = require('playwright');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 const db = require('../db');
 const { loadReadyTestUsers } = require('./ready-test-users');
 
-const APP_URL = String(process.env.SAFETY_VOTE_LOCAL_APP_URL || 'http://127.0.0.1:5500/index.html#/safety-vote');
+let APP_URL = String(process.env.SAFETY_VOTE_LOCAL_APP_URL || 'http://127.0.0.1:5500/index.html#/safety-vote');
 const evidenceDir = path.join(__dirname, '..', '..', 'backups', 'local', `safety-vote-close-finalization-browser-${Date.now()}`);
+const root = path.resolve(__dirname, '..', '..');
+const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+let ownedApi = null;
+let ownedFrontend = null;
+
+async function reachable(url, expected = status => status === 200) {
+    try { const response = await fetch(url, { signal: AbortSignal.timeout(1500) }); return expected(response.status); }
+    catch (_) { return false; }
+}
+
+async function ensureLocalRuntime() {
+    const apiUrl = 'http://127.0.0.1:5000/api/safety-vote/me/campaigns';
+    if (!await reachable(apiUrl, status => status === 401)) {
+        ownedApi = spawn(process.execPath, [path.join(root, 'backend', 'server.js')], { cwd: root, env: { ...process.env, PORT: '5000' }, stdio: 'ignore', windowsHide: true });
+        for (let attempt = 0; attempt < 100 && !await reachable(apiUrl, status => status === 401); attempt += 1) { if (ownedApi.exitCode !== null) break; await sleep(150); }
+        assert(await reachable(apiUrl, status => status === 401), 'Local Safety Vote API did not become ready on port 5000');
+    }
+    const frontendProbe = APP_URL.split('#')[0];
+    if (await reachable(frontendProbe)) return;
+    assert(!process.env.SAFETY_VOTE_LOCAL_APP_URL, 'Configured Local frontend is unreachable');
+    const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.json':'application/json', '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.svg':'image/svg+xml', '.woff2':'font/woff2' };
+    ownedFrontend = http.createServer((request, response) => {
+        const pathname = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
+        const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+        const target = path.resolve(root, relative);
+        if (!target.startsWith(`${root}${path.sep}`) || !fs.existsSync(target) || !fs.statSync(target).isFile()) { response.writeHead(404); response.end('Not found'); return; }
+        response.writeHead(200, { 'Content-Type': mime[path.extname(target).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+        fs.createReadStream(target).pipe(response);
+    });
+    await new Promise((resolve, reject) => { ownedFrontend.once('error', reject); ownedFrontend.listen(5500, '127.0.0.1', resolve); });
+    assert(await reachable(frontendProbe), 'Local frontend did not become ready on port 5500');
+}
 
 (async () => {
     assert(new Set(['localhost', '127.0.0.1', '::1']).has(new URL(APP_URL).hostname), 'Refusing non-loopback frontend');
+    await ensureLocalRuntime();
     const { user } = await loadReadyTestUsers(db);
     const [[completedFixture = null]] = await db.query(`
         SELECT c.id
@@ -88,4 +123,8 @@ const evidenceDir = path.join(__dirname, '..', '..', 'backups', 'local', `safety
 })().catch(error => {
     console.error(error.stack || error.message);
     process.exitCode = 1;
-}).finally(async () => db.end());
+}).finally(async () => {
+    await db.end();
+    if (ownedFrontend) await new Promise(resolve => ownedFrontend.close(resolve));
+    if (ownedApi?.exitCode === null) ownedApi.kill();
+});

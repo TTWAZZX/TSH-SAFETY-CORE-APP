@@ -48,7 +48,7 @@ async function call(pathname, token, options = {}) {
     assert(publicResult, 'Closed campaign result must remain publicly readable to authenticated employees');
     const activationGuard = await call(`/safety-vote/admin/campaigns/4/versions/${adminCampaign.PendingDraftVersionID}/activate`, adminToken, { method: 'POST', body: { confirmation: `ACTIVATE ${adminCampaign.CampaignCode} V${adminCampaign.PendingDraftVersionNo}` } });
     assert.equal(activationGuard.status, 409, JSON.stringify(activationGuard));
-    assert.equal(activationGuard.code, 'REVISION_ACTIVATION_WOULD_HIDE_COMPLETED_CAMPAIGN', JSON.stringify(activationGuard));
+    assert.equal(activationGuard.code, 'NEXT_CYCLE_REQUIRED', JSON.stringify(activationGuard));
     const [lifecycleRows] = await db.query("SELECT c.Status,c.ClosedAt,v.Status VersionStatus,(SELECT COUNT(*) FROM SafetyVote_CampaignVersions pending WHERE pending.CampaignID=c.id AND pending.Status='Draft' AND pending.id<>c.CurrentVersionID) PendingDrafts,(SELECT COUNT(*) FROM SafetyVote_AuditLogs a WHERE a.CampaignID=c.id AND a.Action='SAFETY_VOTE_SCHEDULE_CLOSE' AND a.ActorEmployeeID='SYSTEM_SCHEDULE') ScheduleCloseAudits FROM SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID WHERE c.id=?", [4]);
     assert.equal(lifecycleRows.length, 1, 'Campaign 4 lifecycle state is unavailable');
     assert.equal(lifecycleRows[0].Status, 'Closed', 'Past-due campaign 4 was not reconciled to Closed');
