@@ -2,7 +2,7 @@ import { API } from '../api.js?v=20260908-bbs-navigation-loading-r1';
 import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js?v=20261020-safety-vote-duplicate-media-r3';
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
-import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261027-safety-vote-gallery-lightbox-r1';
+import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261027-safety-vote-gallery-choice-r2';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261025-safety-vote-final-phase7-r1';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
@@ -238,7 +238,7 @@ function questionControl(question) {
     const id = Number(question.id), raw = state.answers[String(id)], options = question.options || [];
     if (isChoiceQuestion(question)) {
         const inputType = question.questionType === 'single_choice' || question.questionType === 'yes_no_abstain' || Number(question.maxSelections) === 1 ? 'radio' : 'checkbox';
-        return `<div class="svp-options">${options.map(option => `<article class="svp-option">${candidateGalleryMarkup(option,id)}<label><input type="${inputType}" name="svp-q-${id}" value="${Number(option.id)}" data-svp-answer="${id}" ${(Array.isArray(raw) && raw.map(Number).includes(Number(option.id))) ? 'checked' : ''}><span><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${optionMedia(option)}</span></label></article>`).join('')}</div>`;
+        return `<div class="svp-options">${options.map(option => `<article class="svp-option">${candidateGalleryMarkup(option,id,{ choiceName:`svp-q-${id}`, choiceValue:Number(option.id), choiceLabel:option.label })}<label><input type="${inputType}" name="svp-q-${id}" value="${Number(option.id)}" data-svp-answer="${id}" ${(Array.isArray(raw) && raw.map(Number).includes(Number(option.id))) ? 'checked' : ''}><span><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${optionMedia(option)}</span></label></article>`).join('')}</div>`;
     }
     if (question.questionType === 'rating') return `<label class="svp-inline-input"><span>คะแนน ${Number(question.validation?.minNumber ?? 0)}–${Number(question.validation?.maxNumber ?? 10)}</span><input type="number" data-svp-answer="${id}" value="${escHtml(raw ?? '')}" min="${Number(question.validation?.minNumber ?? 0)}" max="${Number(question.validation?.maxNumber ?? 10)}"></label>`;
     if (question.questionType === 'long_text') return `<textarea data-svp-answer="${id}" rows="5" maxlength="${Number(question.validation?.maxLength || 10000)}" placeholder="กรอกคำตอบ">${escHtml(raw || '')}</textarea>`;
@@ -252,11 +252,12 @@ function questionControl(question) {
     return '<p class="svp-note">รูปแบบคำถามนี้ยังไม่มีตัวควบคุมในหน้าเข้าร่วม</p>';
 }
 
-function candidateGalleryMarkup(option, questionId) {
+function candidateGalleryMarkup(option, questionId, choice = null) {
     const gallery = Array.isArray(option.gallery) && option.gallery.length ? option.gallery : option.fileId ? [{ fileId: option.fileId, altText: option.label, caption: null, isCover: true }] : [];
     if (!gallery.length) return '';
-    const group = `candidate-${Number(option.candidateId || option.id)}-question-${Number(questionId)}`;
-    return `<div class="sv-work-gallery sv-work-gallery--candidate" aria-label="ภาพผลงาน ${escHtml(option.label)}">${gallery.map((item,index)=>`<figure class="sv-work-gallery__item ${item.isCover?'is-cover':''}"><button type="button" class="svp-gallery-trigger" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="${group}" data-sv-gallery-label="${escHtml(item.altText||option.label)}" aria-label="เปิดภาพที่ ${index+1} ของ ${escHtml(option.label)}"><img data-svp-private-file="${Number(item.fileId)}" data-sv-auth-file="${Number(item.fileId)}" alt="${escHtml(item.altText||option.label)}" decoding="async"></button>${item.caption?`<figcaption>${escHtml(item.caption)}</figcaption>`:''}</figure>`).join('')}</div>`;
+    const group = choice ? `question-options-${Number(questionId)}` : `candidate-${Number(option.candidateId || option.id)}-question-${Number(questionId)}`;
+    const choiceData = choice ? ` data-sv-gallery-choice-name="${escHtml(choice.choiceName)}" data-sv-gallery-choice-value="${Number(choice.choiceValue)}" data-sv-gallery-choice-label="${escHtml(choice.choiceLabel || option.label)}"` : '';
+    return `<div class="sv-work-gallery sv-work-gallery--candidate" aria-label="ภาพผลงาน ${escHtml(option.label)}">${gallery.map((item,index)=>`<figure class="sv-work-gallery__item ${item.isCover?'is-cover':''}"><button type="button" class="svp-gallery-trigger" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="${group}"${choiceData} data-sv-gallery-label="${escHtml(item.altText||option.label)}" aria-label="เปิดภาพที่ ${index+1} ของ ${escHtml(option.label)}"><img data-svp-private-file="${Number(item.fileId)}" data-sv-auth-file="${Number(item.fileId)}" alt="${escHtml(item.altText||option.label)}" decoding="async"></button>${item.caption?`<figcaption>${escHtml(item.caption)}</figcaption>`:''}</figure>`).join('')}</div>`;
 }
 
 function publicWorkGalleryMarkup() {
