@@ -56,6 +56,21 @@ export function validateScoreSheet(detail = {}, scores = {}) {
     return errors;
 }
 
+export function validateDraftScoreSheet(detail = {}, scores = {}) {
+    const errors = [];
+    for (const candidate of detail.candidates || []) {
+        for (const criterion of detail.criteria || []) {
+            const key = scoreKey(candidate.id, criterion.id), raw = scores[key]?.score;
+            const min = Number(valueOf(criterion, 'MinScore', 'minScore')), max = Number(valueOf(criterion, 'MaxScore', 'maxScore'));
+            if (raw !== '' && raw !== undefined && raw !== null && (!Number.isFinite(Number(raw)) || Number(raw) < min || Number(raw) > max)) {
+                errors.push({ key, message: `คะแนน “${valueOf(criterion, 'Title', 'title')}” ต้องอยู่ระหว่าง ${min}–${max}` });
+            }
+            if (String(scores[key]?.comment || '').length > 1000) errors.push({ key, message: 'หมายเหตุแต่ละรายการต้องไม่เกิน 1,000 ตัวอักษร' });
+        }
+    }
+    return errors;
+}
+
 export function scoreProgress(detail = {}, scores = {}) {
     const total = (detail.candidates || []).length * (detail.criteria || []).length;
     let completed = 0;
@@ -68,9 +83,11 @@ export function scoreProgress(detail = {}, scores = {}) {
 
 export function buildScorePayload(detail = {}, scores = {}) {
     return {
-        scores: (detail.candidates || []).flatMap(candidate => (detail.criteria || []).map(criterion => {
+        scores: (detail.candidates || []).flatMap(candidate => (detail.criteria || []).flatMap(criterion => {
             const row = scores[scoreKey(candidate.id, criterion.id)] || {};
-            return { candidateId: Number(candidate.id), criterionId: Number(criterion.id), score: Number(row.score), comment: String(row.comment || '').trim() };
+            const raw = row.score;
+            if (raw === '' || raw === undefined || raw === null || !Number.isFinite(Number(raw))) return [];
+            return [{ candidateId: Number(candidate.id), criterionId: Number(criterion.id), score: Number(raw), comment: String(row.comment || '').trim() }];
         }))
     };
 }

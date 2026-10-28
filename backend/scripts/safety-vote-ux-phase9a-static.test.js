@@ -41,6 +41,7 @@ ok(user.includes('promotionAdminPreview') && user.includes('promotions.data?.adm
 ok(user.includes("matchMedia('(prefers-reduced-motion: reduce)').matches") && user.includes('mouseenter') && user.includes('focusin'), 'carousel respects motion preference and interaction pause');
 ok(user.includes('svp-promotion__backdrop') && user.includes('svp-promotion__foreground'), 'promotion image uses decorative cover and complete foreground layers');
 ok(css.includes('.svp-promotion__backdrop') && css.includes('object-fit: cover') && css.includes('.svp-promotion__foreground') && css.includes('object-fit: contain'), 'responsive layered image fit contract');
+ok(css.includes('.svp-promotion__media[data-sv-auth-media]') && css.includes('height: clamp(180px, 15vw, 240px)'), 'hydrated banner retains its containing block and campaign covers expose more artwork');
 ok(css.includes('.svp-promotion') && css.includes('@media (prefers-reduced-motion: reduce)'), 'responsive reduced-motion presentation');
 ok(css.includes('min-height: 44px'), 'minimum touch target contract');
 console.log(`Safety Vote UX Phase 9A static + Node/PHP parity: PASS (${checks} assertions)`);

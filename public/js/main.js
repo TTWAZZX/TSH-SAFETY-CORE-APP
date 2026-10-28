@@ -32,7 +32,7 @@ const loadHiyariPage = lazyPage('./pages/hiyari.js?v=20260907-hiyari-pdf-summary
 const loadKyPage = lazyPage('./pages/ky.js?v=20261015-ky-video-manager-r4', 'loadKyPage');
 const loadFourmPage = lazyPage('./pages/fourm.js?v=20261011-fourm-chart-containment-r1', 'loadFourmPage');
 const loadJohnnyAiPage = lazyPage('./pages/johnny-ai.js?v=20261011-johnny-admin-workspace-r1', 'loadJohnnyAiPage');
-const loadSafetyVotePage = lazyPage('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-promotion-carousel-r2', 'loadSafetyVotePage');
+const loadSafetyVotePage = lazyPage('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-jury-scoring-r1', 'loadSafetyVotePage');
 import { initJohnnyDrawer, syncJohnnyDrawerRoute, destroyJohnnyDrawer } from './johnny-drawer.js?v=20261010-johnny-draggable-launcher-r1';
 import { openProfileDrawer, closeProfileDrawer } from './pages/profile.js?v=20260924-company-email-self-service-r1';
 const loadDashboardPage = lazyPage('./pages/dashboard.js?v=20260822-cccf-shared-target-r4', 'loadDashboardPage');

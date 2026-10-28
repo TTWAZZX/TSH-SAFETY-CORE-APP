@@ -38,7 +38,7 @@ for (const source of [nodeResults, phpResults]) {
 for (const source of [nodeVersions, phpVersions]) {
     assert(source.includes('NEXT_CYCLE_REQUIRED'), 'Completed-campaign non-destructive next-cycle guard is missing');
 }
-assert(/20261027-safety-vote-(?:gallery-(?:lightbox-r1|choice-r2|bounded-r3)|jury-work-media-r1|jury-score-ux-r1)/.test(read('index.html')), 'Frontend release cache key is stale');
+assert(/20261027-safety-vote-(?:gallery-(?:lightbox-r1|choice-r2|bounded-r3)|jury-work-media-r1|jury-score-ux-r1)|20261028-safety-vote-jury-scoring-r1/.test(read('index.html')), 'Frontend release cache key is stale');
 assert(memberPage.includes('data-svp-official-results') && memberPage.includes('/official-results'), 'Closed campaign immutable official results are not rendered for members');
 assert(memberPage.includes('ไม่มีบัตรที่ระบบรับรอง') && memberPage.includes('ไม่มีการจัดอันดับหรือสร้างผู้ชนะ'), 'Zero-vote public disclosure is missing');
 assert(main.includes("replace(/^#\\/?/, '')"), 'Hash routes must accept both #safety-vote and #/safety-vote');

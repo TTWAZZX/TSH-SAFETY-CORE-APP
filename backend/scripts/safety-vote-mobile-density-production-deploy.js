@@ -12,16 +12,20 @@ const root = path.resolve(__dirname, '..', '..');
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = 'd39ba47c4e2a2d61d0b0727c5c112534fe0f43fe';
-const confirmation = 'DEPLOY_SAFETY_VOTE_PROMOTION_CAROUSEL_R2';
+const productionBaseline = '5058212e9f78ed7e3235a6d5efd46cb55fee2b14';
+const confirmation = 'DEPLOY_SAFETY_VOTE_JURY_SCORING_R1';
 const runtimePaths = Object.freeze([
     'index.html',
     'public/style.css',
     'public/js/main.js',
     'public/js/pages/safety-vote-page-ux1.js',
+    'public/js/pages/safety-vote-jury-workspace.js',
+    'public/js/pages/safety-vote-jury-model.mjs',
+    'api/handlers/safety_vote_phase4.php',
+    'api/lib/safety_vote_phase4.php',
 ]);
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-promotion-carousel-r2-deploy-${stamp}`);
+const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-jury-scoring-r1-deploy-${stamp}`);
 const candidateRoot = path.join(evidenceRoot, 'candidate');
 const rollbackRoot = path.join(evidenceRoot, 'rollback-package');
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -109,17 +113,29 @@ function prepare(commit, tree) {
     const main = gitBlob(commit, 'public/js/main.js').toString('utf8');
     const css = gitBlob(commit, 'public/style.css').toString('utf8');
     const page = gitBlob(commit, 'public/js/pages/safety-vote-page-ux1.js').toString('utf8');
-    assert(index.includes('public/style.css?v=20261028-safety-vote-promotion-carousel-r2'), 'Promotion carousel R2 stylesheet cache marker missing');
-    assert(index.includes('public/js/main.js?v=20261028-safety-vote-promotion-carousel-r2'), 'Promotion carousel R2 main cache marker missing');
-    assert(main.includes('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-promotion-carousel-r2'), 'Promotion carousel R2 page cache marker missing');
+    const jury = gitBlob(commit, 'public/js/pages/safety-vote-jury-workspace.js').toString('utf8');
+    const juryModel = gitBlob(commit, 'public/js/pages/safety-vote-jury-model.mjs').toString('utf8');
+    const phpHandler = gitBlob(commit, 'api/handlers/safety_vote_phase4.php').toString('utf8');
+    const phpLib = gitBlob(commit, 'api/lib/safety_vote_phase4.php').toString('utf8');
+    assert(index.includes('public/style.css?v=20261028-safety-vote-jury-scoring-r1'), 'Jury scoring R1 stylesheet cache marker missing');
+    assert(index.includes('public/js/main.js?v=20261028-safety-vote-jury-scoring-r1'), 'Jury scoring R1 main cache marker missing');
+    assert(main.includes('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-jury-scoring-r1'), 'Jury scoring R1 page cache marker missing');
+    assert(page.includes('./safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-scoring-r1'), 'Jury scoring R1 workspace cache marker missing');
     assert(page.includes('schedulePromotionCarousel(delay = 6000)') && page.includes('data-svp-promotion-carousel') && page.includes('promotionPointerStartX'), 'Promotion carousel behavior missing');
     assert(page.includes('svp-promotion__backdrop') && page.includes('svp-promotion__foreground') && page.includes("matchMedia('(prefers-reduced-motion: reduce)').matches"), 'Promotion image layering or reduced-motion guard missing');
     assert(page.includes('promotionAdminPreview') && page.includes('promotions.data?.adminPreview === true') && page.includes('|| state.promotionAdminPreview'), 'Admin preview analytics suppression missing');
     assert(css.includes('.svp-promotion__backdrop') && css.includes('object-fit: cover') && css.includes('.svp-promotion__foreground') && css.includes('object-fit: contain'), 'Promotion responsive image-fit styling missing');
+    assert(css.includes('.svp-promotion__media[data-sv-auth-media]') && css.includes('height: clamp(180px, 15vw, 240px)'), 'Promotion media positioning or campaign cover height fix missing');
     assert(css.includes('.svp-promotion__dots button') && css.includes('min-width: 44px') && css.includes('min-height: 44px'), 'Promotion carousel touch targets missing');
+    assert(jury.includes('validateDraftScoreSheet') && jury.includes('startSessionKeepAlive') && jury.includes('data-svj-candidate-progress'), 'Jury partial draft, keepalive or progress behavior missing');
+    assert(jury.includes('บันทึกอัตโนมัติบนเซิร์ฟเวอร์แล้ว') && jury.includes('svj-candidate__workspace'), 'Jury autosave or evidence workspace missing');
+    assert(juryModel.includes('validateDraftScoreSheet') && juryModel.includes('buildScorePayload'), 'Jury draft model contract missing');
+    assert(css.includes('.svj-candidate__workspace') && css.includes('.svj-candidate__criteria { max-height: calc(100dvh - 8rem)'), 'Jury sticky evidence layout missing');
+    assert(phpHandler.includes("sv4_sheet($cs,$ids,json_body()['scores']??null,false)") && phpHandler.includes("DELETE FROM SafetyVote_JuryScores WHERE AssignmentID=? AND Status='Draft'"), 'PHP partial draft snapshot persistence missing');
+    assert(phpLib.includes('bool$requireComplete=true') && phpLib.includes('if($requireComplete)'), 'PHP partial draft validator missing');
 
     const manifest = {
-        contract: '2026-10-28-safety-vote-promotion-carousel-r2',
+        contract: '2026-10-28-safety-vote-jury-scoring-r1',
         productionBaseline,
         candidate: { commit, tree },
         runtimePaths,
@@ -216,9 +232,9 @@ async function main() {
     const https = await httpsVerify(prepared.candidate, commit);
     const authenticated = await authenticatedSmoke();
     const result = {
-        contract: '2026-10-28-safety-vote-promotion-carousel-r2',
+        contract: '2026-10-28-safety-vote-jury-scoring-r1',
         generatedAt: new Date().toISOString(),
-        decision: 'PASS_SAFETY_VOTE_PROMOTION_CAROUSEL_R2_PRODUCTION_DEPLOYMENT',
+        decision: 'PASS_SAFETY_VOTE_JURY_SCORING_R1_PRODUCTION_DEPLOYMENT',
         candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length },
         remoteBefore: prepared.remoteBefore,
         deployment: { uploaded: prepared.candidate.length, doubleDownloadVerified: deployed.length, httpsVerified: https.publicFiles.length },
@@ -241,6 +257,6 @@ main().catch(error => {
             ? 'HOLD_DEPLOYMENT_FAILED_RUNTIME_ROLLED_BACK'
             : 'HOLD_DEPLOYMENT_ROLLBACK_INCOMPLETE';
     writeJson('failure.json', { generatedAt: new Date().toISOString(), decision, error: error.message, rollback });
-    process.stderr.write(`Safety Vote Promotion Carousel deployment failed: ${error.message}\n`);
+    process.stderr.write(`Safety Vote Jury Scoring R1 deployment failed: ${error.message}\n`);
     process.exitCode = 1;
 });

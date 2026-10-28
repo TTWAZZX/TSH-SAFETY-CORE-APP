@@ -39,7 +39,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(components.includes("event.key === 'Escape'"), 'dialog Escape behavior is missing');
     check(workspace.includes('sessionStorage') && workspace.includes('safety-vote-jury-draft:'), 'session-local autosave is missing');
     check(workspace.includes('clearStaleDrafts') && workspace.includes('clearLocalDraft'), 'local draft cleanup contract is missing');
-    check(workspace.includes('บันทึกบนเซิร์ฟเวอร์เมื่อกรอกครบ'), 'local/server autosave distinction is missing');
+    check(workspace.includes('validateDraftScoreSheet') && workspace.includes('buildScorePayload'), 'partial local/server autosave distinction is missing');
     check(workspace.includes('validateScoreSheet') && workspace.includes('role="alert" tabindex="-1"'), 'focusable validation summary is missing');
     check(workspace.includes('data-svj-score-range') && workspace.includes('data-svj-score-step') && workspace.includes('data-svj-score-quick'), 'accessible slider, stepper and quick-score controls are missing');
     check(workspace.includes('syncScoreUi') && workspace.includes("inputmode=\"decimal\""), 'score controls must stay synchronized with direct numeric entry');
@@ -51,7 +51,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('คุณมีสิทธิ์กรรมการสำหรับแคมเปญนี้') && page.includes('data-svp-jury'), 'participant preview must distinguish jury access and provide a direct action');
     check(page.includes('รอให้คะแนน') && page.includes('กำลังประเมิน') && !page.includes('แบบประเมิน #'), 'assignment cards must use plain-language states instead of internal IDs');
     for (const source of [nodePhase4, phpPhase4]) check(source.includes('StageName') && source.includes('ScoreCount') && source.includes('ExpectedScoreCount'), 'jury assignment projection must expose stage and progress parity');
-    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
+    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 4'), 'Phase 4 scoped CSS marker is missing');
     check(css.includes('.svj-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
     check(css.includes('min-height: 44px'), '44 px touch targets are not enforced');

@@ -14,5 +14,6 @@ echo json_encode([
  'calculations'=>array_map('sv4_calculate',$variants),
  'criteria'=>sv4_criteria($criteria),
  'sheet'=>sv4_sheet($sheetCriteria,[10],$scores),
+ 'partialSheet'=>sv4_sheet($sheetCriteria,[10,20],$scores,false),
  'stages'=>sv4_stages($stages),
 ],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);

@@ -42,7 +42,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('loadLegacySafetyVotePage') && page.includes('data-svp-jury'), 'existing Juror workspace handoff is missing');
     check(page.includes('state.moduleDisabled') && page.includes('MODULE_DISABLED'), 'module_enabled fail-closed state is missing');
     check(page.includes('state.denied') && page.includes('PERMISSION_DENIED'), 'permission denied state is missing');
-    const currentCacheKey = /safety-vote-(?:(?:ux(?:[3-8]|9c)|phase9abc-enabled|preview-gallery|public-discovery|wizard-layout|final-phase7|jury-score-ux|official-topn)-r1|density-r[1-9]\d*)/;
+    const currentCacheKey = /safety-vote-(?:(?:ux(?:[3-8]|9c)|phase9abc-enabled|preview-gallery|public-discovery|wizard-layout|final-phase7|jury-score-ux|jury-scoring|official-topn)-r1|density-r[1-9]\d*)/;
     check(currentCacheKey.test(main) && currentCacheKey.test(html), 'Phase 3-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 3'), 'Phase 3 scoped CSS marker is missing');
     check(css.includes('.svp-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
@@ -55,7 +55,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(css.includes('.svp-shell[data-sv-participation] .sv-role-nav__item'), 'participant mobile role navigation is not scoped');
     check(css.includes('.svp-shell[data-sv-participation] .sv-journey-steps button'), 'participant mobile journey density is not scoped');
     check(css.includes('flex-direction: row') && css.includes('.svp-shell[data-sv-participation] .svp-action-bar'), 'participant mobile action bar must remain a single row');
-    check(html.includes('20261028-safety-vote-density-r5'), 'participant mobile density stylesheet cache key is missing');
+    check(html.includes('20261028-safety-vote-density-r5') || html.includes('20261028-safety-vote-jury-scoring-r1'), 'participant mobile density stylesheet cache key is missing');
     check(css.includes('mobile density phase 3: choices, media and review flow'), 'participant mobile choice/review phase marker is missing');
     check(css.includes('.svp-option:has(input:checked)::after'), 'selected choice state must remain visible');
     check(css.includes('.svp-option > .sv-work-gallery--candidate'), 'candidate media strip is not scoped to choice cards');

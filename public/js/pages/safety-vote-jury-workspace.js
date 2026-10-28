@@ -3,8 +3,8 @@ import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, openSafetyVoteReasonDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
 import {
     JURY_VIEW_LABELS, assignmentProgress, assignmentState, buildScorePayload, filterAssignments,
-    normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateScoreSheet, valueOf
-} from './safety-vote-jury-model.mjs?v=20261028-safety-vote-jury-assignment-ux-r1';
+    normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateDraftScoreSheet, validateScoreSheet, valueOf
+} from './safety-vote-jury-model.mjs?v=20261028-safety-vote-jury-scoring-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261024-safety-vote-gallery-r1';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261024-safety-vote-gallery-r1';
@@ -13,8 +13,12 @@ const STORAGE_PREFIX = 'safety-vote-jury-draft:';
 const state = {
     page: null, assignments: [], detail: null, selected: null, query: '', view: 'draft', screen: 'list', mode: 'edit',
     scores: {}, errors: [], receipt: null, loading: true, error: null, denied: false, moduleDisabled: false,
-    inFlight: false, saveState: 'idle', saveMessage: '', submitError: null, saveTimer: null, savePromise: null, onUser: null
+    inFlight: false, saveState: 'idle', saveMessage: '', submitError: null, saveTimer: null, savePromise: null,
+    sessionTimer: null, sessionVisibilityHandler: null, sessionRefreshPromise: null,
+    draftRevision: 0, serverRevision: 0, onUser: null
 };
+
+const SESSION_REFRESH_MS = 4 * 60 * 1000;
 
 function dateTime(value) {
     return formatThaiDateTime(value, 'ไม่ระบุเวลา');
@@ -40,6 +44,41 @@ function clearStaleDrafts(assignments) {
             if (key?.startsWith(STORAGE_PREFIX) && !allowed.has(key)) sessionStorage.removeItem(key);
         }
     } catch (_) {}
+}
+
+function stopSessionKeepAlive() {
+    clearInterval(state.sessionTimer);
+    state.sessionTimer = null;
+    if (state.sessionVisibilityHandler) document.removeEventListener('visibilitychange', state.sessionVisibilityHandler);
+    state.sessionVisibilityHandler = null;
+}
+
+async function refreshJurySession({ notify = false } = {}) {
+    if (state.sessionRefreshPromise) return state.sessionRefreshPromise;
+    state.sessionRefreshPromise = (async () => {
+        if (!window.TSHSession?.getToken?.()) return false;
+        const verification = await window.TSHSession.refreshSession({ preserveOnFailure: true });
+        if (verification || window.TSHSession.getToken()) return true;
+        if (state.detail && state.mode === 'edit') {
+            collectScores();
+            writeLocalDraft();
+            state.saveState = 'error';
+            state.saveMessage = 'เซสชันหมดอายุ · เก็บฉบับร่างไว้ในแท็บนี้แล้ว กรุณาเข้าสู่ระบบใหม่';
+            updateSaveStatus();
+        }
+        if (notify) showToast('เซสชันหมดอายุ ฉบับร่างยังอยู่ในแท็บนี้ กรุณาเข้าสู่ระบบใหม่', 'error');
+        return false;
+    })().finally(() => { state.sessionRefreshPromise = null; });
+    return state.sessionRefreshPromise;
+}
+
+function startSessionKeepAlive() {
+    stopSessionKeepAlive();
+    state.sessionTimer = setInterval(() => refreshJurySession(), SESSION_REFRESH_MS);
+    state.sessionVisibilityHandler = () => {
+        if (document.visibilityState === 'visible' && state.screen === 'detail' && state.mode === 'edit') refreshJurySession();
+    };
+    document.addEventListener('visibilitychange', state.sessionVisibilityHandler);
 }
 
 function loadingMarkup() {
@@ -94,7 +133,9 @@ function scoreControl(candidate, criterion) {
 }
 
 function validationMarkup() {
-    return state.errors.length ? `<section class="svp-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบคะแนน</h2><ul>${state.errors.map(error => `<li><a href="#svj-score-${error.key.replace(':', '-')}">${escHtml(error.message)}</a></li>`).join('')}</ul></section>` : '';
+    if (!state.errors.length) return '';
+    const visible = state.errors.slice(0, 8), remaining = state.errors.length - visible.length;
+    return `<section class="svp-validation svj-validation" role="alert" tabindex="-1"><h2>ยังส่งผลไม่ได้ · เหลือ ${state.errors.length} ช่องที่ต้องตรวจสอบ</h2><p>ฉบับร่างบันทึกบางส่วนได้ตามปกติ รายการด้านล่างใช้ตรวจสอบก่อนส่งผลเท่านั้น</p><ul>${visible.map(error => `<li><a href="#svj-score-${error.key.replace(':', '-')}">${escHtml(error.message)}</a></li>`).join('')}</ul>${remaining > 0 ? `<p><strong>และอีก ${remaining} ช่อง</strong> — ดูความคืบหน้าของแต่ละผลงานเพื่อกรอกต่อ</p>` : ''}</section>`;
 }
 
 function matrixSummaryMarkup() {
@@ -107,7 +148,14 @@ function matrixSummaryMarkup() {
 
 function editMarkup() {
     const progress = scoreProgress(state.detail, state.scores);
-    return `${validationMarkup()}${matrixSummaryMarkup()}<section class="svj-sheet-summary"><div><strong>${progress.completed}/${progress.total}</strong><span>รายการที่ให้คะแนนแล้ว</span></div><div class="svj-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.completed}" aria-label="ความคืบหน้าการให้คะแนน"><span style="width:${progress.percent}%"></span></div><p data-svj-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage || 'ยังไม่มีการแก้ไข')}</p></section><form class="svj-score-form" data-svj-form data-sv-result-binding="submitted_score_rows_to_frozen_result" novalidate>${(state.detail.candidates || []).map((candidate, index) => `<fieldset class="svj-candidate"><legend><span>${index + 1}</span>${escHtml(candidate.displayName)}</legend><p class="svj-candidate__code">รหัสรายการ ${escHtml(candidate.candidateNo)}</p>${candidateGallery(candidate)}${(state.detail.criteria || []).map(criterion => scoreControl(candidate, criterion)).join('')}</fieldset>`).join('')}</form>`;
+    const criteria = state.detail.criteria || [];
+    return `${validationMarkup()}${matrixSummaryMarkup()}<section class="svj-sheet-summary"><div><strong>${progress.completed}/${progress.total}</strong><span>รายการที่ให้คะแนนแล้ว</span></div><div class="svj-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.completed}" aria-label="ความคืบหน้าการให้คะแนน"><span style="width:${progress.percent}%"></span></div><p data-svj-save-status data-state="${state.saveState}" aria-live="polite">${escHtml(state.saveMessage || 'ระบบจะบันทึกฉบับร่างอัตโนมัติเมื่อเริ่มให้คะแนน')}</p></section><form class="svj-score-form" data-svj-form data-sv-result-binding="submitted_score_rows_to_frozen_result" novalidate>${(state.detail.candidates || []).map((candidate, index) => {
+        const candidateCompleted = criteria.filter(criterion => {
+            const raw = state.scores[scoreKey(candidate.id, criterion.id)]?.score;
+            return raw !== '' && raw !== undefined && raw !== null && Number.isFinite(Number(raw));
+        }).length;
+        return `<fieldset class="svj-candidate"><legend><span>${index + 1}</span>${escHtml(candidate.displayName)}</legend><div class="svj-candidate__workspace"><aside class="svj-candidate__evidence" aria-label="หลักฐานผลงาน ${escHtml(candidate.displayName)}"><div class="svj-candidate__meta"><div><span>รหัสผลงาน</span><strong>${escHtml(candidate.candidateNo)}</strong></div><span class="svj-candidate__progress" data-svj-candidate-progress="${Number(candidate.id)}">ให้คะแนนแล้ว ${candidateCompleted}/${criteria.length} เกณฑ์</span></div>${candidateGallery(candidate)}</aside><section class="svj-candidate__criteria" aria-label="แบบประเมิน ${escHtml(candidate.displayName)}"><header><div><span>แบบประเมินผลงาน</span><strong>${criteria.length} เกณฑ์ · น้ำหนักรวม ${Number(state.detail?.matrix?.weightTotal || 0)}%</strong></div><small>บันทึกร่างได้ทุกเมื่อ · ต้องครบทุกเกณฑ์ก่อนส่งผล</small></header>${criteria.map(criterion => scoreControl(candidate, criterion)).join('')}</section></div></fieldset>`;
+    }).join('')}</form>`;
 }
 
 function reviewMarkup() {
@@ -161,36 +209,54 @@ function updateSaveStatus() {
     const progress = scoreProgress(state.detail, state.scores), bar = state.page?.querySelector('.svj-sheet-summary [role=progressbar]');
     if (bar) { bar.setAttribute('aria-valuenow', String(progress.completed)); bar.querySelector('span').style.width = `${progress.percent}%`; }
     const count = state.page?.querySelector('.svj-sheet-summary > div strong'); if (count) count.textContent = `${progress.completed}/${progress.total}`;
+    for (const candidate of state.detail?.candidates || []) {
+        const criteria = state.detail?.criteria || [];
+        const completed = criteria.filter(criterion => {
+            const raw = state.scores[scoreKey(candidate.id, criterion.id)]?.score;
+            return raw !== '' && raw !== undefined && raw !== null && Number.isFinite(Number(raw));
+        }).length;
+        const candidateProgress = state.page?.querySelector(`[data-svj-candidate-progress="${Number(candidate.id)}"]`);
+        if (candidateProgress) candidateProgress.textContent = `ให้คะแนนแล้ว ${completed}/${criteria.length} เกณฑ์`;
+    }
 }
 
 function scheduleAutosave() {
-    collectScores(); writeLocalDraft(); clearTimeout(state.saveTimer);
+    collectScores(); state.draftRevision += 1; writeLocalDraft(); clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => saveServer(false), 700);
 }
 
 async function saveServer(explicit) {
     if (state.savePromise) return state.savePromise;
     collectScores(); writeLocalDraft();
-    const errors = validateScoreSheet(state.detail, state.scores);
+    const errors = validateDraftScoreSheet(state.detail, state.scores);
     if (errors.length) {
         if (explicit) { state.errors = errors; renderDetail(); }
-        else { state.saveState = 'local'; state.saveMessage = 'เก็บในอุปกรณ์นี้แล้ว · บันทึกบนเซิร์ฟเวอร์เมื่อกรอกครบ'; updateSaveStatus(); }
+        else { state.saveState = 'local'; state.saveMessage = 'เก็บในแท็บนี้แล้ว · แก้คะแนนที่ไม่ถูกต้องเพื่อบันทึกบนเซิร์ฟเวอร์'; updateSaveStatus(); }
         return false;
     }
     if (state.inFlight) return false;
+    state.errors = [];
+    const revision = state.draftRevision;
     state.saveState = 'saving'; state.saveMessage = 'กำลังบันทึกฉบับร่างบนเซิร์ฟเวอร์…'; updateSaveStatus();
     state.savePromise = (async () => {
         try {
-            await API.put(`/safety-vote/jury/assignments/${Number(state.detail.assignment.id)}/scores`, buildScorePayload(state.detail, state.scores));
-            state.saveState = 'saved'; state.saveMessage = 'บันทึกฉบับร่างบนเซิร์ฟเวอร์แล้ว'; updateSaveStatus();
+            if (!await refreshJurySession({ notify: explicit })) return false;
+            await API.put(`/safety-vote/jury/assignments/${Number(state.detail.assignment.id)}/scores`, buildScorePayload(state.detail, state.scores), { preserveSessionOnAuthError: true });
+            const progress = scoreProgress(state.detail, state.scores);
+            state.serverRevision = revision;
+            state.saveState = 'saved'; state.saveMessage = `บันทึกอัตโนมัติบนเซิร์ฟเวอร์แล้ว · ${progress.completed}/${progress.total} ช่อง`; updateSaveStatus();
             if (explicit) showToast('บันทึกฉบับร่างคะแนนแล้ว', 'success');
             return true;
         } catch (error) {
             state.saveState = 'error'; state.saveMessage = 'บันทึกบนเซิร์ฟเวอร์ไม่ได้ · ฉบับร่างในอุปกรณ์ยังอยู่'; updateSaveStatus();
-            if (explicit) { state.errors = [{ key: Object.keys(state.scores)[0] || '0:0', message: error?.message || 'บันทึกฉบับร่างไม่สำเร็จ' }]; renderDetail(); }
+            if (explicit) showToast(error?.message || 'บันทึกฉบับร่างบนเซิร์ฟเวอร์ไม่สำเร็จ แต่ฉบับร่างในแท็บนี้ยังอยู่', 'error');
             return false;
         } finally {
             state.savePromise = null;
+            if (state.saveState === 'saved' && state.draftRevision > state.serverRevision && state.mode === 'edit') {
+                clearTimeout(state.saveTimer);
+                state.saveTimer = setTimeout(() => saveServer(false), 250);
+            }
         }
     })();
     return state.savePromise;
@@ -209,8 +275,9 @@ async function submitScores() {
     const id = Number(state.detail.assignment.id);
     try {
         if (state.savePromise) await state.savePromise;
-        await API.put(`/safety-vote/jury/assignments/${id}/scores`, buildScorePayload(state.detail, state.scores));
-        await API.post(`/safety-vote/jury/assignments/${id}/submit`, {});
+        if (!await refreshJurySession({ notify: true })) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
+        await API.put(`/safety-vote/jury/assignments/${id}/scores`, buildScorePayload(state.detail, state.scores), { preserveSessionOnAuthError: true });
+        await API.post(`/safety-vote/jury/assignments/${id}/submit`, {}, { preserveSessionOnAuthError: true });
         clearLocalDraft(id);
         const current = await API.get(`/safety-vote/jury/assignments/${id}`, { suppressErrorLog: true });
         state.detail = current.data;
@@ -244,6 +311,7 @@ function confirmRecuse() {
 }
 
 async function openAssignment(id) {
+    stopSessionKeepAlive();
     state.loading = true; state.error = null; state.denied = false; state.screen = 'detail'; render();
     try {
         const response = await API.get(`/safety-vote/jury/assignments/${Number(id)}`);
@@ -256,6 +324,7 @@ async function openAssignment(id) {
             else { state.saveState = Object.keys(state.scores).length ? 'saved' : 'idle'; state.saveMessage = Object.keys(state.scores).length ? 'โหลดฉบับร่างจากเซิร์ฟเวอร์แล้ว' : 'ยังไม่มีการแก้ไข'; }
         } else if (assignmentState(state.detail.assignment) === 'submitted') { state.receipt = safeJuryReceipt(state.detail.assignment); state.mode = 'receipt'; }
         state.loading = false; render();
+        if (assignmentState(state.detail.assignment) === 'draft') startSessionKeepAlive();
     } catch (error) {
         state.loading = false; state.denied = error?.code === 'ASSIGNMENT_NOT_FOUND' || error?.code === 'PERMISSION_DENIED' || Number(error?.status) === 403;
         state.moduleDisabled = error?.code === 'SAFETY_VOTE_MODULE_DISABLED'; state.error = state.denied || state.moduleDisabled ? null : error; render();
@@ -294,7 +363,7 @@ function bindDetail() {
     state.page.querySelectorAll('[data-svj-comment]').forEach(input => input.addEventListener('input', scheduleAutosave));
     state.page.querySelectorAll('[data-svj-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svjAction;
-        if (action === 'back-list') { clearTimeout(state.saveTimer); state.screen = 'list'; state.detail = null; state.receipt = null; renderList(); }
+        if (action === 'back-list') { clearTimeout(state.saveTimer); stopSessionKeepAlive(); state.screen = 'list'; state.detail = null; state.receipt = null; renderList(); }
         else if (action === 'save') saveServer(true);
         else if (action === 'review') requestReview();
         else if (action === 'edit') { state.mode = 'edit'; state.submitError = null; renderDetail(); }
@@ -310,6 +379,7 @@ function bindState() {
 }
 
 async function loadQueue(initialAssignmentId = null) {
+    stopSessionKeepAlive();
     state.loading = true; state.error = null; state.denied = false; state.moduleDisabled = false; state.screen = 'list'; render();
     try {
         const response = await API.get('/safety-vote/jury/assignments', { suppressErrorLog: true });
@@ -326,7 +396,8 @@ async function loadQueue(initialAssignmentId = null) {
 export async function loadSafetyVoteJuryWorkspace({ page = document.getElementById('safety-vote-page'), initialAssignmentId = null, onUser = null } = {}) {
     if (!isSafetyVoteUxV1Enabled() || !page) return false;
     clearTimeout(state.saveTimer);
-    Object.assign(state, { page, assignments: [], detail: null, selected: null, query: '', view: 'draft', screen: 'list', mode: 'edit', scores: {}, errors: [], receipt: null, loading: true, error: null, denied: false, moduleDisabled: false, inFlight: false, saveState: 'idle', saveMessage: '', submitError: null, savePromise: null, onUser });
+    stopSessionKeepAlive();
+    Object.assign(state, { page, assignments: [], detail: null, selected: null, query: '', view: 'draft', screen: 'list', mode: 'edit', scores: {}, errors: [], receipt: null, loading: true, error: null, denied: false, moduleDisabled: false, inFlight: false, saveState: 'idle', saveMessage: '', submitError: null, savePromise: null, draftRevision: 0, serverRevision: 0, onUser });
     await loadQueue(initialAssignmentId);
     return true;
 }
