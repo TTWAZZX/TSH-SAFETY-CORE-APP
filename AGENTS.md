@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Jury Assignment UX Production Deployment (PASS, 2026-10-28)
+
+- Immutable commit `71c4b93c0da507b03b1e42ff2681685260421064` was deployed to the PHP shared-hosting Production target from baseline `ba8b4b02764ff6274c8756af076c9c4a80e98943`. The guarded release uploaded 7 runtime files after remote pre-deploy double-download drift checks and created a verified runtime rollback package.
+- Jury assignment cards now use campaign and stage names, plain-language Thai states (`รอให้คะแนน`, `กำลังประเมิน`, `ส่งผลประเมินแล้ว`, `ถอนตัวจากการประเมิน`), score progress and contextual actions instead of internal assignment IDs and raw `Draft` status. Admin participant preview explicitly separates voter eligibility from Jury authority and links directly to the assigned Jury workspace.
+- Node/PHP assignment projections expose stage name, completed score count and expected score count with parity. Mobile Jury navigation and fixed review actions retain 44 px touch targets. Five-viewport authenticated Browser UAT passed with 5 submitted assignments, 1 recusal, 20 submitted scores and 0 forbidden rows.
+- Production HTTPS checks matched all 6 public runtime files; authenticated health is ready at schema `2026-10-25-jury-work-items-atomic-media-r1`, with 7 campaigns and 1 Jury assignment visible to the deployment account. Question Images, Candidate/Submission Gallery, Jury Work Items, Atomic Media and Company-wide Campaign Visibility remain ready.
+- Evidence: `backups/production/safety-vote-jury-assignment-ux-deploy-20261028050448/`; rollback manifest SHA-256 `993f08c394922105c6d9d8e5c01c6c377ce4a0df992acd0284acb690228b81c3`, result SHA-256 `865ae2f5a3a362caeefbe974ea08a4875c5dd5d9c5509ce75f0c5aad2b3e081c`. No schema/business-data change, notification delivery or external-delivery configuration change occurred. Decision: `PASS_SAFETY_VOTE_JURY_ASSIGNMENT_UX_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Configurable Official Top N Production Deployment (PASS, 2026-10-28)
 
 - Immutable commit `ba8b4b02764ff6274c8756af076c9c4a80e98943` was deployed to the PHP shared-hosting Production target from baseline `a188e35c6aaf7f3f73591b370539a63092d284f0`. The guarded release uploaded 10 allowlisted PHP/frontend runtime files after remote double-download drift checks; deployed double-download SHA-256 matched `10/10` and public HTTPS SHA-256 matched all six frontend files.
