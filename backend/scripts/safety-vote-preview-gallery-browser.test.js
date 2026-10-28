@@ -36,13 +36,14 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || (fs.existsSync(
                     navWidth: nav.width,
                     navHeight: nav.height,
                     dialogInsideViewport: dialog.left >= 0 && dialog.right <= innerWidth && dialog.top >= 0 && dialog.bottom <= innerHeight,
+                    actionButtonSizes: actionButtons.map(button => ({ width: button.width, height: button.height })),
                     actionButtonsMeetTarget: actionButtons.every(button => button.width >= 44 && button.height >= 44)
                 };
             });
             assert.strictEqual(layout.noHorizontalOverflow, true);
             assert.strictEqual(layout.dialogInsideViewport, true);
             assert.ok(layout.navWidth >= 44 && layout.navHeight >= 44, 'gallery navigation targets must be at least 44px');
-            assert.strictEqual(layout.actionButtonsMeetTarget, true);
+            assert.strictEqual(layout.actionButtonsMeetTarget, true, `${viewport.width}x${viewport.height}: gallery action targets must be at least 44px (${JSON.stringify(layout)})`);
             await page.keyboard.press('ArrowRight');
             assert.strictEqual(await page.locator('#sv-gallery-position').textContent(), 'รูปที่ 3 จาก 3');
             assert.strictEqual(await page.locator('[data-sv-gallery-next]').isDisabled(), true);

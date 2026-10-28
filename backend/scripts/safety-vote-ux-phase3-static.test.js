@@ -51,6 +51,22 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(css.includes('@media (max-width: 430px)') && css.includes('@media (max-width: 767px)') && css.includes('@media (max-width: 1023px)'), 'required responsive breakpoints are incomplete');
     check(css.includes('@media (prefers-reduced-motion: reduce)'), 'reduced-motion handling is missing');
     check(css.includes('overflow-x: clip'), 'horizontal overflow containment is missing');
+    check(css.includes('--svp-mobile-shell-gutter') && css.includes('--svp-mobile-action-bar-height'), 'participant mobile density tokens are missing');
+    check(css.includes('.svp-shell[data-sv-participation] .sv-role-nav__item'), 'participant mobile role navigation is not scoped');
+    check(css.includes('.svp-shell[data-sv-participation] .sv-journey-steps button'), 'participant mobile journey density is not scoped');
+    check(css.includes('flex-direction: row') && css.includes('.svp-shell[data-sv-participation] .svp-action-bar'), 'participant mobile action bar must remain a single row');
+    check(html.includes('20261028-safety-vote-density-r5'), 'participant mobile density stylesheet cache key is missing');
+    check(css.includes('mobile density phase 3: choices, media and review flow'), 'participant mobile choice/review phase marker is missing');
+    check(css.includes('.svp-option:has(input:checked)::after'), 'selected choice state must remain visible');
+    check(css.includes('.svp-option > .sv-work-gallery--candidate'), 'candidate media strip is not scoped to choice cards');
+    check(css.includes('.svp-submitted-answer--with-image'), 'submitted media review layout is missing');
+    check(css.includes('mobile density phase 4: submission, nomination and jury'), 'participant workflow mobile phase marker is missing');
+    check(css.includes('.sv-work-gallery-editor__grid') && css.includes('.sv-people-picker__results'), 'submission/nomination mobile controls are missing');
+    check(css.includes('.svj-shell[data-sv-jury-workspace] .svj-action-bar'), 'jury mobile action bar is not scoped');
+    check(css.includes('mobile density phase 5: results, gallery, receipt and states'), 'participant results/states mobile phase marker is missing');
+    check(css.includes('.svp-official-results__rank') && css.includes('.svp-gallery__stage'), 'mobile results/gallery density is missing');
+    check(css.includes('.svp-receipt dl') && css.includes(':is(.svp-empty, .svp-state)'), 'mobile receipt/state density is missing');
+    check(css.includes('.svr-shell .svr-action-bar'), 'admin results mobile action bar is not scoped');
 
     const questions = [{ id: 7, questionCode: 'Q1', questionType: 'single_choice', title: 'เลือกแนวคิด', isRequired: true, minSelections: 1, maxSelections: 1, options: [{ id: 70, optionCode: 'A', label: 'แนวคิด ก' }, { id: 71, optionCode: 'B', label: 'แนวคิด ข' }] }];
     check(model.validateParticipation(questions, {}).length === 1, 'required unanswered question must fail');

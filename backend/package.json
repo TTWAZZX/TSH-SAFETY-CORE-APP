@@ -4,6 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "test:session-expiry-preflight": "node scripts/session-expiry-preflight.test.js",
+    "test:safety-vote-mobile-catalogue-detail-browser": "node scripts/safety-vote-mobile-catalogue-detail-browser.test.js",
+    "test:safety-vote-mobile-choice-review-browser": "node scripts/safety-vote-mobile-choice-review-browser.test.js",
+    "test:safety-vote-mobile-density-browser": "node scripts/safety-vote-mobile-density-browser.test.js",
+    "test:safety-vote-mobile-workflows-browser": "node scripts/safety-vote-mobile-workflows-browser.test.js",
+    "test:safety-vote-mobile-results-states-browser": "node scripts/safety-vote-mobile-results-states-browser.test.js",
+    "uat:safety-vote-mobile-all-workflows": "node scripts/safety-vote-mobile-all-workflows-uat.js",
     "inspect:safety-vote-phase1-schema": "node scripts/safety-vote-phase1-schema-inspect.js",
     "test:safety-vote-phase1-parity": "node scripts/safety-vote-phase1-parity.test.js",
     "test:safety-vote-phase1-migration": "node scripts/safety-vote-phase1-migration.test.js",

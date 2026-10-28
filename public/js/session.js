@@ -42,6 +42,25 @@ function getUser() {
     return user ? JSON.parse(user) : null;
 }
 
+function jwtPayload(token) {
+    try {
+        const parts = String(token || '').split('.');
+        if (parts.length !== 3) return null;
+        const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+        const payload = JSON.parse(atob(padded));
+        return payload && typeof payload === 'object' ? payload : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function isExpiredJwt(token, nowMs = Date.now()) {
+    const payload = jwtPayload(token);
+    const expiresAt = Number(payload?.exp);
+    return Number.isFinite(expiresAt) && expiresAt * 1000 <= nowMs + 5000;
+}
+
 /**
  * =========================
  * Auth Actions
@@ -92,6 +111,10 @@ async function refreshSession(options = {}) {
     const signal = options?.signal;
     const token = getToken();
     if (!token) return null;
+    if (isExpiredJwt(token)) {
+        clearSession();
+        return null;
+    }
 
     try {
         const res = await fetch(`${API_BASE}/session/verify`, {
@@ -124,8 +147,8 @@ async function refreshSession(options = {}) {
         return data;
 
     } catch (err) {
-        console.warn('Session verify failed:', err.message);
         const aborted = err?.name === 'AbortError';
+        if (!err?.invalidSession && !aborted) console.warn('Session verify failed:', err.message);
         if (err?.invalidSession || (!preserveOnFailure && !aborted)) clearSession();
         if (throwOnFailure && !err?.invalidSession) throw err;
         return null;
