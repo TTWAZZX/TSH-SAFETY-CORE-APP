@@ -127,7 +127,7 @@ function prepare(commit, tree) {
     assert(wizard.includes('data-svw-official-topn-preset') && wizard.includes('กำหนดจำนวนเอง'), 'Official Top N custom UI missing');
     assert(model.includes('OFFICIAL_RESULT_TOP_N_MAX = 100') && model.includes('officialResultTopNValid'), 'Official Top N Browser validation missing');
     assert(phpCore.includes('SAFETY_VOTE_OFFICIAL_RESULT_TOP_N_MAX') && phpCore.includes('OfficialResultTopN,ResultReleasePolicy'), 'Official Top N PHP lifecycle integration missing');
-    assert(phpPhase1.includes('SAFETY_VOTE_OFFICIAL_RESULT_TOP_N_MAX=100'), 'Official Top N PHP validation missing');
+    assert(/SAFETY_VOTE_OFFICIAL_RESULT_TOP_N_MAX\s*=\s*100/.test(phpPhase1), 'Official Top N PHP validation missing');
 
     const manifest = {
         contract: '2026-10-28-safety-vote-official-topn-r1',
@@ -238,7 +238,12 @@ main().catch(error => {
     let rollback = { attempted: false };
     try { rollback = rollbackRuntime(); }
     catch (rollbackError) { rollback = { attempted: true, pass: false, error: rollbackError.message }; }
-    writeJson('failure.json', { generatedAt: new Date().toISOString(), decision: rollback.attempted && rollback.pass ? 'HOLD_DEPLOYMENT_FAILED_RUNTIME_ROLLED_BACK' : 'HOLD_DEPLOYMENT_ROLLBACK_INCOMPLETE', error: error.message, rollback });
+    const decision = !mutationStarted
+        ? 'HOLD_PRE_UPLOAD_VALIDATION_FAILED_NO_PRODUCTION_MUTATION'
+        : rollback.attempted && rollback.pass
+            ? 'HOLD_DEPLOYMENT_FAILED_RUNTIME_ROLLED_BACK'
+            : 'HOLD_DEPLOYMENT_ROLLBACK_INCOMPLETE';
+    writeJson('failure.json', { generatedAt: new Date().toISOString(), decision, error: error.message, rollback });
     process.stderr.write(`Safety Vote Official Top N deployment failed: ${error.message}\n`);
     process.exitCode = 1;
 });
