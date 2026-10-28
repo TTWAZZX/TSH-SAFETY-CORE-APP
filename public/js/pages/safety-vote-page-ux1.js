@@ -4,15 +4,15 @@ import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261027-safety-vote-jury-work-media-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
-import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-scoring-r1';
+import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-scoring-r2';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-duplicate-media-r3';
 import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
 import {
     CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignMatchesView, campaignType, filterCampaigns,
-    isBallotCampaign, isChoiceQuestion, isQuestionVisible, participationState, privacyMode,
-    privacyNotice, safeReceipt, validateParticipation, valueOf
-} from './safety-vote-participation-model.mjs?v=20261025-safety-vote-final-phase7-r1';
+    isBallotCampaign, isChoiceQuestion, isQuestionVisible, participationProgressItems, participationState, privacyMode,
+    privacyNotice, safeReceipt, validateParticipation, validateWorkflowParticipation, valueOf, workflowProgressItems
+} from './safety-vote-participation-model.mjs?v=20261028-safety-vote-jury-scoring-r2';
 
 const questionControlBase=questionControl;
 questionControl=function questionControlWithImage(question){
@@ -277,6 +277,9 @@ async function hydratePromotionSlide(index) {
 }
 
 async function hydratePromotionImages() {
+    if (state.mode === 'edit' && !submitted && detail.canSubmit && !state.liveView) {
+        state.page.querySelector('[data-svp-form]')?.insertAdjacentHTML('afterbegin', participantProgressNavigatorMarkup());
+    }
     preparePromotionImages();
     await hydrateSafetyVoteImages(state.page);
     state.page?.querySelectorAll('[data-svp-promotion-file]').forEach(image => {
@@ -368,12 +371,42 @@ function publicWorkGalleryMarkup() {
 
 function submissionGalleryEditor() {
     const rows = state.submissionGallery || [];
-    return `<section class="sv-work-gallery-editor" aria-labelledby="svp-submission-gallery-title"><div><h3 id="svp-submission-gallery-title">รูปผลงาน</h3><p>เพิ่มได้สูงสุด 12 รูป · JPG, PNG หรือ WebP รูปละไม่เกิน 10 MB</p></div><label class="sv-button sv-button--secondary"><span>เพิ่มรูปผลงาน</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple data-svp-submission-gallery ${rows.length>=12?'disabled':''}></label>${rows.length?`<div class="sv-work-gallery-editor__grid">${rows.map((item,index)=>`<article><img src="${escHtml(item.previewUrl||'')}" alt=""><label class="svp-field"><span>คำอธิบายภาพ</span><input maxlength="300" value="${escHtml(item.altText||'')}" data-svp-gallery-alt="${index}" required></label><label class="svp-field"><span>คำบรรยาย (ถ้ามี)</span><input maxlength="500" value="${escHtml(item.caption||'')}" data-svp-gallery-caption="${index}"></label><button type="button" class="sv-button sv-button--secondary" data-svp-gallery-remove="${index}">ลบรูป</button></article>`).join('')}</div>`:'<p class="svp-note">ยังไม่มีรูปผลงาน</p>'}</section>`;
+    return `<section class="sv-work-gallery-editor" aria-labelledby="svp-submission-gallery-title"><div><h3 id="svp-submission-gallery-title">รูปผลงาน</h3><p>เพิ่มได้สูงสุด 12 รูป · JPG, PNG หรือ WebP รูปละไม่เกิน 10 MB</p></div><label class="sv-button sv-button--secondary"><span>เพิ่มรูปผลงาน</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple data-svp-submission-gallery ${rows.length>=12?'disabled':''}></label>${rows.length?`<div class="sv-work-gallery-editor__grid">${rows.map((item,index)=>`<article id="svp-work-gallery-${index}"><img src="${escHtml(item.previewUrl||'')}" alt=""><label class="svp-field"><span>คำอธิบายภาพ</span><input maxlength="300" value="${escHtml(item.altText||'')}" data-svp-gallery-alt="${index}" required></label><label class="svp-field"><span>คำบรรยาย (ถ้ามี)</span><input maxlength="500" value="${escHtml(item.caption||'')}" data-svp-gallery-caption="${index}"></label><button type="button" class="sv-button sv-button--secondary" data-svp-gallery-remove="${index}">ลบรูป</button></article>`).join('')}</div>`:'<p class="svp-note">ยังไม่มีรูปผลงาน</p>'}</section>`;
+}
+
+function validationSummaryMarkup(heading = 'กรุณาตรวจสอบข้อมูล') {
+    if (!state.errors.length) return '';
+    return `<section class="svp-validation" role="alert" tabindex="-1"><h2>${escHtml(heading)} · ${state.errors.length} จุด</h2><p>กดแต่ละรายการเพื่อไปยังจุดที่ต้องแก้ไข</p><ul>${state.errors.map(error => `<li><a href="#${escHtml(error.targetId || `svp-question-${Number(error.questionId)}`)}" data-svp-error-target="${escHtml(error.targetId || `svp-question-${Number(error.questionId)}`)}"><strong>${escHtml(error.sectionLabel || 'รายการ')} ${Number(error.itemIndex || 1)}/${Number(error.itemTotal || 1)}${error.itemCode ? ` · ${escHtml(error.itemCode)}` : ''}</strong><span>${escHtml(error.itemTitle || 'ข้อมูลที่ต้องตรวจสอบ')}</span><small>${escHtml(error.message)}</small></a></li>`).join('')}</ul></section>`;
+}
+
+function participantProgressItems() {
+    if (!state.detail?.campaign) return [];
+    return isBallotCampaign(state.detail.campaign)
+        ? participationProgressItems(state.detail.questions || [], state.answers)
+        : workflowProgressItems(campaignType(state.detail.campaign), state.answers, state.submissionGallery);
+}
+
+function participantProgressNavigatorMarkup() {
+    const items = participantProgressItems();
+    if (!items.length) return '';
+    const complete = items.filter(item => item.status === 'complete').length;
+    const incomplete = items.filter(item => item.status === 'incomplete').length;
+    return `<nav class="sv-progress-navigator svp-progress-navigator" data-svp-progress-navigator aria-label="ความคืบหน้ารายข้อ"><div class="sv-progress-navigator__heading"><div><strong>ความคืบหน้ารายข้อ</strong><span>ครบ ${complete}/${items.length}${incomplete ? ` · ขาด ${incomplete}` : ' · พร้อมตรวจคำตอบ'}</span></div><span class="sv-progress-navigator__summary ${incomplete ? 'is-incomplete' : 'is-complete'}">${incomplete ? `ต้องตรวจ ${incomplete} ข้อ` : 'ครบแล้ว'}</span></div><div class="sv-progress-navigator__items">${items.map(item => `<button type="button" class="sv-progress-item is-${item.status}" data-svp-progress-target="${escHtml(item.targetId)}" aria-label="ข้อ ${item.index} จาก ${item.total} ${escHtml(item.label)}: ${escHtml(item.message)}"><span>${item.index}</span><strong>${escHtml(item.shortLabel || item.label)}</strong><small>${item.status === 'complete' ? 'ครบ' : item.status === 'optional' ? 'ไม่บังคับ' : 'ยังไม่ครบ'}</small></button>`).join('')}</div></nav>`;
+}
+
+function refreshParticipantProgressNavigator() {
+    const current = state.page?.querySelector('[data-svp-progress-navigator]');
+    const markup = participantProgressNavigatorMarkup();
+    if (!markup) { current?.remove(); return; }
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = markup;
+    if (current) current.replaceWith(wrapper.firstElementChild);
+    else state.page?.querySelector('[data-svp-form]')?.insertAdjacentElement('afterbegin', wrapper.firstElementChild);
 }
 
 function ballotForm(detail) {
     const questions = detail.questions || [];
-    return `<form class="svp-form" data-svp-form novalidate>${state.errors.length ? `<section class="svp-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบคำตอบ</h2><ul>${state.errors.map(error => `<li><a href="#svp-question-${Number(error.questionId)}">${escHtml(error.message)}</a></li>`).join('')}</ul></section>` : ''}${questions.map((question, index) => `<fieldset id="svp-question-${Number(question.id)}" class="svp-question ${isQuestionVisible(question, questions, state.answers) ? '' : 'is-hidden'}" data-svp-question="${Number(question.id)}"><legend>${index + 1}. ${escHtml(question.title)}</legend>${question.helpText ? `<p>${escHtml(question.helpText)}</p>` : ''}<small>${question.isRequired ? 'จำเป็น' : 'ไม่บังคับ'}${isChoiceQuestion(question) ? ` · เลือก ${Number(question.minSelections)}–${Number(question.maxSelections)} รายการ` : ''}</small>${questionControl(question)}</fieldset>`).join('')}</form>`;
+    return `<form class="svp-form" data-svp-form novalidate>${validationSummaryMarkup('กรุณาตรวจสอบคำตอบ')}${questions.map((question, index) => `<fieldset id="svp-question-${Number(question.id)}" class="svp-question ${isQuestionVisible(question, questions, state.answers) ? '' : 'is-hidden'}" data-svp-question="${Number(question.id)}"><legend>${index + 1}. ${escHtml(question.title)}</legend>${question.helpText ? `<p>${escHtml(question.helpText)}</p>` : ''}<small>${question.isRequired ? 'จำเป็น' : 'ไม่บังคับ'}${isChoiceQuestion(question) ? ` · เลือก ${Number(question.minSelections)}–${Number(question.maxSelections)} รายการ` : ''}</small>${questionControl(question)}</fieldset>`).join('')}</form>`;
 }
 
 function workflowRequirementsMarkup() {
@@ -383,10 +416,10 @@ function workflowRequirementsMarkup() {
 }
 
 function workflowForm(campaign) {
-    const validation = state.errors.length ? `<section class="svp-validation" role="alert" tabindex="-1"><h2>กรุณาตรวจสอบข้อมูล</h2><ul>${state.errors.map(error => `<li><a href="#svp-question-${Number(error.questionId)}">${escHtml(error.message)}</a></li>`).join('')}</ul></section>` : '';
+    const validation = validationSummaryMarkup();
     const requirements = workflowRequirementsMarkup();
-    if (campaignType(campaign) === 'submission_challenge') return `<form class="svp-form" data-svp-form novalidate>${validation}${requirements}<section id="svp-question-0" class="svp-question" data-svp-question="0"><h2>ข้อมูลผลงาน</h2><label class="svp-field"><span>ชื่อผลงาน</span><input data-svp-workflow="title" value="${escHtml(state.answers.title || '')}" maxlength="300"></label><label class="svp-field"><span>รายละเอียด</span><textarea data-svp-workflow="description" rows="6" maxlength="10000">${escHtml(state.answers.description || '')}</textarea></label>${submissionGalleryEditor()}${state.submissions.length ? `<p class="svp-note">คุณมีผลงานในกิจกรรมนี้ ${state.submissions.length} รายการ ระบบจะไม่สร้างรายการซ้ำระหว่างที่กำลังส่ง</p>` : ''}</section></form>`;
-    return `<form class="svp-form" data-svp-form novalidate>${validation}${requirements}<section id="svp-question-0" class="svp-question" data-svp-question="0"><h2>ข้อมูลการเสนอชื่อ</h2>${safetyVotePeoplePickerMarkup({pickerId:'nominee',key:'nomineeEmployeeId',label:'ผู้ถูกเสนอชื่อ',value:state.answers.nomineeEmployeeId||'',selectedLabel:state.peopleLabels.nomineeEmployeeId||'',help:'ค้นหาจากชื่อ รหัสพนักงาน แผนก หน่วยงาน หรือตำแหน่ง'})}<label class="svp-field"><span>เหตุผลประกอบการเสนอชื่อ</span><textarea data-svp-workflow="statement" rows="6" maxlength="5000">${escHtml(state.answers.statement || '')}</textarea></label></section></form>`;
+    if (campaignType(campaign) === 'submission_challenge') return `<form class="svp-form" data-svp-form novalidate>${validation}${requirements}<section id="svp-question-0" class="svp-question" data-svp-question="0"><h2>ข้อมูลผลงาน</h2><label id="svp-workflow-title" class="svp-field"><span>ชื่อผลงาน</span><input data-svp-workflow="title" value="${escHtml(state.answers.title || '')}" maxlength="300"></label><label id="svp-workflow-description" class="svp-field"><span>รายละเอียด</span><textarea data-svp-workflow="description" rows="6" maxlength="10000">${escHtml(state.answers.description || '')}</textarea></label>${submissionGalleryEditor()}${state.submissions.length ? `<p class="svp-note">คุณมีผลงานในกิจกรรมนี้ ${state.submissions.length} รายการ ระบบจะไม่สร้างรายการซ้ำระหว่างที่กำลังส่ง</p>` : ''}</section></form>`;
+    return `<form class="svp-form" data-svp-form novalidate>${validation}${requirements}<section id="svp-question-0" class="svp-question" data-svp-question="0"><h2>ข้อมูลการเสนอชื่อ</h2><div id="svp-workflow-nominee">${safetyVotePeoplePickerMarkup({pickerId:'nominee',key:'nomineeEmployeeId',label:'ผู้ถูกเสนอชื่อ',value:state.answers.nomineeEmployeeId||'',selectedLabel:state.peopleLabels.nomineeEmployeeId||'',help:'ค้นหาจากชื่อ รหัสพนักงาน แผนก หน่วยงาน หรือตำแหน่ง'})}</div><label id="svp-workflow-statement" class="svp-field"><span>เหตุผลประกอบการเสนอชื่อ</span><textarea data-svp-workflow="statement" rows="6" maxlength="5000">${escHtml(state.answers.statement || '')}</textarea></label></section></form>`;
 }
 
 function collectAnswers() {
@@ -506,16 +539,17 @@ async function hydratePrivateImages() {
 }
 
 function validateWorkflow() {
-    const type = campaignType(state.detail.campaign), errors = [];
-    if (type === 'submission_challenge') {
-        if (!String(state.answers.title || '').trim()) errors.push({ questionId: 0, message: 'กรุณาระบุชื่อผลงาน' });
-        if (!String(state.answers.description || '').trim()) errors.push({ questionId: 0, message: 'กรุณาระบุรายละเอียดผลงาน' });
-        if (state.submissionGallery.some(item => !String(item.altText || '').trim())) errors.push({ questionId: 0, message: 'กรุณาระบุคำอธิบายสำหรับรูปผลงานทุกภาพ' });
-    } else {
-        if (!String(state.answers.nomineeEmployeeId || '').trim()) errors.push({ questionId: 0, message: 'กรุณาระบุรหัสพนักงานของผู้ถูกเสนอชื่อ' });
-        if (!String(state.answers.statement || '').trim()) errors.push({ questionId: 0, message: 'กรุณาระบุเหตุผลประกอบการเสนอชื่อ' });
-    }
-    return errors;
+    return validateWorkflowParticipation(campaignType(state.detail.campaign), state.answers, state.submissionGallery);
+}
+
+function focusParticipationValidationTarget(targetId) {
+    const target = state.page?.querySelector(`#${CSS.escape(String(targetId || ''))}`);
+    if (!target) return;
+    state.page.querySelectorAll('.is-validation-target').forEach(node => node.classList.remove('is-validation-target'));
+    target.classList.add('is-validation-target');
+    target.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    target.querySelector('input:not([type="hidden"]), select, textarea, button')?.focus({ preventScroll: true });
+    setTimeout(() => target.classList.remove('is-validation-target'), 2400);
 }
 
 function requestReview() {
@@ -581,8 +615,18 @@ function bindList() {
 }
 
 function bindDetail() {
+    state.page.querySelector('[data-svp-form]')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-svp-progress-target]');
+        if (!button) return;
+        event.preventDefault();
+        focusParticipationValidationTarget(button.dataset.svpProgressTarget);
+    });
+    state.page.querySelectorAll('[data-svp-error-target]').forEach(link => link.addEventListener('click', event => {
+        event.preventDefault();
+        focusParticipationValidationTarget(link.dataset.svpErrorTarget);
+    }));
     state.peoplePickerCleanup?.();
-    state.peoplePickerCleanup=bindSafetyVotePeoplePickers(state.page,{onChange:detail=>{state.answers[detail.key.startsWith('question:')?detail.key.split(':')[1]:detail.key]=detail.employeeId;if(detail.person)state.peopleLabels[detail.key]=detail.person.employeeName||detail.employeeId;else delete state.peopleLabels[detail.key];collectAnswers();state.page.querySelectorAll('[data-svp-question]').forEach(fieldset=>{const question=state.detail.questions.find(item=>Number(item.id)===Number(fieldset.dataset.svpQuestion));fieldset.classList.toggle('is-hidden',!isQuestionVisible(question,state.detail.questions,state.answers));});}});
+    state.peoplePickerCleanup=bindSafetyVotePeoplePickers(state.page,{onChange:detail=>{state.answers[detail.key.startsWith('question:')?detail.key.split(':')[1]:detail.key]=detail.employeeId;if(detail.person)state.peopleLabels[detail.key]=detail.person.employeeName||detail.employeeId;else delete state.peopleLabels[detail.key];collectAnswers();state.page.querySelectorAll('[data-svp-question]').forEach(fieldset=>{const question=state.detail.questions.find(item=>Number(item.id)===Number(fieldset.dataset.svpQuestion));fieldset.classList.toggle('is-hidden',!isQuestionVisible(question,state.detail.questions,state.answers));});refreshParticipantProgressNavigator();}});
     bindRoleNavigation();
     state.page.querySelectorAll('[data-svp-jury]').forEach(button => button.addEventListener('click', () => loadSafetyVoteJuryWorkspace({ page: state.page, initialAssignmentId: Number(button.dataset.svpJury), onUser: load })));
     state.page.querySelectorAll('[data-svp-action]').forEach(button => button.addEventListener('click', () => {
@@ -597,14 +641,18 @@ function bindDetail() {
         else if (action === 'live-refresh') loadLiveResults(true);
         else if (action === 'live-toggle') { state.livePaused = !state.livePaused; renderDetail(); if (!state.livePaused) loadLiveResults(true); else scheduleLivePolling(); }
     }));
-    state.page.querySelectorAll('[data-svp-answer],[data-svp-rank],[data-svp-allocation],[data-svp-matrix],[data-svp-workflow]').forEach(input => input.addEventListener('change', () => { collectAnswers(); state.page.querySelectorAll('[data-svp-question]').forEach(fieldset => { const question = state.detail.questions.find(item => Number(item.id) === Number(fieldset.dataset.svpQuestion)); fieldset.classList.toggle('is-hidden', !isQuestionVisible(question, state.detail.questions, state.answers)); }); }));
+    const syncParticipantProgress = () => { collectAnswers(); state.page.querySelectorAll('[data-svp-question]').forEach(fieldset => { const question = state.detail.questions.find(item => Number(item.id) === Number(fieldset.dataset.svpQuestion)); fieldset.classList.toggle('is-hidden', !isQuestionVisible(question, state.detail.questions, state.answers)); }); refreshParticipantProgressNavigator(); };
+    state.page.querySelectorAll('[data-svp-answer],[data-svp-rank],[data-svp-allocation],[data-svp-matrix],[data-svp-workflow]').forEach(input => {
+        input.addEventListener('change', syncParticipantProgress);
+        if (input.matches('input:not([type="radio"]):not([type="checkbox"]), textarea')) input.addEventListener('input', syncParticipantProgress);
+    });
     state.page.querySelector('[data-svp-submission-gallery]')?.addEventListener('change',event=>{for(const file of [...(event.target.files||[])].slice(0,Math.max(0,12-state.submissionGallery.length))){if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024){showToast(`${file.name}: รองรับเฉพาะ JPG, PNG หรือ WebP ไม่เกิน 10 MB`,'error');continue;}const previewUrl=URL.createObjectURL(file);state.objectUrls.add(previewUrl);state.submissionGallery.push({file,previewUrl,altText:file.name.replace(/\.[^.]+$/,''),caption:''});}renderDetail();});
-    state.page.querySelectorAll('[data-svp-gallery-alt]').forEach(input=>input.addEventListener('input',()=>{state.submissionGallery[Number(input.dataset.svpGalleryAlt)].altText=input.value;}));
+    state.page.querySelectorAll('[data-svp-gallery-alt]').forEach(input=>input.addEventListener('input',()=>{state.submissionGallery[Number(input.dataset.svpGalleryAlt)].altText=input.value;refreshParticipantProgressNavigator();}));
     state.page.querySelectorAll('[data-svp-gallery-caption]').forEach(input=>input.addEventListener('input',()=>{state.submissionGallery[Number(input.dataset.svpGalleryCaption)].caption=input.value;}));
     state.page.querySelectorAll('[data-svp-gallery-remove]').forEach(button=>button.addEventListener('click',async()=>{const index=Number(button.dataset.svpGalleryRemove),item=state.submissionGallery[index];if(item?.id)await API.delete(`/safety-vote/gallery/items/${item.id}`).catch(error=>showToast(error?.message||'ลบรูปไม่สำเร็จ','error'));if(item?.previewUrl){URL.revokeObjectURL(item.previewUrl);state.objectUrls.delete(item.previewUrl);}state.submissionGallery.splice(index,1);renderDetail();}));
     state.page.querySelectorAll('[data-svp-answer-file]').forEach(input => input.addEventListener('change', async () => {
         const file = input.files?.[0]; if (!file || state.inFlight) return; input.disabled = true;
-        try { const form = new FormData(); form.append('file', file); const response = await API.upload(`/safety-vote/campaigns/${Number(state.detail.campaign.id)}/questions/${Number(input.dataset.svpAnswerFile)}/files`, form); input.dataset.fileId = String(response.data.id); state.answers[input.dataset.svpAnswerFile] = Number(response.data.id); showToast('แนบไฟล์คำตอบแล้ว', 'success'); }
+        try { const form = new FormData(); form.append('file', file); const response = await API.upload(`/safety-vote/campaigns/${Number(state.detail.campaign.id)}/questions/${Number(input.dataset.svpAnswerFile)}/files`, form); input.dataset.fileId = String(response.data.id); state.answers[input.dataset.svpAnswerFile] = Number(response.data.id); refreshParticipantProgressNavigator(); showToast('แนบไฟล์คำตอบแล้ว', 'success'); }
         catch (_) { state.errors = [{ questionId: Number(input.dataset.svpAnswerFile), message: 'แนบไฟล์ไม่สำเร็จ กรุณาตรวจสอบชนิดและขนาดไฟล์' }]; renderDetail(); }
         finally { input.disabled = false; }
     }));

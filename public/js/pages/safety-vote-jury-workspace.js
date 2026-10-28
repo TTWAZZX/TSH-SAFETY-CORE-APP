@@ -4,7 +4,7 @@ import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, openSafetyVoteRea
 import {
     JURY_VIEW_LABELS, assignmentProgress, assignmentState, buildScorePayload, filterAssignments,
     normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateDraftScoreSheet, validateScoreSheet, valueOf
-} from './safety-vote-jury-model.mjs?v=20261028-safety-vote-jury-scoring-r1';
+} from './safety-vote-jury-model.mjs?v=20261028-safety-vote-jury-scoring-r2';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261024-safety-vote-gallery-r1';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261024-safety-vote-gallery-r1';
@@ -15,7 +15,7 @@ const state = {
     scores: {}, errors: [], receipt: null, loading: true, error: null, denied: false, moduleDisabled: false,
     inFlight: false, saveState: 'idle', saveMessage: '', submitError: null, saveTimer: null, savePromise: null,
     sessionTimer: null, sessionVisibilityHandler: null, sessionRefreshPromise: null,
-    draftRevision: 0, serverRevision: 0, onUser: null
+    draftRevision: 0, serverRevision: 0, progressCandidateId: 0, onUser: null
 };
 
 const SESSION_REFRESH_MS = 4 * 60 * 1000;
@@ -135,7 +135,17 @@ function scoreControl(candidate, criterion) {
 function validationMarkup() {
     if (!state.errors.length) return '';
     const visible = state.errors.slice(0, 8), remaining = state.errors.length - visible.length;
-    return `<section class="svp-validation svj-validation" role="alert" tabindex="-1"><h2>ยังส่งผลไม่ได้ · เหลือ ${state.errors.length} ช่องที่ต้องตรวจสอบ</h2><p>ฉบับร่างบันทึกบางส่วนได้ตามปกติ รายการด้านล่างใช้ตรวจสอบก่อนส่งผลเท่านั้น</p><ul>${visible.map(error => `<li><a href="#svj-score-${error.key.replace(':', '-')}">${escHtml(error.message)}</a></li>`).join('')}</ul>${remaining > 0 ? `<p><strong>และอีก ${remaining} ช่อง</strong> — ดูความคืบหน้าของแต่ละผลงานเพื่อกรอกต่อ</p>` : ''}</section>`;
+    return `<section class="svp-validation svj-validation" role="alert" tabindex="-1"><h2>ยังส่งผลไม่ได้ · เหลือ ${state.errors.length} ช่องที่ต้องตรวจสอบ</h2><p>กดแต่ละรายการเพื่อไปยังช่องที่ต้องแก้ไข ฉบับร่างยังบันทึกบางส่วนได้ตามปกติ</p><ul>${visible.map(error => `<li><a href="#svj-score-${error.key.replace(':', '-')}" data-svj-error-key="${escHtml(error.key)}"><strong>ผลงาน ${Number(error.candidateIndex)}/${Number(error.candidateTotal)} · ${escHtml(error.candidateCode)}</strong><span>เกณฑ์ข้อ ${Number(error.criterionIndex)}/${Number(error.criterionTotal)} · ${escHtml(error.criterionTitle)}</span><small>${escHtml(error.message)}</small></a></li>`).join('')}</ul>${remaining > 0 ? `<p><strong>และอีก ${remaining} ช่อง</strong> — ดูความคืบหน้าของแต่ละผลงานเพื่อกรอกต่อ</p>` : ''}</section>`;
+}
+
+function focusValidationTarget(key) {
+    const target = state.page?.querySelector(`#svj-score-${String(key).replace(':', '-')}`);
+    if (!target) return;
+    state.page.querySelectorAll('.svj-score-row.is-validation-target').forEach(row => row.classList.remove('is-validation-target'));
+    target.classList.add('is-validation-target');
+    target.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    target.querySelector('[data-svj-score]')?.focus({ preventScroll: true });
+    setTimeout(() => target.classList.remove('is-validation-target'), 2400);
 }
 
 function matrixSummaryMarkup() {
@@ -144,6 +154,35 @@ function matrixSummaryMarkup() {
     const criteria = Number(matrix.criteriaCount ?? state.detail?.criteria?.length ?? 0);
     const cells = Number(matrix.cellCount ?? works * criteria);
     return `<section class="svj-matrix-contract" data-sv-jury-matrix="${escHtml(matrix.contractVersion || '2026-10-25-jury-work-criteria-matrix-r1')}" aria-label="สรุปตารางผลงานและเกณฑ์"><div><p class="sv-eyebrow">WORK × CRITERIA MATRIX</p><h2>ให้คะแนน ${works} ผลงาน ตาม ${criteria} เกณฑ์</h2><p>ต้องกรอกครบ ${cells} ช่องก่อนส่ง คะแนนที่ยืนยันแล้วจะถูกใช้เป็นข้อมูลต้นทางของ Frozen Result โดยตรง</p></div><dl><div><dt>ผลงาน</dt><dd>${works}</dd></div><div><dt>เกณฑ์</dt><dd>${criteria}</dd></div><div><dt>น้ำหนักรวม</dt><dd>${Number(matrix.weightTotal || 0)}%</dd></div></dl></section>`;
+}
+
+function isCompleteScore(candidate, criterion) {
+    const raw = state.scores[scoreKey(candidate.id, criterion.id)]?.score;
+    const score = Number(raw), min = Number(criterionValue(criterion, 'MinScore')), max = Number(criterionValue(criterion, 'MaxScore'));
+    return raw !== '' && raw !== undefined && raw !== null && Number.isFinite(score) && score >= min && score <= max;
+}
+
+function activeProgressCandidate() {
+    const candidates = state.detail?.candidates || [], criteria = state.detail?.criteria || [];
+    const selected = candidates.find(candidate => Number(candidate.id) === Number(state.progressCandidateId));
+    if (selected) return selected;
+    return candidates.find(candidate => criteria.some(criterion => !isCompleteScore(candidate, criterion))) || candidates[0] || null;
+}
+
+function juryProgressNavigatorMarkup() {
+    const candidates = state.detail?.candidates || [], criteria = state.detail?.criteria || [], active = activeProgressCandidate();
+    if (!active) return '';
+    state.progressCandidateId = Number(active.id);
+    const completedWorks = candidates.filter(candidate => criteria.every(criterion => isCompleteScore(candidate, criterion))).length;
+    return `<nav class="sv-progress-navigator svj-progress-navigator" data-svj-progress-navigator aria-label="ความคืบหน้าผลงานและเกณฑ์"><div class="sv-progress-navigator__heading"><div><strong>ตรวจความคืบหน้ารายผลงาน</strong><span>ครบ ${completedWorks}/${candidates.length} ผลงาน · เลือกผลงานแล้วกดเกณฑ์ที่ต้องการตรวจ</span></div><span class="sv-progress-navigator__summary ${completedWorks === candidates.length ? 'is-complete' : 'is-incomplete'}">${completedWorks === candidates.length ? 'ครบทุกผลงาน' : `เหลือ ${candidates.length - completedWorks} ผลงาน`}</span></div><div class="sv-progress-navigator__items svj-progress-works">${candidates.map((candidate, index) => { const complete = criteria.filter(criterion => isCompleteScore(candidate, criterion)).length, current = Number(candidate.id) === Number(active.id); return `<button type="button" class="sv-progress-item ${complete === criteria.length ? 'is-complete' : 'is-incomplete'} ${current ? 'is-current' : ''}" data-svj-progress-work="${Number(candidate.id)}" aria-current="${current ? 'true' : 'false'}"><span>${index + 1}</span><strong>${escHtml(candidate.candidateNo || candidate.displayName)}</strong><small>${complete === criteria.length ? 'ครบ' : `ขาด ${criteria.length - complete}`}</small></button>`; }).join('')}</div><section class="svj-progress-criteria" aria-label="เกณฑ์ของ ${escHtml(active.displayName)}"><header><strong>${escHtml(active.displayName)}</strong><span>กดเกณฑ์เพื่อไปยังช่องคะแนน</span></header><div class="sv-progress-navigator__items">${criteria.map((criterion, index) => { const key = scoreKey(active.id, criterion.id), complete = isCompleteScore(active, criterion); return `<button type="button" class="sv-progress-item ${complete ? 'is-complete' : 'is-incomplete'}" data-svj-progress-score="${escHtml(key)}"><span>${index + 1}</span><strong>${escHtml(criterionValue(criterion, 'Title'))}</strong><small>${complete ? 'ครบ' : 'ยังไม่ครบ'}</small></button>`; }).join('')}</div></section></nav>`;
+}
+
+function refreshJuryProgressNavigator() {
+    const current = state.page?.querySelector('[data-svj-progress-navigator]');
+    if (!current) return;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = juryProgressNavigatorMarkup();
+    current.replaceWith(wrapper.firstElementChild);
 }
 
 function editMarkup() {
@@ -186,6 +225,7 @@ function renderDetail() {
     const stageName = valueOf(assignment, 'StageName', 'stageName') || 'รอบประเมิน';
     const body = state.mode === 'receipt' ? receiptMarkup() : state.mode === 'review' ? reviewMarkup() : status === 'draft' ? editMarkup() : lockedMarkup();
     state.page.innerHTML = `<div class="svj-shell svj-shell--detail" data-sv-jury-workspace="2026-10-28-safety-vote-jury-assignment-ux-r1">${safetyVoteRoleNav({ active: 'jury', showJury: true, juryCount: state.assignments.length })}<header class="svj-detail-header"><button type="button" class="sv-icon-button" data-svj-action="back-list" aria-label="กลับงานประเมินของฉัน">←</button><div><p class="sv-eyebrow">${escHtml(stageName)}${Number(valueOf(assignment, 'SheetVersion', 'sheetVersion') || 1) > 1 ? ` · เปิดประเมินใหม่ครั้งที่ ${Number(valueOf(assignment, 'SheetVersion', 'sheetVersion'))}` : ''}</p><h1>${escHtml(campaignTitle)}</h1><p>${state.detail.blind ? 'การประเมินแบบปกปิดตัวตน — ใช้เฉพาะชื่อแทนที่เซิร์ฟเวอร์ส่งมา' : 'ประเมินตามรายการและเกณฑ์ที่ได้รับมอบหมาย'}</p></div><span class="sv-status-badge sv-status-badge--${status === 'draft' ? 'scheduled' : status === 'submitted' ? 'published' : 'closed'}"><span class="sv-status-dot"></span>${JURY_VIEW_LABELS[status]}</span></header>${state.detail.blind ? '<section class="svj-blind-notice" role="note"><strong>Blind judging</strong><span>ห้ามใช้ข้อมูลนอกหน้าจอนี้เพื่อพยายามระบุตัวผู้ส่งผลงาน</span></section>' : ''}<main class="svj-main" aria-live="polite">${body}</main>${actionBarMarkup()}</div>`;
+    if (status === 'draft' && state.mode === 'edit') state.page.querySelector('.svj-sheet-summary')?.insertAdjacentHTML('beforebegin', juryProgressNavigatorMarkup());
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'jury', current: 'jury', campaign: { CampaignType: 'jury_scoring', TitleTh: campaignTitle }, onPage: true }));
     bindDetail();
     bindSafetyVoteImageGallery(state.page);hydrateSafetyVoteImages(state.page);
@@ -221,7 +261,7 @@ function updateSaveStatus() {
 }
 
 function scheduleAutosave() {
-    collectScores(); state.draftRevision += 1; writeLocalDraft(); clearTimeout(state.saveTimer);
+    collectScores(); refreshJuryProgressNavigator(); state.draftRevision += 1; writeLocalDraft(); clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => saveServer(false), 700);
 }
 
@@ -339,6 +379,20 @@ function bindList() {
 }
 
 function bindDetail() {
+    state.page.querySelector('.svj-main')?.addEventListener('click', event => {
+        const work = event.target.closest('[data-svj-progress-work]');
+        if (work) {
+            event.preventDefault();
+            state.progressCandidateId = Number(work.dataset.svjProgressWork);
+            refreshJuryProgressNavigator();
+            return;
+        }
+        const score = event.target.closest('[data-svj-progress-score]');
+        if (score) {
+            event.preventDefault();
+            focusValidationTarget(score.dataset.svjProgressScore);
+        }
+    });
     state.page.querySelector('[data-sv-role-link="user"]')?.addEventListener('click', event => { event.preventDefault(); state.onUser?.(); });
     const syncScoreUi = (key, raw, schedule = false) => {
         const number = state.page.querySelector(`[data-svj-score="${key}"]`), range = state.page.querySelector(`[data-svj-score-range="${key}"]`), output = state.page.querySelector(`[data-svj-score-output="${key}"]`);
@@ -361,6 +415,10 @@ function bindDetail() {
     }));
     state.page.querySelectorAll('[data-svj-score-quick]').forEach(button => button.addEventListener('click', () => syncScoreUi(button.dataset.svjScoreQuick, button.dataset.score, true)));
     state.page.querySelectorAll('[data-svj-comment]').forEach(input => input.addEventListener('input', scheduleAutosave));
+    state.page.querySelectorAll('[data-svj-error-key]').forEach(link => link.addEventListener('click', event => {
+        event.preventDefault();
+        focusValidationTarget(link.dataset.svjErrorKey);
+    }));
     state.page.querySelectorAll('[data-svj-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svjAction;
         if (action === 'back-list') { clearTimeout(state.saveTimer); stopSessionKeepAlive(); state.screen = 'list'; state.detail = null; state.receipt = null; renderList(); }

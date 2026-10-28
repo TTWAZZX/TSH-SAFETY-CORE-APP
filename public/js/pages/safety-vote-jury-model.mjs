@@ -39,18 +39,31 @@ export function normalizeScores(rows = []) {
     }]));
 }
 
+function scoreError(detail, candidate, criterion, candidateIndex, criterionIndex, key, message) {
+    return {
+        key,
+        candidateIndex: candidateIndex + 1,
+        candidateTotal: (detail.candidates || []).length,
+        candidateCode: String(candidate.candidateNo || candidate.displayName || `WORK-${candidateIndex + 1}`),
+        criterionIndex: criterionIndex + 1,
+        criterionTotal: (detail.criteria || []).length,
+        criterionTitle: String(valueOf(criterion, 'Title', 'title') || `เกณฑ์ที่ ${criterionIndex + 1}`),
+        message
+    };
+}
+
 export function validateScoreSheet(detail = {}, scores = {}) {
     const errors = [];
-    for (const candidate of detail.candidates || []) {
-        for (const criterion of detail.criteria || []) {
+    for (const [candidateIndex, candidate] of (detail.candidates || []).entries()) {
+        for (const [criterionIndex, criterion] of (detail.criteria || []).entries()) {
             const key = scoreKey(candidate.id, criterion.id), raw = scores[key]?.score;
             const min = Number(valueOf(criterion, 'MinScore', 'minScore')), max = Number(valueOf(criterion, 'MaxScore', 'maxScore'));
             if (raw === '' || raw === undefined || raw === null || !Number.isFinite(Number(raw))) {
-                errors.push({ key, message: `กรุณาให้คะแนน “${valueOf(criterion, 'Title', 'title')}” สำหรับ ${candidate.displayName}` });
+                errors.push(scoreError(detail, candidate, criterion, candidateIndex, criterionIndex, key, 'ยังไม่ได้ให้คะแนน'));
             } else if (Number(raw) < min || Number(raw) > max) {
-                errors.push({ key, message: `คะแนน “${valueOf(criterion, 'Title', 'title')}” ต้องอยู่ระหว่าง ${min}–${max}` });
+                errors.push(scoreError(detail, candidate, criterion, candidateIndex, criterionIndex, key, `คะแนนต้องอยู่ระหว่าง ${min}–${max}`));
             }
-            if (String(scores[key]?.comment || '').length > 1000) errors.push({ key, message: 'หมายเหตุแต่ละรายการต้องไม่เกิน 1,000 ตัวอักษร' });
+            if (String(scores[key]?.comment || '').length > 1000) errors.push(scoreError(detail, candidate, criterion, candidateIndex, criterionIndex, key, 'หมายเหตุต้องไม่เกิน 1,000 ตัวอักษร'));
         }
     }
     return errors;
@@ -58,14 +71,14 @@ export function validateScoreSheet(detail = {}, scores = {}) {
 
 export function validateDraftScoreSheet(detail = {}, scores = {}) {
     const errors = [];
-    for (const candidate of detail.candidates || []) {
-        for (const criterion of detail.criteria || []) {
+    for (const [candidateIndex, candidate] of (detail.candidates || []).entries()) {
+        for (const [criterionIndex, criterion] of (detail.criteria || []).entries()) {
             const key = scoreKey(candidate.id, criterion.id), raw = scores[key]?.score;
             const min = Number(valueOf(criterion, 'MinScore', 'minScore')), max = Number(valueOf(criterion, 'MaxScore', 'maxScore'));
             if (raw !== '' && raw !== undefined && raw !== null && (!Number.isFinite(Number(raw)) || Number(raw) < min || Number(raw) > max)) {
-                errors.push({ key, message: `คะแนน “${valueOf(criterion, 'Title', 'title')}” ต้องอยู่ระหว่าง ${min}–${max}` });
+                errors.push(scoreError(detail, candidate, criterion, candidateIndex, criterionIndex, key, `คะแนนต้องอยู่ระหว่าง ${min}–${max}`));
             }
-            if (String(scores[key]?.comment || '').length > 1000) errors.push({ key, message: 'หมายเหตุแต่ละรายการต้องไม่เกิน 1,000 ตัวอักษร' });
+            if (String(scores[key]?.comment || '').length > 1000) errors.push(scoreError(detail, candidate, criterion, candidateIndex, criterionIndex, key, 'หมายเหตุต้องไม่เกิน 1,000 ตัวอักษร'));
         }
     }
     return errors;

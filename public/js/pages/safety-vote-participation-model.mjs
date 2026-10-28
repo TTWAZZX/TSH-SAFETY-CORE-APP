@@ -103,26 +103,96 @@ export function hasParticipationAnswer(question, raw) {
 
 export function validateParticipation(questions = [], answers = {}) {
     const errors = [];
-    for (const question of questions) {
+    for (const [questionIndex, question] of questions.entries()) {
         if (!isQuestionVisible(question, questions, answers)) continue;
         const raw = answers[String(question.id)];
+        const location = {
+            targetId: `svp-question-${Number(question.id)}`,
+            sectionLabel: 'คำถาม',
+            itemIndex: questionIndex + 1,
+            itemTotal: questions.length,
+            itemCode: String(question.questionCode || `Q${questionIndex + 1}`),
+            itemTitle: String(question.title || `คำถามข้อ ${questionIndex + 1}`)
+        };
         if (question.isRequired && !hasParticipationAnswer(question, raw)) {
-            errors.push({ questionId: Number(question.id), message: `กรุณาตอบ “${question.title}”` });
+            errors.push({ questionId: Number(question.id), ...location, message: 'ยังไม่ได้ตอบคำถามที่จำเป็น' });
             continue;
         }
         if (isChoiceQuestion(question) && Array.isArray(raw)) {
-            if (raw.length < Number(question.minSelections || 0)) errors.push({ questionId: Number(question.id), message: `เลือกอย่างน้อย ${Number(question.minSelections)} รายการใน “${question.title}”` });
-            if (raw.length > Number(question.maxSelections || raw.length)) errors.push({ questionId: Number(question.id), message: `เลือกได้ไม่เกิน ${Number(question.maxSelections)} รายการใน “${question.title}”` });
+            if (raw.length < Number(question.minSelections || 0)) errors.push({ questionId: Number(question.id), ...location, message: `ต้องเลือกอย่างน้อย ${Number(question.minSelections)} รายการ` });
+            if (raw.length > Number(question.maxSelections || raw.length)) errors.push({ questionId: Number(question.id), ...location, message: `เลือกได้ไม่เกิน ${Number(question.maxSelections)} รายการ` });
         }
         if (question.questionType === 'ranking' && Array.isArray(raw) && new Set(raw.map(Number)).size !== raw.length) {
-            errors.push({ questionId: Number(question.id), message: `กรุณาใช้ลำดับไม่ซ้ำกันใน “${question.title}”` });
+            errors.push({ questionId: Number(question.id), ...location, message: 'ลำดับตัวเลือกต้องไม่ซ้ำกัน' });
         }
         if (question.questionType === 'rating' && hasParticipationAnswer(question, raw)) {
             const min = Number(question.validation?.minNumber ?? 0), max = Number(question.validation?.maxNumber ?? 10), value = Number(raw);
-            if (value < min || value > max) errors.push({ questionId: Number(question.id), message: `คะแนนของ “${question.title}” ต้องอยู่ระหว่าง ${min}–${max}` });
+            if (value < min || value > max) errors.push({ questionId: Number(question.id), ...location, message: `คะแนนต้องอยู่ระหว่าง ${min}–${max}` });
         }
     }
     return errors;
+}
+
+export function validateWorkflowParticipation(type, answers = {}, submissionGallery = []) {
+    const errors = [];
+    if (type === 'submission_challenge') {
+        const fields = [
+            { key: 'title', targetId: 'svp-workflow-title', title: 'ชื่อผลงาน' },
+            { key: 'description', targetId: 'svp-workflow-description', title: 'รายละเอียดผลงาน' }
+        ];
+        fields.forEach((field, index) => {
+            if (!String(answers[field.key] || '').trim()) errors.push({ questionId: 0, targetId: field.targetId, sectionLabel: 'ข้อมูลผลงาน', itemIndex: index + 1, itemTotal: fields.length, itemTitle: field.title, message: 'ยังไม่ได้กรอกข้อมูลที่จำเป็น' });
+        });
+        submissionGallery.forEach((item, index) => {
+            if (!String(item.altText || '').trim()) errors.push({ questionId: 0, targetId: `svp-work-gallery-${index}`, sectionLabel: 'รูปผลงาน', itemIndex: index + 1, itemTotal: submissionGallery.length, itemTitle: `ภาพที่ ${index + 1}`, message: 'ยังไม่ได้ระบุคำอธิบายภาพ' });
+        });
+    } else {
+        if (!String(answers.nomineeEmployeeId || '').trim()) errors.push({ questionId: 0, targetId: 'svp-workflow-nominee', sectionLabel: 'ข้อมูลการเสนอชื่อ', itemIndex: 1, itemTotal: 2, itemTitle: 'ผู้ถูกเสนอชื่อ', message: 'ยังไม่ได้เลือกพนักงาน' });
+        if (!String(answers.statement || '').trim()) errors.push({ questionId: 0, targetId: 'svp-workflow-statement', sectionLabel: 'ข้อมูลการเสนอชื่อ', itemIndex: 2, itemTotal: 2, itemTitle: 'เหตุผลประกอบการเสนอชื่อ', message: 'ยังไม่ได้กรอกเหตุผล' });
+    }
+    return errors;
+}
+
+export function participationProgressItems(questions = [], answers = {}) {
+    const errorsByQuestion = new Map(validateParticipation(questions, answers).map(error => [Number(error.questionId), error]));
+    const visible = questions.filter(question => isQuestionVisible(question, questions, answers));
+    return visible.map((question, index) => {
+        const raw = answers[String(question.id)];
+        const answered = hasParticipationAnswer(question, raw);
+        const error = errorsByQuestion.get(Number(question.id));
+        return {
+            key: `question:${Number(question.id)}`,
+            targetId: `svp-question-${Number(question.id)}`,
+            label: String(question.title || `คำถามข้อ ${index + 1}`),
+            shortLabel: String(question.questionCode || `ข้อ ${index + 1}`),
+            index: index + 1,
+            total: visible.length,
+            required: Boolean(question.isRequired),
+            status: error || (question.isRequired && !answered) ? 'incomplete' : answered ? 'complete' : 'optional',
+            message: error?.message || (!answered && question.isRequired ? 'ยังไม่ได้ตอบ' : answered ? 'ครบแล้ว' : 'ไม่บังคับ')
+        };
+    });
+}
+
+export function workflowProgressItems(type, answers = {}, submissionGallery = []) {
+    const definitions = type === 'submission_challenge'
+        ? [
+            { key: 'title', targetId: 'svp-workflow-title', label: 'ชื่อผลงาน', complete: Boolean(String(answers.title || '').trim()) },
+            { key: 'description', targetId: 'svp-workflow-description', label: 'รายละเอียดผลงาน', complete: Boolean(String(answers.description || '').trim()) },
+            ...submissionGallery.map((item, index) => ({ key: `gallery:${index}`, targetId: `svp-work-gallery-${index}`, label: `คำอธิบายภาพที่ ${index + 1}`, complete: Boolean(String(item.altText || '').trim()) }))
+        ]
+        : [
+            { key: 'nomineeEmployeeId', targetId: 'svp-workflow-nominee', label: 'ผู้ถูกเสนอชื่อ', complete: Boolean(String(answers.nomineeEmployeeId || '').trim()) },
+            { key: 'statement', targetId: 'svp-workflow-statement', label: 'เหตุผลประกอบ', complete: Boolean(String(answers.statement || '').trim()) }
+        ];
+    return definitions.map((item, index) => ({
+        ...item,
+        index: index + 1,
+        total: definitions.length,
+        required: true,
+        status: item.complete ? 'complete' : 'incomplete',
+        message: item.complete ? 'ครบแล้ว' : 'ยังไม่ครบ'
+    }));
 }
 
 export function answerPayload(question, raw) {

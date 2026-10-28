@@ -42,7 +42,8 @@ async function wait(expression, label = expression) {
         if (await ev(expression)) return;
         await sleep(150);
     }
-    throw new Error(`Timeout waiting for ${label}`);
+    const pageState = await ev(`({url:location.href,body:(document.body?.innerText||'').slice(0,1600),html:(document.querySelector('#safety-vote-page')?.innerHTML||'').slice(0,1600)})`).catch(() => null);
+    throw new Error(`Timeout waiting for ${label}\nPage state: ${JSON.stringify(pageState)}\nConsole errors: ${JSON.stringify(consoleErrors)}\nAPI errors: ${JSON.stringify(apiErrors)}`);
 }
 
 async function click(selector) {
@@ -72,6 +73,10 @@ async function submitPopular(viewport, ordinal) {
         await click('[data-svp-action="review"]');
         await wait(`Boolean(document.querySelector('.svp-validation[role=alert]'))`, 'validation summary');
         assert(await ev(`document.activeElement?.classList.contains('svp-validation')`), 'validation summary must receive focus');
+        assert(await ev(`document.querySelector('[data-svp-error-target] strong')?.textContent.includes('1/1')`), 'validation summary must identify the question position');
+        await click('[data-svp-error-target]');
+        await wait(`Boolean(document.querySelector('.svp-question.is-validation-target'))`, 'highlighted invalid question');
+        assert(await ev(`document.activeElement?.matches('.svp-option input')`), 'validation link must focus the exact invalid question control');
     }
     const alternate = await ev(`document.querySelectorAll('.svp-option input')[1]?.value`);
     await click('.svp-option input');

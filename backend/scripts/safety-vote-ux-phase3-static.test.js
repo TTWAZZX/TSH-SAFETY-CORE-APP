@@ -35,6 +35,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('data-svp-search') && page.includes('data-svp-view'), 'My Activities search/status views are incomplete');
     check(page.includes('role="tablist"') && page.includes('aria-selected='), 'status tabs lack accessible semantics');
     check(page.includes('role="alert" tabindex="-1"'), 'validation summary must be focusable and announced');
+    check(page.includes('validationSummaryMarkup') && page.includes('data-svp-error-target') && page.includes('focusParticipationValidationTarget'), 'all participant validation summaries must identify and navigate to the exact field');
     check(page.includes('bindSafetyVoteImageGallery') && page.includes('data-sv-gallery-group'), 'shared private image gallery binding is missing');
     check(gallery.includes("event.key === 'Escape'") && gallery.includes("event.key === 'ArrowLeft'") && gallery.includes("event.key === 'ArrowRight'"), 'private image gallery keyboard behavior is missing');
     check(gallery.includes("addEventListener('touchstart'") && gallery.includes("addEventListener('touchend'"), 'private image gallery swipe behavior is missing');
@@ -42,7 +43,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('loadLegacySafetyVotePage') && page.includes('data-svp-jury'), 'existing Juror workspace handoff is missing');
     check(page.includes('state.moduleDisabled') && page.includes('MODULE_DISABLED'), 'module_enabled fail-closed state is missing');
     check(page.includes('state.denied') && page.includes('PERMISSION_DENIED'), 'permission denied state is missing');
-    const currentCacheKey = /safety-vote-(?:(?:ux(?:[3-8]|9c)|phase9abc-enabled|preview-gallery|public-discovery|wizard-layout|final-phase7|jury-score-ux|jury-scoring|official-topn)-r1|density-r[1-9]\d*)/;
+    const currentCacheKey = /safety-vote-(?:(?:ux(?:[3-8]|9c)|phase9abc-enabled|preview-gallery|public-discovery|wizard-layout|final-phase7|jury-score-ux|official-topn)-r1|jury-scoring-r[12]|density-r[1-9]\d*)/;
     check(currentCacheKey.test(main) && currentCacheKey.test(html), 'Phase 3-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 3'), 'Phase 3 scoped CSS marker is missing');
     check(css.includes('.svp-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
@@ -55,7 +56,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(css.includes('.svp-shell[data-sv-participation] .sv-role-nav__item'), 'participant mobile role navigation is not scoped');
     check(css.includes('.svp-shell[data-sv-participation] .sv-journey-steps button'), 'participant mobile journey density is not scoped');
     check(css.includes('flex-direction: row') && css.includes('.svp-shell[data-sv-participation] .svp-action-bar'), 'participant mobile action bar must remain a single row');
-    check(html.includes('20261028-safety-vote-density-r5') || html.includes('20261028-safety-vote-jury-scoring-r1'), 'participant mobile density stylesheet cache key is missing');
+    check(html.includes('20261028-safety-vote-density-r5') || html.includes('20261028-safety-vote-jury-scoring-r2'), 'participant mobile density stylesheet cache key is missing');
     check(css.includes('mobile density phase 3: choices, media and review flow'), 'participant mobile choice/review phase marker is missing');
     check(css.includes('.svp-option:has(input:checked)::after'), 'selected choice state must remain visible');
     check(css.includes('.svp-option > .sv-work-gallery--candidate'), 'candidate media strip is not scoped to choice cards');
@@ -70,7 +71,20 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
 
     const questions = [{ id: 7, questionCode: 'Q1', questionType: 'single_choice', title: 'เลือกแนวคิด', isRequired: true, minSelections: 1, maxSelections: 1, options: [{ id: 70, optionCode: 'A', label: 'แนวคิด ก' }, { id: 71, optionCode: 'B', label: 'แนวคิด ข' }] }];
     check(model.validateParticipation(questions, {}).length === 1, 'required unanswered question must fail');
+    const locatedParticipationError = model.validateParticipation(questions, {})[0];
+    check(locatedParticipationError.itemIndex === 1 && locatedParticipationError.itemTotal === 1 && locatedParticipationError.targetId === 'svp-question-7', 'participant validation must include question position and target');
     check(model.validateParticipation(questions, { 7: [70] }).length === 0, 'valid choice answer must pass');
+    const submissionErrors = model.validateWorkflowParticipation('submission_challenge', {}, [{ altText: '' }]);
+    check(submissionErrors.length === 3 && submissionErrors[2].targetId === 'svp-work-gallery-0' && submissionErrors[2].itemTitle.includes('1'), 'submission validation must locate fields and individual gallery images');
+    const nominationErrors = model.validateWorkflowParticipation('nomination', {});
+    check(nominationErrors.length === 2 && nominationErrors[0].targetId === 'svp-workflow-nominee' && nominationErrors[1].targetId === 'svp-workflow-statement', 'nomination validation must locate nominee and reason fields');
+    const incompleteProgress = model.participationProgressItems(questions, {});
+    const completeProgress = model.participationProgressItems(questions, { 7: [70] });
+    check(incompleteProgress[0].status === 'incomplete' && completeProgress[0].status === 'complete', 'participant progress must update required question status');
+    const workflowProgress = model.workflowProgressItems('submission_challenge', { title: 'A', description: '' }, [{ altText: '' }]);
+    check(workflowProgress.map(item => item.status).join(',') === 'complete,incomplete,incomplete' && workflowProgress[2].targetId === 'svp-work-gallery-0', 'submission progress must locate every required field and image description');
+    check(page.includes('participantProgressNavigatorMarkup') && page.includes('data-svp-progress-target') && page.includes('refreshParticipantProgressNavigator'), 'participant workflows must expose a live per-item progress navigator');
+    check(css.includes('.sv-progress-item.is-incomplete') && css.includes('.sv-progress-item.is-complete'), 'shared progress states must remain visually distinct');
     const payload = model.buildBallotPayload({ campaign: { VersionNo: 3 }, questions }, { 7: [70] });
     check(payload.campaignVersion === 3 && payload.acknowledgedRules === true, 'ballot envelope does not match the existing API');
     check(payload.answers.length === 1 && payload.answers[0].optionIds[0] === 70, 'choice answer mapping is incorrect');
@@ -80,6 +94,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(model.validateParticipation(ranked, { 9: [1, 1] }).length > 0, 'duplicate ranks must fail client validation');
     const hidden = { id: 10, questionCode: 'Q4', questionType: 'long_text', title: 'รายละเอียด', isRequired: true, options: [], displayCondition: { questionCode: 'Q1', operator: 'equals', value: 'B' } };
     check(model.isQuestionVisible(hidden, [...questions, hidden], { 7: [70] }) === false, 'conditional question visibility is incorrect');
+    check(model.participationProgressItems([...questions, hidden], { 7: [70] }).length === 1, 'hidden conditional questions must not appear as missing progress items');
     const secretReceipt = model.safeReceipt({ campaign: { PrivacyMode: 'secret_ballot' }, receiptCode: 'SV-TEST' });
     check(secretReceipt.proof === 'accepted_only' && secretReceipt.canLocateBallot === false && secretReceipt.answersIncluded === false, 'secret receipt exposes excessive proof');
     check(!Object.prototype.hasOwnProperty.call(secretReceipt, 'answers'), 'receipt must never include answers');

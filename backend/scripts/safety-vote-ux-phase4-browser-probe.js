@@ -90,6 +90,11 @@ async function completeAndSubmit(viewport, ordinal, assignmentId) {
         await click('[data-svj-action="review"]');
         await wait(`Boolean(document.querySelector('.svp-validation[role=alert]'))`, 'validation summary');
         assert(await ev(`document.activeElement?.classList.contains('svp-validation')`), 'validation summary must receive focus');
+        assert(await ev(`(document.querySelector('[data-svj-error-key] strong')?.textContent||'').includes('/')`), 'Jury validation must identify the work position');
+        assert(await ev(`(document.querySelector('[data-svj-error-key] span')?.textContent||'').includes('/')`), 'Jury validation must identify the criterion position');
+        await click('[data-svj-error-key]');
+        await wait(`Boolean(document.querySelector('.svj-score-row.is-validation-target'))`, 'highlighted invalid Jury score row');
+        assert(await ev(`document.activeElement?.matches('[data-svj-score]')`), 'Jury validation link must focus the exact score control');
         await setValue('[data-svj-score]', 8);
         await wait(`document.querySelector('[data-svj-save-status]')?.dataset.state==='local'`, 'local autosave state');
         await openAssignment(ordinal, assignmentId);
