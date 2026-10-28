@@ -18,6 +18,13 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || (fs.existsSync(
             const errors = [];
             page.on('pageerror', error => errors.push(error.message));
             await page.setContent(`<main id="root"><button id="before">ก่อนเปิด</button><div id="gallery-root"><input type="radio" name="svp-q-1" value="1" data-svp-answer="1"><input type="radio" name="svp-q-1" value="2" data-svp-answer="1"><input type="radio" name="svp-q-1" value="3" data-svp-answer="1"><button data-sv-image-gallery data-sv-gallery-group="q1" data-sv-gallery-label="ผู้สมัคร 1" data-sv-gallery-choice-name="svp-q-1" data-sv-gallery-choice-value="1" data-sv-gallery-choice-label="ผลงาน 1"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='60'%3E%3Crect width='80' height='60' fill='red'/%3E%3C/svg%3E" alt="ผู้สมัคร 1"></button><button data-sv-image-gallery data-sv-gallery-group="q1" data-sv-gallery-label="ผู้สมัคร 2" data-sv-gallery-choice-name="svp-q-1" data-sv-gallery-choice-value="2" data-sv-gallery-choice-label="ผลงาน 2"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='60'%3E%3Crect width='80' height='60' fill='green'/%3E%3C/svg%3E" alt="ผู้สมัคร 2"></button><button data-sv-image-gallery data-sv-gallery-group="q1" data-sv-gallery-label="ผู้สมัคร 3" data-sv-gallery-choice-name="svp-q-1" data-sv-gallery-choice-value="3" data-sv-gallery-choice-label="ผลงาน 3"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='60'%3E%3Crect width='80' height='60' fill='blue'/%3E%3C/svg%3E" alt="ผู้สมัคร 3"></button><button data-sv-image-gallery data-sv-gallery-group="q2" data-sv-gallery-label="คนละคำถาม"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='60'%3E%3C/svg%3E" alt="คนละคำถาม"></button></div></main>`);
+            await page.evaluate(() => {
+                const root = document.querySelector('#gallery-root');
+                for (let index = 1; index <= 12; index += 1) {
+                    const questionId = index <= 10 ? 10 : 20;
+                    root.insertAdjacentHTML('beforeend', `<input type="radio" name="campaign-q-${questionId}" value="${index}" data-svp-answer="${questionId}"><button data-campaign-image="${index}" data-sv-image-gallery data-sv-gallery-group="campaign-choice-options" data-sv-gallery-label="Campaign image ${index}" data-sv-gallery-choice-name="campaign-q-${questionId}" data-sv-gallery-choice-value="${index}" data-sv-gallery-choice-label="Campaign choice ${index}"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='60'%3E%3C/svg%3E" alt="Campaign image ${index}"></button>`);
+                }
+            });
             await page.addStyleTag({ path: path.join(root, 'public', 'style.css') });
             const source = fs.readFileSync(path.join(root, 'public', 'js', 'pages', 'safety-vote-image-gallery.js'), 'utf8').replaceAll('export ', '');
             await page.addScriptTag({ content: `${source}\nwindow.bindSafetyVoteImageGallery = bindSafetyVoteImageGallery;` });
@@ -66,7 +73,7 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || (fs.existsSync(
             assert.strictEqual(await page.locator('[data-sv-image-gallery-dialog] [data-sv-gallery-choice-label]').textContent(), 'ผลงาน 3');
             assert.strictEqual(await page.locator('[data-sv-gallery-confirm]').isDisabled(), true);
             await page.locator('[data-sv-gallery-select]').click();
-            assert.strictEqual(await page.locator('input[value="3"]').isChecked(), true);
+            assert.strictEqual(await page.locator('input[name="svp-q-1"][value="3"]').isChecked(), true);
             assert.strictEqual(await page.locator('[data-sv-gallery-confirm]').isEnabled(), true);
             await page.locator('[data-sv-gallery-confirm]').click();
             assert.strictEqual(await page.locator('[data-sv-image-gallery-dialog]').count(), 0);
@@ -90,6 +97,19 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || (fs.existsSync(
             assert.ok(singleLayout.imageWidthRatio > .8, 'single gallery image must use the large-image stage');
             assert.strictEqual(singleLayout.centered, true);
             await page.keyboard.press('Escape');
+
+            await page.locator('[data-campaign-image="10"]').click();
+            assert.strictEqual(await page.locator('#sv-gallery-position').textContent(), 'รูปที่ 10 จาก 12');
+            assert.strictEqual(await page.locator('[data-sv-gallery-next]').isEnabled(), true);
+            await page.locator('[data-sv-gallery-next]').click();
+            assert.strictEqual(await page.locator('#sv-gallery-position').textContent(), 'รูปที่ 11 จาก 12');
+            assert.strictEqual(await page.locator('[data-sv-image-gallery-dialog] [data-sv-gallery-choice-label]').textContent(), 'Campaign choice 11');
+            await page.locator('[data-sv-gallery-next]').click();
+            assert.strictEqual(await page.locator('#sv-gallery-position').textContent(), 'รูปที่ 12 จาก 12');
+            assert.strictEqual(await page.locator('[data-sv-gallery-next]').isDisabled(), true);
+            await page.locator('[data-sv-gallery-select]').click();
+            assert.strictEqual(await page.locator('input[name="campaign-q-20"][value="12"]').isChecked(), true);
+            await page.locator('[data-sv-gallery-confirm]').click();
             assert.deepStrictEqual(errors, []);
             await page.close();
         }

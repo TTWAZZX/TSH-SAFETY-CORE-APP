@@ -252,10 +252,10 @@ function questionControl(question) {
     return '<p class="svp-note">รูปแบบคำถามนี้ยังไม่มีตัวควบคุมในหน้าเข้าร่วม</p>';
 }
 
-function candidateGalleryMarkup(option, questionId, choice = null) {
+function candidateGalleryMarkup(option, questionId, choice = null, galleryGroup = '') {
     const gallery = Array.isArray(option.gallery) && option.gallery.length ? option.gallery : option.fileId ? [{ fileId: option.fileId, altText: option.label, caption: null, isCover: true }] : [];
     if (!gallery.length) return '';
-    const group = choice ? `question-options-${Number(questionId)}` : `candidate-${Number(option.candidateId || option.id)}-question-${Number(questionId)}`;
+    const group = galleryGroup || (choice ? 'campaign-choice-options' : `candidate-${Number(option.candidateId || option.id)}-question-${Number(questionId)}`);
     const choiceData = choice ? ` data-sv-gallery-choice-name="${escHtml(choice.choiceName)}" data-sv-gallery-choice-value="${Number(choice.choiceValue)}" data-sv-gallery-choice-label="${escHtml(choice.choiceLabel || option.label)}"` : '';
     return `<div class="sv-work-gallery sv-work-gallery--candidate" aria-label="ภาพผลงาน ${escHtml(option.label)}">${gallery.map((item,index)=>`<figure class="sv-work-gallery__item ${item.isCover?'is-cover':''}"><button type="button" class="svp-gallery-trigger" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="${group}"${choiceData} data-sv-gallery-label="${escHtml(item.altText||option.label)}" aria-label="เปิดภาพที่ ${index+1} ของ ${escHtml(option.label)}"><img data-svp-private-file="${Number(item.fileId)}" data-sv-auth-file="${Number(item.fileId)}" alt="${escHtml(item.altText||option.label)}" decoding="async"></button>${item.caption?`<figcaption>${escHtml(item.caption)}</figcaption>`:''}</figure>`).join('')}</div>`;
 }
@@ -263,7 +263,7 @@ function candidateGalleryMarkup(option, questionId, choice = null) {
 function publicWorkGalleryMarkup() {
     if (campaignType(state.detail?.campaign) !== 'jury_scoring') return '';
     const works = Array.isArray(state.publicWorks) ? state.publicWorks : [];
-    return `<section class="svp-aux svp-public-work-gallery" data-svp-public-work-gallery aria-labelledby="svp-public-work-gallery-title"><div><p class="sv-eyebrow">ผลงานที่เข้าประกวด</p><h2 id="svp-public-work-gallery-title">Public Work Gallery</h2><p>พนักงานทุกคนดูผลงานได้แบบอ่านอย่างเดียว การดูผลงานไม่ได้ให้สิทธิ์เข้าตัดสิน</p></div>${works.length ? `<div class="svp-card-grid">${works.map(work => `<article class="svp-campaign-card svp-public-work-card"><strong>${escHtml(work.title || work.workCode || 'ผลงาน')}</strong><span>${escHtml(work.workCode || '')}</span>${work.description ? `<p>${escHtml(work.description)}</p>` : ''}${candidateGalleryMarkup({ id: work.id, candidateId: work.id, label: work.title || work.workCode, gallery: work.gallery || [] }, 0)}</article>`).join('')}</div>` : '<p class="svp-note">ยังไม่มีผลงานที่เปิดให้แสดง</p>'}</section>`;
+    return `<section class="svp-aux svp-public-work-gallery" data-svp-public-work-gallery aria-labelledby="svp-public-work-gallery-title"><div><p class="sv-eyebrow">ผลงานที่เข้าประกวด</p><h2 id="svp-public-work-gallery-title">Public Work Gallery</h2><p>พนักงานทุกคนดูผลงานได้แบบอ่านอย่างเดียว การดูผลงานไม่ได้ให้สิทธิ์เข้าตัดสิน</p></div>${works.length ? `<div class="svp-card-grid">${works.map(work => `<article class="svp-campaign-card svp-public-work-card"><strong>${escHtml(work.title || work.workCode || 'ผลงาน')}</strong><span>${escHtml(work.workCode || '')}</span>${work.description ? `<p>${escHtml(work.description)}</p>` : ''}${candidateGalleryMarkup({ id: work.id, candidateId: work.id, label: work.title || work.workCode, gallery: work.gallery || [] }, 0, null, 'campaign-public-works')}</article>`).join('')}</div>` : '<p class="svp-note">ยังไม่มีผลงานที่เปิดให้แสดง</p>'}</section>`;
 }
 
 function submissionGalleryEditor() {

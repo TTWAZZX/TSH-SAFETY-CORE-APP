@@ -11,15 +11,15 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 const root = path.resolve(__dirname, '..', '..');
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = '820e97ab38602eb9d748745b537502d0d991814a';
-const confirmation = 'DEPLOY_SAFETY_VOTE_MOBILE_DENSITY_R5';
+const productionBaseline = '5b439668b1efe273515fd9732f52c5f536f975fc';
+const confirmation = 'DEPLOY_SAFETY_VOTE_CAMPAIGN_GALLERY_R1';
 const runtimePaths = Object.freeze([
     'index.html',
-    'public/js/session.js',
-    'public/style.css',
+    'public/js/main.js',
+    'public/js/pages/safety-vote-page-ux1.js',
 ]);
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-mobile-density-deploy-${stamp}`);
+const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-campaign-gallery-deploy-${stamp}`);
 const candidateRoot = path.join(evidenceRoot, 'candidate');
 const rollbackRoot = path.join(evidenceRoot, 'rollback-package');
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -103,16 +103,16 @@ function prepare(commit, tree) {
     }
 
     const index = gitBlob(commit, 'index.html').toString('utf8');
-    const session = gitBlob(commit, 'public/js/session.js').toString('utf8');
-    const style = gitBlob(commit, 'public/style.css').toString('utf8');
+    const main = gitBlob(commit, 'public/js/main.js').toString('utf8');
+    const participant = gitBlob(commit, 'public/js/pages/safety-vote-page-ux1.js').toString('utf8');
     assert(index.includes('public/style.css?v=20261028-safety-vote-density-r5'), 'Mobile density stylesheet cache marker missing');
-    assert(index.includes('public/js/session.js?v=20261028-session-expiry-preflight-r1'), 'Session expiry cache marker missing');
-    assert(session.includes('function isExpiredJwt') && session.includes('if (isExpiredJwt(token))'), 'Expired JWT preflight missing');
-    assert(style.includes('Safety Vote participant mobile density phase 5'), 'Mobile density Phase 5 marker missing');
-    assert(style.includes('.svj-shell[data-sv-jury-workspace] .svj-action-bar'), 'Jury mobile action bar contract missing');
+    assert(index.includes('public/js/main.js?v=20261028-safety-vote-campaign-gallery-r1'), 'Campaign gallery main cache marker missing');
+    assert(main.includes('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-campaign-gallery-r1'), 'Campaign gallery participant cache marker missing');
+    assert(participant.includes("choice ? 'campaign-choice-options'"), 'Campaign-wide participant choice gallery missing');
+    assert(participant.includes("null, 'campaign-public-works'"), 'Campaign-wide public work gallery missing');
 
     const manifest = {
-        contract: '2026-10-28-safety-vote-mobile-density-r5',
+        contract: '2026-10-28-safety-vote-campaign-gallery-r1',
         productionBaseline,
         candidate: { commit, tree },
         runtimePaths,
@@ -177,9 +177,9 @@ async function main() {
     const deployed = prepared.candidate.map(file => doubleDownload(file.path, 'deployed', file.sha256));
     const https = await httpsVerify(prepared.candidate, commit);
     const result = {
-        contract: '2026-10-28-safety-vote-mobile-density-r5',
+        contract: '2026-10-28-safety-vote-campaign-gallery-r1',
         generatedAt: new Date().toISOString(),
-        decision: 'PASS_SAFETY_VOTE_MOBILE_DENSITY_PRODUCTION_DEPLOYMENT',
+        decision: 'PASS_SAFETY_VOTE_CAMPAIGN_GALLERY_PRODUCTION_DEPLOYMENT',
         candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length },
         remoteBefore: prepared.remoteBefore,
         deployment: { uploaded: prepared.candidate.length, doubleDownloadVerified: deployed.length, httpsVerified: https.publicFiles.length },
@@ -197,6 +197,6 @@ main().catch(error => {
     try { rollback = rollbackRuntime(); }
     catch (rollbackError) { rollback = { attempted: true, pass: false, error: rollbackError.message }; }
     writeJson('failure.json', { generatedAt: new Date().toISOString(), decision: rollback.attempted && rollback.pass ? 'HOLD_DEPLOYMENT_FAILED_RUNTIME_ROLLED_BACK' : 'HOLD_DEPLOYMENT_ROLLBACK_INCOMPLETE', error: error.message, rollback });
-    process.stderr.write(`Safety Vote mobile density deployment failed: ${error.message}\n`);
+    process.stderr.write(`Safety Vote campaign gallery deployment failed: ${error.message}\n`);
     process.exitCode = 1;
 });
