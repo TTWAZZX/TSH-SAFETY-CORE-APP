@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Configurable Official Top N Production Deployment (PASS, 2026-10-28)
+
+- Immutable commit `ba8b4b02764ff6274c8756af076c9c4a80e98943` was deployed to the PHP shared-hosting Production target from baseline `a188e35c6aaf7f3f73591b370539a63092d284f0`. The guarded release uploaded 10 allowlisted PHP/frontend runtime files after remote double-download drift checks; deployed double-download SHA-256 matched `10/10` and public HTTPS SHA-256 matched all six frontend files.
+- Admin Official Results now provides Top 3/5/10/20/50 presets and a custom integer from 1–100. Node, PHP and Browser validation are aligned; tie-aware final-rank behavior remains intact. The value and result-release policy are retained through create, Draft save, duplicate, offline revision update and non-destructive next-cycle paths.
+- Local Node/PHP disposable API UAT proved source Top 37, offline revision Top 41 and duplicate Top 37 with the `manual` policy. Five-viewport authenticated Admin Browser UAT passed with no horizontal overflow, sub-44 px visible control or console error. Production authenticated read-only health/catalogue smoke passed with schema `2026-10-25-jury-work-items-atomic-media-r1`, 7 campaigns and all five reported capabilities ready; Public Branding returned `200` and anonymous Admin health remained `401`.
+- Runtime rollback evidence is `backups/production/safety-vote-official-topn-deploy-20261028041609/`; rollback-manifest SHA-256 is `7ad49a49695a336ea2668947870b0949938a961268b43202a8d7d3fd03cdd3e8` and result SHA-256 is `4259e0acbb6da5d5752dfb081b6b122cb88d793b9386e7c710d9b49078b7d626`. The first guarded attempt stopped before upload on an overly strict preflight assertion; Production was unchanged. No schema, business-data, external-delivery or notification change occurred, and rollback was not required. Decision: `PASS_SAFETY_VOTE_OFFICIAL_TOPN_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Campaign-wide Gallery Navigation Production Deployment (PASS, 2026-10-28)
 
 - Immutable commit `a188e35c6aaf7f3f73591b370539a63092d284f0` was deployed to the PHP shared-hosting Production target. The guarded release uploaded exactly `index.html`, `public/js/main.js` and `public/js/pages/safety-vote-page-ux1.js`; FTPS double-download and public HTTPS SHA-256 verification matched `3/3`.
