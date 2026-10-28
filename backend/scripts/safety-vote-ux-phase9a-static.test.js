@@ -34,8 +34,12 @@ ok(admin.includes('const form = event.currentTarget') && admin.includes('savePro
 ok(admin.includes('state.promotionAssetUrls.get(existingFileId)'), 'saved promotion images are restored in the editor preview');
 ok(user.includes('สิ่งที่คุณต้องทำ') && user.includes('data-svp-promotion-next') && user.includes('การแจ้งเตือน Safety Vote'), 'user discovery and notification center');
 ok(user.includes('promotionHistoryMarkup') && user.includes('promotions.data?.history'), 'expired promotion history is rendered for eligible users');
-ok(user.includes('โหมดตรวจสอบของผู้ดูแลระบบ') && user.includes('previewOnly'), 'Admin preview is visibly read-only');
-ok(!user.includes('setInterval('), 'carousel never auto-rotates');
+ok(user.includes('กำลังดูในฐานะผู้ดูแลระบบ') && user.includes('previewOnly'), 'Admin preview is visibly read-only');
+ok(!user.includes('setInterval(') && user.includes('schedulePromotionCarousel(delay = 6000)'), 'carousel uses one restartable auto-rotation timer');
+ok(user.includes('data-svp-promotion-carousel') && user.includes('visibilitychange') && user.includes('promotionPointerStartX'), 'carousel supports visibility pause, controls and swipe');
+ok(user.includes("matchMedia('(prefers-reduced-motion: reduce)').matches") && user.includes('mouseenter') && user.includes('focusin'), 'carousel respects motion preference and interaction pause');
+ok(user.includes('svp-promotion__backdrop') && user.includes('svp-promotion__foreground'), 'promotion image uses decorative cover and complete foreground layers');
+ok(css.includes('.svp-promotion__backdrop') && css.includes('object-fit: cover') && css.includes('.svp-promotion__foreground') && css.includes('object-fit: contain'), 'responsive layered image fit contract');
 ok(css.includes('.svp-promotion') && css.includes('@media (prefers-reduced-motion: reduce)'), 'responsive reduced-motion presentation');
 ok(css.includes('min-height: 44px'), 'minimum touch target contract');
 console.log(`Safety Vote UX Phase 9A static + Node/PHP parity: PASS (${checks} assertions)`);

@@ -38,7 +38,8 @@ const state = {
     workflowDraftId: null, workflowReference: '', submissionGallery: [], submitError: null, objectUrls: new Set(), trackedPromotionEvents: new Set(),
     liveView: false, liveResults: null, liveError: null, liveInFlight: false, livePaused: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null,
     discoveryRefreshing: false, discoveryRefreshHandler: null, notificationsExpanded: false, catalogueMode: 'legacy_discovery',
-    peopleLabels: {}, peoplePickerCleanup: null, officialResults: null, publicWorks: []
+    peopleLabels: {}, peoplePickerCleanup: null, officialResults: null, publicWorks: [],
+    promotionTimer: null, promotionPaused: false, promotionVisibilityHandler: null, promotionPointerStartX: null
 };
 
 function trackPromotionEvent(promotionId, eventType) {
@@ -67,15 +68,21 @@ function eligibilityBadgeMarkup(source, { eligible = false, discoveryOnly = fals
     return `<b class="svp-auto-eligibility-chip svp-eligibility-chip is-${origin}" title="${escHtml(description)}">${escHtml(label)}</b>`;
 }
 
-function promotionImageMarkup(fileId, desktopFileId, altText = '') {
-    return `<span class="svp-auth-media__status" role="status"><span aria-hidden="true"></span><span data-sv-auth-status>กำลังโหลดภาพ…</span></span><img class="svp-auth-image" data-svp-promotion-file="${Number(fileId)}" data-desktop-file="${Number(desktopFileId || fileId)}" data-sv-auth-file="${Number(fileId)}" alt="${escHtml(altText)}" decoding="async">`;
+function promotionImageMarkup(fileId, desktopFileId, altText = '', { className = '', prime = true } = {}) {
+    return `<span class="svp-auth-media__status" role="status"><span aria-hidden="true"></span><span data-sv-auth-status>กำลังโหลดภาพ…</span></span><img class="svp-auth-image ${escHtml(className)}" data-svp-promotion-file="${Number(fileId)}" data-desktop-file="${Number(desktopFileId || fileId)}" ${prime ? `data-sv-auth-file="${Number(fileId)}"` : ''} alt="${escHtml(altText)}" decoding="async">`;
 }
 
 function promotionBannerMarkup() {
     if (!isSafetyVoteEngagementV1Enabled() || !state.promotions.length) return '';
-    const index = Math.min(state.promotionIndex, state.promotions.length - 1), item = state.promotions[index], fileId = item.mobileFileId || item.desktopFileId;
-    const cta = `<button type="button" class="sv-button sv-button--primary" data-svp-campaign="${Number(item.campaignId)}" data-svp-promotion-cta="${Number(item.id)}">${escHtml(item.ctaLabel || 'ดูรายละเอียด')}</button>`;
-    return `<section class="svp-promotion" aria-roledescription="carousel" aria-label="กิจกรรมประชาสัมพันธ์"><article aria-label="${index + 1} จาก ${state.promotions.length}" ${fileId ? 'data-svp-media-state="loading" aria-busy="true"' : ''}>${fileId ? promotionImageMarkup(fileId, item.desktopFileId, item.altText) : '<div class="svp-promotion__fallback" aria-hidden="true">Safety Vote</div>'}<div class="svp-promotion__shade"><p class="sv-eyebrow">กิจกรรมแนะนำ</p><h2>${escHtml(item.titleTh)}</h2><p>${escHtml(item.subtitleTh || item.campaignTitle || '')}</p>${cta}</div></article>${state.promotions.length > 1 ? `<div class="svp-promotion__controls"><button type="button" class="sv-icon-button" data-svp-promotion-prev aria-label="ป้ายก่อนหน้า">←</button><span>${index + 1}/${state.promotions.length}</span><button type="button" class="sv-icon-button" data-svp-promotion-next aria-label="ป้ายถัดไป">→</button></div>` : ''}</section>`;
+    const activeIndex = Math.min(state.promotionIndex, state.promotions.length - 1);
+    const slides = state.promotions.map((item, index) => {
+        const fileId = item.mobileFileId || item.desktopFileId, active = index === activeIndex, prime = active || index === (activeIndex + 1) % state.promotions.length;
+        const cta = `<button type="button" class="sv-button sv-button--primary" data-svp-campaign="${Number(item.campaignId)}" data-svp-promotion-cta="${Number(item.id)}" ${active ? '' : 'tabindex="-1"'}>${escHtml(item.ctaLabel || 'ดูรายละเอียด')}</button>`;
+        const media = fileId ? `<div class="svp-promotion__media" data-svp-media-state="loading" aria-busy="true"><img class="svp-promotion__backdrop" data-svp-promotion-backdrop alt="" aria-hidden="true" decoding="async">${promotionImageMarkup(fileId, item.desktopFileId, item.altText, { className: 'svp-promotion__foreground', prime })}</div>` : '<div class="svp-promotion__fallback" aria-hidden="true">Safety Vote</div>';
+        return `<article class="svp-promotion__slide ${active ? 'is-active' : ''}" data-svp-promotion-slide="${index}" aria-hidden="${active ? 'false' : 'true'}" aria-label="${index + 1} จาก ${state.promotions.length}">${media}<div class="svp-promotion__shade"><p class="sv-eyebrow">กิจกรรมแนะนำ</p><h2>${escHtml(item.titleTh)}</h2><p>${escHtml(item.subtitleTh || item.campaignTitle || '')}</p>${cta}</div></article>`;
+    }).join('');
+    const controls = state.promotions.length > 1 ? `<div class="svp-promotion__controls"><button type="button" class="sv-icon-button" data-svp-promotion-prev aria-label="ป้ายก่อนหน้า">←</button><div class="svp-promotion__dots" role="group" aria-label="เลือกป้ายกิจกรรม">${state.promotions.map((_, index) => `<button type="button" data-svp-promotion-dot="${index}" aria-label="ไปป้ายที่ ${index + 1}" aria-current="${index === activeIndex ? 'true' : 'false'}"></button>`).join('')}</div><span data-svp-promotion-counter>${activeIndex + 1}/${state.promotions.length}</span><button type="button" class="sv-icon-button" data-svp-promotion-next aria-label="ป้ายถัดไป">→</button></div>` : '';
+    return `<section class="svp-promotion" aria-roledescription="carousel" aria-label="กิจกรรมประชาสัมพันธ์" aria-live="off" data-svp-promotion-carousel><div class="svp-promotion__viewport">${slides}</div>${controls}</section>`;
 }
 
 function promotionHistoryMarkup() {
@@ -107,6 +114,7 @@ function automaticEligibilityNoticeMarkup() {
 }
 
 function clearObjectUrls(preserveSubmissionPreviews = false) {
+    state.page?.querySelectorAll('[data-svp-promotion-slide]').forEach(slide => releaseSafetyVoteImages(slide));
     if (state.page) releaseSafetyVoteImages(state.page);
     if (preserveSubmissionPreviews) return;
     state.objectUrls.forEach(url => URL.revokeObjectURL(url));
@@ -215,6 +223,7 @@ function auxiliaryMarkup() {
 }
 
 function renderList() {
+    stopPromotionCarousel();
     clearObjectUrls();
     // Phase 1 regression contract: showJury: jury > 0 remains assignment-aware.
     const rows = filterCampaigns(state.campaigns, { view: state.view, query: state.query });
@@ -239,16 +248,90 @@ function renderList() {
     hydratePromotionImages();
 }
 
-function preparePromotionImages() {
-    [...state.page.querySelectorAll('[data-svp-promotion-file]')].forEach(image => {
+function preparePromotionImages(root = state.page) {
+    [...(root?.querySelectorAll('[data-svp-promotion-file][data-sv-auth-file]') || [])].forEach(image => {
         const desktop = Number(image.dataset.desktopFile || 0), mobile = Number(image.dataset.svpPromotionFile || 0), fileId = matchMedia('(min-width: 768px)').matches && desktop ? desktop : mobile;
         image.dataset.svAuthFile = String(fileId);
     });
 }
 
+function syncPromotionBackdrops(root = state.page) {
+    const slides = root?.matches?.('[data-svp-promotion-slide]')
+        ? [root]
+        : [...(root?.querySelectorAll('[data-svp-promotion-slide]') || [])];
+    slides.forEach(slide => {
+        const foreground = slide.querySelector('.svp-promotion__foreground'), backdrop = slide.querySelector('[data-svp-promotion-backdrop]');
+        if (foreground?.src && backdrop && backdrop.src !== foreground.src) backdrop.src = foreground.src;
+    });
+}
+
+async function hydratePromotionSlide(index) {
+    const slide = state.page?.querySelector(`[data-svp-promotion-slide="${Number(index)}"]`), image = slide?.querySelector('[data-svp-promotion-file]');
+    if (!slide || !image) return;
+    if (image.dataset.svpPromotionHydrated === 'true') { syncPromotionBackdrops(slide); return; }
+    if (!image.dataset.svAuthFile) image.dataset.svAuthFile = image.dataset.svpPromotionFile || image.dataset.desktopFile || '';
+    preparePromotionImages(slide);
+    await hydrateSafetyVoteImages(slide);
+    if (image.src && slide.querySelector('[data-svp-media-state]')?.dataset.svpMediaState === 'loaded') image.dataset.svpPromotionHydrated = 'true';
+    syncPromotionBackdrops(slide);
+}
+
 async function hydratePromotionImages() {
     preparePromotionImages();
     await hydrateSafetyVoteImages(state.page);
+    state.page?.querySelectorAll('[data-svp-promotion-file]').forEach(image => {
+        if (image.src && image.closest('[data-svp-media-state]')?.dataset.svpMediaState === 'loaded') image.dataset.svpPromotionHydrated = 'true';
+    });
+    syncPromotionBackdrops();
+}
+
+function stopPromotionCarousel() {
+    clearTimeout(state.promotionTimer); state.promotionTimer = null; state.promotionPaused = false; state.promotionPointerStartX = null;
+    if (state.promotionVisibilityHandler) document.removeEventListener('visibilitychange', state.promotionVisibilityHandler);
+    state.promotionVisibilityHandler = null;
+}
+
+function schedulePromotionCarousel(delay = 6000) {
+    clearTimeout(state.promotionTimer); state.promotionTimer = null;
+    if (state.promotions.length < 2 || state.promotionPaused || document.hidden || state.screen !== 'list' || matchMedia('(prefers-reduced-motion: reduce)').matches || !state.page?.querySelector('[data-svp-promotion-carousel]')) return;
+    state.promotionTimer = setTimeout(() => selectPromotion((state.promotionIndex + 1) % state.promotions.length, { manual: false }), delay);
+}
+
+function selectPromotion(index, { manual = true } = {}) {
+    if (!state.promotions.length) return;
+    state.promotionIndex = (Number(index) + state.promotions.length) % state.promotions.length;
+    const carousel = state.page?.querySelector('[data-svp-promotion-carousel]');
+    if (!carousel) return;
+    carousel.querySelectorAll('[data-svp-promotion-slide]').forEach((slide, slideIndex) => {
+        const active = slideIndex === state.promotionIndex;
+        slide.classList.toggle('is-active', active); slide.setAttribute('aria-hidden', active ? 'false' : 'true');
+        slide.querySelectorAll('button,a').forEach(control => { control.tabIndex = active ? 0 : -1; });
+    });
+    carousel.querySelectorAll('[data-svp-promotion-dot]').forEach((dot, dotIndex) => dot.setAttribute('aria-current', dotIndex === state.promotionIndex ? 'true' : 'false'));
+    const counter = carousel.querySelector('[data-svp-promotion-counter]'); if (counter) counter.textContent = `${state.promotionIndex + 1}/${state.promotions.length}`;
+    const nextIndex = (state.promotionIndex + 1) % state.promotions.length;
+    Promise.all([hydratePromotionSlide(state.promotionIndex), hydratePromotionSlide(nextIndex)]).catch(() => {});
+    trackPromotionEvent(state.promotions[state.promotionIndex]?.id, 'impression');
+    schedulePromotionCarousel(manual ? 7000 : 6000);
+}
+
+function bindPromotionCarousel() {
+    const carousel = state.page?.querySelector('[data-svp-promotion-carousel]');
+    if (!carousel || state.promotions.length < 2) return;
+    carousel.querySelector('[data-svp-promotion-prev]')?.addEventListener('click', () => selectPromotion(state.promotionIndex - 1));
+    carousel.querySelector('[data-svp-promotion-next]')?.addEventListener('click', () => selectPromotion(state.promotionIndex + 1));
+    carousel.querySelectorAll('[data-svp-promotion-dot]').forEach(button => button.addEventListener('click', () => selectPromotion(Number(button.dataset.svpPromotionDot))));
+    carousel.addEventListener('mouseenter', () => { state.promotionPaused = true; clearTimeout(state.promotionTimer); });
+    carousel.addEventListener('mouseleave', () => { state.promotionPaused = false; schedulePromotionCarousel(3000); });
+    carousel.addEventListener('focusin', () => { state.promotionPaused = true; clearTimeout(state.promotionTimer); });
+    carousel.addEventListener('focusout', event => { if (!carousel.contains(event.relatedTarget)) { state.promotionPaused = false; schedulePromotionCarousel(3000); } });
+    const viewport = carousel.querySelector('.svp-promotion__viewport');
+    viewport?.addEventListener('pointerdown', event => { if (!event.target.closest('button,a')) { state.promotionPointerStartX = event.clientX; state.promotionPaused = true; clearTimeout(state.promotionTimer); } });
+    viewport?.addEventListener('pointerup', event => { if (state.promotionPointerStartX === null) return; const distance = event.clientX - state.promotionPointerStartX; state.promotionPointerStartX = null; state.promotionPaused = false; if (Math.abs(distance) >= 44) selectPromotion(state.promotionIndex + (distance < 0 ? 1 : -1)); else schedulePromotionCarousel(3000); });
+    viewport?.addEventListener('pointercancel', () => { state.promotionPointerStartX = null; state.promotionPaused = false; schedulePromotionCarousel(3000); });
+    state.promotionVisibilityHandler = () => { if (document.hidden) clearTimeout(state.promotionTimer); else schedulePromotionCarousel(3000); };
+    document.addEventListener('visibilitychange', state.promotionVisibilityHandler);
+    schedulePromotionCarousel();
 }
 
 function questionControl(question) {
@@ -391,6 +474,7 @@ function officialResultsMarkup(results, campaign) {
 }
 
 function renderDetail() {
+    stopPromotionCarousel();
     clearObjectUrls(true);
     const detail = state.detail, campaign = detail.campaign, privacy = privacyNotice(campaign), submitted = String(valueOf(detail.participation, 'State', 'state')).toLowerCase() === 'submitted';
     const preOpen = Boolean(detail.preOpen || detail.accessMode === 'pre_open_promotion');
@@ -481,14 +565,13 @@ function confirmSubmit() {
 
 function bindList() {
     bindRoleNavigation();
+    bindPromotionCarousel();
     state.page.querySelector('[data-svp-search]')?.addEventListener('input', event => { state.query = event.target.value; renderList(); requestAnimationFrame(() => { const input = state.page.querySelector('[data-svp-search]'); input?.focus(); input?.setSelectionRange(state.query.length, state.query.length); }); });
     state.page.querySelectorAll('[data-svp-view]').forEach(button => button.addEventListener('click', () => { state.view = button.dataset.svpView; renderList(); }));
     state.page.querySelectorAll('[data-svp-campaign]').forEach(button => button.addEventListener('click', () => openCampaign(Number(button.dataset.svpCampaign))));
-    state.page.querySelector('[data-svp-promotion-cta]')?.addEventListener('click', event => trackPromotionEvent(event.currentTarget.dataset.svpPromotionCta, 'cta_click'));
+    state.page.querySelectorAll('[data-svp-promotion-cta]').forEach(button => button.addEventListener('click', event => trackPromotionEvent(event.currentTarget.dataset.svpPromotionCta, 'cta_click')));
     state.page.querySelector('[data-sv-role-link="jury"]')?.addEventListener('click', event => { event.preventDefault(); loadSafetyVoteJuryWorkspace({ page: state.page, onUser: load }); });
     state.page.querySelectorAll('[data-svp-jury]').forEach(button => button.addEventListener('click', () => loadSafetyVoteJuryWorkspace({ page: state.page, initialAssignmentId: Number(button.dataset.svpJury), onUser: load })));
-    state.page.querySelector('[data-svp-promotion-prev]')?.addEventListener('click', () => { state.promotionIndex = (state.promotionIndex - 1 + state.promotions.length) % state.promotions.length; renderList(); });
-    state.page.querySelector('[data-svp-promotion-next]')?.addEventListener('click', () => { state.promotionIndex = (state.promotionIndex + 1) % state.promotions.length; renderList(); });
     state.page.querySelectorAll('[data-svp-scroll]').forEach(button => button.addEventListener('click', () => state.page.querySelector('#svp-consent-title')?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' })));
     state.page.querySelectorAll('[data-svp-notification]').forEach(button => button.addEventListener('click', async () => { const id = Number(button.dataset.svpNotification), item = state.notificationCenter.find(row => Number(row.id) === id); if (item && !item.readAt) { try { await API.post(`/safety-vote/notification-center/${id}/read`, {}); item.readAt = new Date().toISOString(); } catch (_) {} } const campaignId = Number(button.dataset.campaignId); if (state.campaigns.some(row => Number(row.id) === campaignId)) openCampaign(campaignId); else renderList(); }));
     state.page.querySelector('[data-svp-notification-more]')?.addEventListener('click', () => { state.notificationsExpanded = !state.notificationsExpanded; renderList(); state.page.querySelector('#svp-notification-center-title')?.scrollIntoView({ block: 'center' }); });
@@ -528,6 +611,7 @@ function bindDetail() {
 }
 
 async function openCampaign(id) {
+    stopPromotionCarousel();
     stopLivePolling();
     clearObjectUrls();
     state.screen = 'detail'; state.loading = true; state.error = null; state.denied = false; state.moduleDisabled = false; state.errors = []; state.answers = {}; state.peopleLabels={}; state.receipt = null; state.requestKey = ''; state.workflowDraftId = null; state.workflowReference = ''; state.submissionGallery = []; state.submitError = null; state.officialResults = null;

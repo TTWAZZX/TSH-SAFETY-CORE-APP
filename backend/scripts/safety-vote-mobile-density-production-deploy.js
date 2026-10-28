@@ -12,19 +12,16 @@ const root = path.resolve(__dirname, '..', '..');
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = 'ba8b4b02764ff6274c8756af076c9c4a80e98943';
-const confirmation = 'DEPLOY_SAFETY_VOTE_JURY_ASSIGNMENT_UX_R1';
+const productionBaseline = '6e8ac9416b10d29c8029df5071fc3dee1cf9cf46';
+const confirmation = 'DEPLOY_SAFETY_VOTE_PROMOTION_CAROUSEL_R1';
 const runtimePaths = Object.freeze([
     'index.html',
     'public/style.css',
     'public/js/main.js',
     'public/js/pages/safety-vote-page-ux1.js',
-    'public/js/pages/safety-vote-jury-workspace.js',
-    'public/js/pages/safety-vote-jury-model.mjs',
-    'api/handlers/safety_vote_phase4.php',
 ]);
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-jury-assignment-ux-deploy-${stamp}`);
+const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-promotion-carousel-deploy-${stamp}`);
 const candidateRoot = path.join(evidenceRoot, 'candidate');
 const rollbackRoot = path.join(evidenceRoot, 'rollback-package');
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -112,21 +109,16 @@ function prepare(commit, tree) {
     const main = gitBlob(commit, 'public/js/main.js').toString('utf8');
     const css = gitBlob(commit, 'public/style.css').toString('utf8');
     const page = gitBlob(commit, 'public/js/pages/safety-vote-page-ux1.js').toString('utf8');
-    const workspace = gitBlob(commit, 'public/js/pages/safety-vote-jury-workspace.js').toString('utf8');
-    const model = gitBlob(commit, 'public/js/pages/safety-vote-jury-model.mjs').toString('utf8');
-    const phpPhase4 = gitBlob(commit, 'api/handlers/safety_vote_phase4.php').toString('utf8');
-    assert(index.includes('public/style.css?v=20261028-safety-vote-jury-assignment-ux-r1'), 'Jury assignment stylesheet cache marker missing');
-    assert(index.includes('public/js/main.js?v=20261028-safety-vote-jury-assignment-ux-r1'), 'Jury assignment main cache marker missing');
-    assert(main.includes('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-jury-assignment-ux-r1'), 'Jury assignment page cache marker missing');
-    assert(page.includes('คุณมีสิทธิ์กรรมการสำหรับแคมเปญนี้') && page.includes('รอให้คะแนน') && page.includes('กำลังประเมิน'), 'Role-aware jury assignment UX missing');
-    assert(page.includes('./safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-assignment-ux-r1'), 'Jury workspace cache marker missing');
-    assert(workspace.includes('ExpectedScoreCount') && workspace.includes('StageName') && workspace.includes('ประเมินต่อ'), 'Jury assignment progress UX missing');
-    assert(model.includes("draft: 'รอประเมิน'") && model.includes("'StageName', 'stageName'"), 'Jury assignment model labels missing');
-    assert(phpPhase4.includes('StageName') && phpPhase4.includes('ScoreCount') && phpPhase4.includes('ExpectedScoreCount'), 'PHP jury assignment projection missing');
-    assert(css.includes('var(--svp-mobile-control-height, 44px)') && css.includes('.svp-assignment-grid button small'), 'Jury mobile touch target styling missing');
+    assert(index.includes('public/style.css?v=20261028-safety-vote-promotion-carousel-r1'), 'Promotion carousel stylesheet cache marker missing');
+    assert(index.includes('public/js/main.js?v=20261028-safety-vote-promotion-carousel-r1'), 'Promotion carousel main cache marker missing');
+    assert(main.includes('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-promotion-carousel-r1'), 'Promotion carousel page cache marker missing');
+    assert(page.includes('schedulePromotionCarousel(delay = 6000)') && page.includes('data-svp-promotion-carousel') && page.includes('promotionPointerStartX'), 'Promotion carousel behavior missing');
+    assert(page.includes('svp-promotion__backdrop') && page.includes('svp-promotion__foreground') && page.includes("matchMedia('(prefers-reduced-motion: reduce)').matches"), 'Promotion image layering or reduced-motion guard missing');
+    assert(css.includes('.svp-promotion__backdrop') && css.includes('object-fit: cover') && css.includes('.svp-promotion__foreground') && css.includes('object-fit: contain'), 'Promotion responsive image-fit styling missing');
+    assert(css.includes('.svp-promotion__dots button') && css.includes('min-width: 44px') && css.includes('min-height: 44px'), 'Promotion carousel touch targets missing');
 
     const manifest = {
-        contract: '2026-10-28-safety-vote-jury-assignment-ux-r1',
+        contract: '2026-10-28-safety-vote-promotion-carousel-r1',
         productionBaseline,
         candidate: { commit, tree },
         runtimePaths,
@@ -223,9 +215,9 @@ async function main() {
     const https = await httpsVerify(prepared.candidate, commit);
     const authenticated = await authenticatedSmoke();
     const result = {
-        contract: '2026-10-28-safety-vote-jury-assignment-ux-r1',
+        contract: '2026-10-28-safety-vote-promotion-carousel-r1',
         generatedAt: new Date().toISOString(),
-        decision: 'PASS_SAFETY_VOTE_JURY_ASSIGNMENT_UX_PRODUCTION_DEPLOYMENT',
+        decision: 'PASS_SAFETY_VOTE_PROMOTION_CAROUSEL_PRODUCTION_DEPLOYMENT',
         candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length },
         remoteBefore: prepared.remoteBefore,
         deployment: { uploaded: prepared.candidate.length, doubleDownloadVerified: deployed.length, httpsVerified: https.publicFiles.length },
@@ -248,6 +240,6 @@ main().catch(error => {
             ? 'HOLD_DEPLOYMENT_FAILED_RUNTIME_ROLLED_BACK'
             : 'HOLD_DEPLOYMENT_ROLLBACK_INCOMPLETE';
     writeJson('failure.json', { generatedAt: new Date().toISOString(), decision, error: error.message, rollback });
-    process.stderr.write(`Safety Vote Jury Assignment UX deployment failed: ${error.message}\n`);
+    process.stderr.write(`Safety Vote Promotion Carousel deployment failed: ${error.message}\n`);
     process.exitCode = 1;
 });
