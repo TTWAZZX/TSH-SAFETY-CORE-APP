@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Promotion Carousel Production Deployment (PASS, 2026-10-28)
+
+- Immutable commit `d39ba47c4e2a2d61d0b0727c5c112534fe0f43fe` was deployed to the PHP shared-hosting Production target from baseline `6e8ac9416b10d29c8029df5071fc3dee1cf9cf46`. The guarded release uploaded 4 allowlisted frontend runtime files after remote pre-deploy double-download drift checks and created a verified four-file rollback package.
+- The recommended-activity banner now rotates every six seconds across every published promotion, loops continuously and supports previous/next controls, direct slide dots and touch swipe. Rotation pauses for hover, focus, touch and hidden tabs; manual navigation resets the delay and reduced-motion users receive no automatic movement.
+- Promotion images preserve the complete uploaded artwork with `contain` while reusing the same authenticated image as a blurred `cover` backdrop, so Admin uploads require no resizing. Current and next slides are hydrated lazily, object URLs are released, and carousel controls retain 44 px touch targets on mobile.
+- Static/Node/PHP parity passed 45 assertions. Authenticated Browser UAT passed Admin/User at 390, 430, 768, 1366 and 1920 px with no horizontal overflow, sub-44 px visible control or console error; the layered image contract passed at 390x844 and 1366x768.
+- Production HTTPS SHA-256 matched all 4 deployed runtime files. Authenticated health remains ready at schema `2026-10-25-jury-work-items-atomic-media-r1`, with 7 campaigns and 1 Jury assignment visible to the deployment account. Evidence: `backups/production/safety-vote-promotion-carousel-deploy-20261028061340/`; rollback manifest SHA-256 `5fdfb69d8a35076e7d822a7076088d36ec6e7b99e9fd6832066ac76a9b07d12f`, result SHA-256 `4edcc2d2ac93ea59da50512b71f42a0750d00eb1585c3497b2c266c9a104ebfa`. No schema/business-data change, notification delivery or external-delivery configuration change occurred. Decision: `PASS_SAFETY_VOTE_PROMOTION_CAROUSEL_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Jury Assignment UX Production Deployment (PASS, 2026-10-28)
 
 - Immutable commit `71c4b93c0da507b03b1e42ff2681685260421064` was deployed to the PHP shared-hosting Production target from baseline `ba8b4b02764ff6274c8756af076c9c4a80e98943`. The guarded release uploaded 7 runtime files after remote pre-deploy double-download drift checks and created a verified runtime rollback package.
