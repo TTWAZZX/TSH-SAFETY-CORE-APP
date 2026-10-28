@@ -34,7 +34,7 @@ async function main() {
         if (/\/api\/safety-vote\/engagement\/promotions\/\d+\/events(?:\?|$)/.test(request.url())) {
             eventRequests.push({ method: request.method(), url: request.url().replace(/\?.*$/, '') });
         }
-        if (request.url().includes('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(request.method()) && !request.url().endsWith('/api/login')) {
+        if (request.url().includes('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(request.method()) && !request.url().endsWith('/api/login') && !request.url().includes('/api/session/verify')) {
             mutationRequests.push({ method: request.method(), url: request.url().replace(/\?.*$/, '') });
         }
     });
@@ -91,6 +91,11 @@ async function main() {
         assert.equal(await juryEntry.count(), 1, 'Production deployment account has no Jury entry');
         await juryEntry.click();
         await page.locator('.svj-candidate__workspace').first().waitFor({ timeout: 30000 });
+        await page.locator('.svj-candidate').first().evaluate(node => {
+            node.scrollIntoView({ block: 'start' });
+            window.scrollBy(0, -76);
+        });
+        await page.waitForTimeout(150);
         const juryState = await page.evaluate(() => {
             const workspace = document.querySelector('.svj-candidate__workspace');
             const evidencePanel = document.querySelector('.svj-candidate__evidence');
