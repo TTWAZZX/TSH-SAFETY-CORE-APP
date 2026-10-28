@@ -12,8 +12,8 @@ const root = path.resolve(__dirname, '..', '..');
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
 const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = '4886262892fd1fdb6d57d32cbc355a36c795b832';
-const confirmation = 'DEPLOY_SAFETY_VOTE_JURY_SCORING_R2';
+const productionBaseline = '30a663d360f91055b5860e4680c2d331df5740ca';
+const confirmation = 'DEPLOY_SAFETY_VOTE_JURY_SCORING_R3';
 const runtimePaths = Object.freeze([
     'index.html',
     'public/style.css',
@@ -26,7 +26,7 @@ const runtimePaths = Object.freeze([
     'api/lib/safety_vote_phase4.php',
 ]);
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-jury-scoring-r2-deploy-${stamp}`);
+const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-jury-scoring-r3-deploy-${stamp}`);
 const candidateRoot = path.join(evidenceRoot, 'candidate');
 const rollbackRoot = path.join(evidenceRoot, 'rollback-package');
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -119,10 +119,13 @@ function prepare(commit, tree) {
     const participationModel = gitBlob(commit, 'public/js/pages/safety-vote-participation-model.mjs').toString('utf8');
     const phpHandler = gitBlob(commit, 'api/handlers/safety_vote_phase4.php').toString('utf8');
     const phpLib = gitBlob(commit, 'api/lib/safety_vote_phase4.php').toString('utf8');
-    assert(index.includes('public/style.css?v=20261028-safety-vote-jury-scoring-r2'), 'Jury scoring R2 stylesheet cache marker missing');
-    assert(index.includes('public/js/main.js?v=20261028-safety-vote-jury-scoring-r2'), 'Jury scoring R2 main cache marker missing');
-    assert(main.includes('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-jury-scoring-r2'), 'Jury scoring R2 page cache marker missing');
-    assert(page.includes('./safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-scoring-r2'), 'Jury scoring R2 workspace cache marker missing');
+    assert(index.includes('public/style.css?v=20261028-safety-vote-jury-scoring-r3'), 'Jury scoring R3 stylesheet cache marker missing');
+    assert(index.includes('public/js/main.js?v=20261028-safety-vote-jury-scoring-r3'), 'Jury scoring R3 main cache marker missing');
+    assert(main.includes('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-jury-scoring-r3'), 'Jury scoring R3 page cache marker missing');
+    assert(page.includes('./safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-scoring-r3'), 'Jury scoring R3 workspace cache marker missing');
+    const promotionHydrator = page.match(/async function hydratePromotionImages\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+    assert(!promotionHydrator.includes('submitted') && !promotionHydrator.includes('detail.canSubmit'), 'Promotion hydration still references renderDetail-local variables');
+    assert(/function renderDetail\(\)[\s\S]*participantProgressNavigatorMarkup\(\)/.test(page), 'Progress navigator is not inserted from renderDetail scope');
     assert(page.includes('schedulePromotionCarousel(delay = 6000)') && page.includes('data-svp-promotion-carousel') && page.includes('promotionPointerStartX'), 'Promotion carousel behavior missing');
     assert(page.includes('svp-promotion__backdrop') && page.includes('svp-promotion__foreground') && page.includes("matchMedia('(prefers-reduced-motion: reduce)').matches"), 'Promotion image layering or reduced-motion guard missing');
     assert(page.includes('promotionAdminPreview') && page.includes('promotions.data?.adminPreview === true') && page.includes('|| state.promotionAdminPreview'), 'Admin preview analytics suppression missing');
@@ -142,7 +145,7 @@ function prepare(commit, tree) {
     assert(phpLib.includes('bool$requireComplete=true') && phpLib.includes('if($requireComplete)'), 'PHP partial draft validator missing');
 
     const manifest = {
-        contract: '2026-10-28-safety-vote-jury-scoring-r2',
+        contract: '2026-10-28-safety-vote-jury-scoring-r3',
         productionBaseline,
         candidate: { commit, tree },
         runtimePaths,
@@ -239,9 +242,9 @@ async function main() {
     const https = await httpsVerify(prepared.candidate, commit);
     const authenticated = await authenticatedSmoke();
     const result = {
-        contract: '2026-10-28-safety-vote-jury-scoring-r2',
+        contract: '2026-10-28-safety-vote-jury-scoring-r3',
         generatedAt: new Date().toISOString(),
-        decision: 'PASS_SAFETY_VOTE_JURY_SCORING_R2_PRODUCTION_DEPLOYMENT',
+        decision: 'PASS_SAFETY_VOTE_JURY_SCORING_R3_PRODUCTION_DEPLOYMENT',
         candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length },
         remoteBefore: prepared.remoteBefore,
         deployment: { uploaded: prepared.candidate.length, doubleDownloadVerified: deployed.length, httpsVerified: https.publicFiles.length },
@@ -264,6 +267,6 @@ main().catch(error => {
             ? 'HOLD_DEPLOYMENT_FAILED_RUNTIME_ROLLED_BACK'
             : 'HOLD_DEPLOYMENT_ROLLBACK_INCOMPLETE';
     writeJson('failure.json', { generatedAt: new Date().toISOString(), decision, error: error.message, rollback });
-    process.stderr.write(`Safety Vote Jury Scoring R2 deployment failed: ${error.message}\n`);
+    process.stderr.write(`Safety Vote Jury Scoring R3 deployment failed: ${error.message}\n`);
     process.exitCode = 1;
 });

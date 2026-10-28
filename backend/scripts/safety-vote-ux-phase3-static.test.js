@@ -43,7 +43,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('loadLegacySafetyVotePage') && page.includes('data-svp-jury'), 'existing Juror workspace handoff is missing');
     check(page.includes('state.moduleDisabled') && page.includes('MODULE_DISABLED'), 'module_enabled fail-closed state is missing');
     check(page.includes('state.denied') && page.includes('PERMISSION_DENIED'), 'permission denied state is missing');
-    const currentCacheKey = /safety-vote-(?:(?:ux(?:[3-8]|9c)|phase9abc-enabled|preview-gallery|public-discovery|wizard-layout|final-phase7|jury-score-ux|official-topn)-r1|jury-scoring-r[12]|density-r[1-9]\d*)/;
+    const currentCacheKey = /safety-vote-(?:(?:ux(?:[3-8]|9c)|phase9abc-enabled|preview-gallery|public-discovery|wizard-layout|final-phase7|jury-score-ux|official-topn)-r1|jury-scoring-r[1-3]|density-r[1-9]\d*)/;
     check(currentCacheKey.test(main) && currentCacheKey.test(html), 'Phase 3-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 3'), 'Phase 3 scoped CSS marker is missing');
     check(css.includes('.svp-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
@@ -56,7 +56,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(css.includes('.svp-shell[data-sv-participation] .sv-role-nav__item'), 'participant mobile role navigation is not scoped');
     check(css.includes('.svp-shell[data-sv-participation] .sv-journey-steps button'), 'participant mobile journey density is not scoped');
     check(css.includes('flex-direction: row') && css.includes('.svp-shell[data-sv-participation] .svp-action-bar'), 'participant mobile action bar must remain a single row');
-    check(html.includes('20261028-safety-vote-density-r5') || html.includes('20261028-safety-vote-jury-scoring-r2'), 'participant mobile density stylesheet cache key is missing');
+    check(html.includes('20261028-safety-vote-density-r5') || /20261028-safety-vote-jury-scoring-r[23]/.test(html), 'participant mobile density stylesheet cache key is missing');
     check(css.includes('mobile density phase 3: choices, media and review flow'), 'participant mobile choice/review phase marker is missing');
     check(css.includes('.svp-option:has(input:checked)::after'), 'selected choice state must remain visible');
     check(css.includes('.svp-option > .sv-work-gallery--candidate'), 'candidate media strip is not scoped to choice cards');
@@ -84,6 +84,9 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     const workflowProgress = model.workflowProgressItems('submission_challenge', { title: 'A', description: '' }, [{ altText: '' }]);
     check(workflowProgress.map(item => item.status).join(',') === 'complete,incomplete,incomplete' && workflowProgress[2].targetId === 'svp-work-gallery-0', 'submission progress must locate every required field and image description');
     check(page.includes('participantProgressNavigatorMarkup') && page.includes('data-svp-progress-target') && page.includes('refreshParticipantProgressNavigator'), 'participant workflows must expose a live per-item progress navigator');
+    const promotionHydrator = page.match(/async function hydratePromotionImages\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+    check(!promotionHydrator.includes('submitted') && !promotionHydrator.includes('detail.canSubmit'), 'promotion hydration must not reference renderDetail-local variables');
+    check(/function renderDetail\(\)[\s\S]*participantProgressNavigatorMarkup\(\)/.test(page), 'participant progress navigator must be inserted from renderDetail scope');
     check(css.includes('.sv-progress-item.is-incomplete') && css.includes('.sv-progress-item.is-complete'), 'shared progress states must remain visually distinct');
     const payload = model.buildBallotPayload({ campaign: { VersionNo: 3 }, questions }, { 7: [70] });
     check(payload.campaignVersion === 3 && payload.acknowledgedRules === true, 'ballot envelope does not match the existing API');

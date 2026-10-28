@@ -4,7 +4,7 @@ import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, openSafetyVoteRea
 import {
     JURY_VIEW_LABELS, assignmentProgress, assignmentState, buildScorePayload, filterAssignments,
     normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateDraftScoreSheet, validateScoreSheet, valueOf
-} from './safety-vote-jury-model.mjs?v=20261028-safety-vote-jury-scoring-r2';
+} from './safety-vote-jury-model.mjs?v=20261028-safety-vote-jury-scoring-r3';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261024-safety-vote-gallery-r1';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261024-safety-vote-gallery-r1';

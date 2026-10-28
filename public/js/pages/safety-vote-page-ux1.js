@@ -4,7 +4,7 @@ import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261027-safety-vote-jury-work-media-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
-import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-scoring-r2';
+import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-scoring-r3';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-duplicate-media-r3';
 import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
@@ -12,7 +12,7 @@ import {
     CAMPAIGN_TYPE_LABELS, PRIVACY_LABELS, buildBallotPayload, campaignMatchesView, campaignType, filterCampaigns,
     isBallotCampaign, isChoiceQuestion, isQuestionVisible, participationProgressItems, participationState, privacyMode,
     privacyNotice, safeReceipt, validateParticipation, validateWorkflowParticipation, valueOf, workflowProgressItems
-} from './safety-vote-participation-model.mjs?v=20261028-safety-vote-jury-scoring-r2';
+} from './safety-vote-participation-model.mjs?v=20261028-safety-vote-jury-scoring-r3';
 
 const questionControlBase=questionControl;
 questionControl=function questionControlWithImage(question){
@@ -277,9 +277,6 @@ async function hydratePromotionSlide(index) {
 }
 
 async function hydratePromotionImages() {
-    if (state.mode === 'edit' && !submitted && detail.canSubmit && !state.liveView) {
-        state.page.querySelector('[data-svp-form]')?.insertAdjacentHTML('afterbegin', participantProgressNavigatorMarkup());
-    }
     preparePromotionImages();
     await hydrateSafetyVoteImages(state.page);
     state.page?.querySelectorAll('[data-svp-promotion-file]').forEach(image => {
@@ -529,6 +526,9 @@ function renderDetail() {
     state.page.querySelector('.svp-shell')?.setAttribute('data-sv-company-user-ux', 'phase5');
     if (isSafetyVoteEngagementV1Enabled() && state.mode === 'edit' && !submitted && !state.liveView) state.page.querySelector('.svp-detail-main')?.insertAdjacentHTML('afterbegin', `<section class="svp-campaign-intro" aria-labelledby="svp-campaign-intro-title"><div><p class="sv-eyebrow">ก่อนเข้าร่วม</p><h2 id="svp-campaign-intro-title">รายละเอียดกิจกรรม</h2><p>${escHtml(campaign.Description || campaign.Summary || 'ตรวจสอบข้อมูลและเงื่อนไขก่อนส่งรายการ')}</p></div><dl><div><dt>ผู้จัดกิจกรรม</dt><dd>${escHtml(campaign.OwnerEmployeeID || 'Safety / Admin')}</dd></div><div><dt>ระยะเวลาโดยประมาณ</dt><dd>3–5 นาที</dd></div><div><dt>เปิดกิจกรรม</dt><dd>${dateTime(campaign.OpenAt)}</dd></div><div><dt>ปิดกิจกรรม</dt><dd>${dateTime(campaign.CloseAt)}</dd></div></dl>${campaign.RulesText ? `<details><summary>กติกาและข้อกำหนด</summary><p>${escHtml(campaign.RulesText)}</p></details>` : ''}</section>`);
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'user', current: 'participation', campaign, onPage: true }));
+    if (state.mode === 'edit' && !submitted && detail.canSubmit && !state.liveView) {
+        state.page.querySelector('[data-svp-form]')?.insertAdjacentHTML('afterbegin', participantProgressNavigatorMarkup());
+    }
     preparePromotionImages();
     bindDetail(); bindSafetyVoteImageGallery(state.page); hydratePrivateImages();
     if (state.errors.length) state.page.querySelector('.svp-validation')?.focus();
