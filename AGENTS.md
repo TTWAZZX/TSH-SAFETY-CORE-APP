@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Promotion Carousel Admin Preview Hotfix R2 (PASS, 2026-10-28)
+
+- Immutable commit `5058212e9f78ed7e3235a6d5efd46cb55fee2b14` was deployed to the PHP shared-hosting Production target from runtime baseline `d39ba47c4e2a2d61d0b0727c5c112534fe0f43fe`. The guarded release uploaded 4 allowlisted frontend runtime files after remote double-download drift checks and created a verified rollback package.
+- Root cause of the Production console `403 CAMPAIGN_NOT_ELIGIBLE` was Admin catalogue preview sending participant impression analytics for promotions that Admin may preview without voter eligibility. R2 preserves Admin carousel preview but suppresses impression/CTA analytics in `adminPreview`; eligible employee analytics remain unchanged.
+- Static/Node/PHP parity passed 46 assertions and authenticated Local Browser UAT passed 10 Admin/User viewport combinations. Production read-only Browser UAT waited through automatic rotation from `1/2` to `2/2` and recorded 0 promotion event requests, 0 failed API responses, 0 console errors and no horizontal overflow.
+- Production HTTPS SHA-256 matched all 4 runtime files. Authenticated health remains ready at schema `2026-10-25-jury-work-items-atomic-media-r1`, with 7 campaigns and 1 Jury assignment visible to the deployment account. Deploy evidence: `backups/production/safety-vote-promotion-carousel-r2-deploy-20261028063142/`; rollback manifest SHA-256 `3801e178e6465816f8ba647687b8ca7774f7a8be611fc590f8c590ebb38fbfa6`, deploy result SHA-256 `e25d63ea8ab562c690ebc987993bdf68b8f77c43f4a63b67a2ce0eaacf1af2ad`.
+- Production Browser evidence: `backups/production/safety-vote-promotion-carousel-r2-readonly-20261028063551/`, result SHA-256 `d3ca91d4e4316c15a678ecf5ab54e44698510fce731d4ec26fb30d5bef1d05ad`. No schema/business-data mutation, notification delivery, external-delivery change or rollback occurred. Decisions: `PASS_SAFETY_VOTE_PROMOTION_CAROUSEL_R2_PRODUCTION_DEPLOYMENT`, `PASS_PRODUCTION_ADMIN_PREVIEW_NO_ANALYTICS_403`.
+
 ## Safety Vote Promotion Carousel Production Deployment (PASS, 2026-10-28)
 
 - Immutable commit `d39ba47c4e2a2d61d0b0727c5c112534fe0f43fe` was deployed to the PHP shared-hosting Production target from baseline `6e8ac9416b10d29c8029df5071fc3dee1cf9cf46`. The guarded release uploaded 4 allowlisted frontend runtime files after remote pre-deploy double-download drift checks and created a verified four-file rollback package.
