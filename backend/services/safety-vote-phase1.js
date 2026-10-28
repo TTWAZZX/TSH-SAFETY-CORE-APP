@@ -14,6 +14,8 @@ const RESULT_VISIBILITY = Object.freeze(['live','admin_only','hidden_until_close
 const RULE_ATTRIBUTES = Object.freeze(['all','employee_id','department_id','safety_unit_id','position_id','role','team']);
 const RULE_OPERATORS = Object.freeze(['EQUALS','NOT_EQUALS','IN','NOT_IN','IS_EMPTY','IS_NOT_EMPTY']);
 const RULE_EFFECTS = Object.freeze(['include','exclude']);
+const OFFICIAL_RESULT_TOP_N_MIN = 1;
+const OFFICIAL_RESULT_TOP_N_MAX = 100;
 
 function clean(value, max = 255) {
     return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().replace(/\s+/g, ' ').slice(0, max);
@@ -88,9 +90,11 @@ function normalizeCampaign(input = {}, options = {}) {
     const live = liveResults.normalizeConfig(input, Math.max(2, Math.min(100, Number(input.privacyThreshold || input.PrivacyThreshold || 5))));
     const maxParticipationAttempts = Number(input.maxParticipationAttempts ?? input.MaxParticipationAttempts ?? 1);
     const officialResultTopN = Number(input.officialResultTopN ?? input.OfficialResultTopN ?? input.liveLeaderboardTopN ?? input.LiveLeaderboardTopN ?? 5);
+    const resultReleasePolicy = clean(input.resultReleasePolicy ?? input.ResultReleasePolicy ?? 'automatic', 24).toLowerCase();
     if (!Number.isInteger(maxParticipationAttempts) || maxParticipationAttempts < 1 || maxParticipationAttempts > 10) errors.push({ field: 'maxParticipationAttempts', code: 'INVALID_RANGE' });
     if (privacyMode === 'secret_ballot' && maxParticipationAttempts !== 1) errors.push({ field: 'maxParticipationAttempts', code: 'SECRET_BALLOT_SINGLE_ATTEMPT_REQUIRED' });
-    if (![5, 10].includes(officialResultTopN)) errors.push({ field: 'officialResultTopN', code: 'INVALID_ENUM' });
+    if (!Number.isInteger(officialResultTopN) || officialResultTopN < OFFICIAL_RESULT_TOP_N_MIN || officialResultTopN > OFFICIAL_RESULT_TOP_N_MAX) errors.push({ field: 'officialResultTopN', code: 'INVALID_RANGE' });
+    if (!['manual', 'automatic'].includes(resultReleasePolicy)) errors.push({ field: 'resultReleasePolicy', code: 'INVALID_ENUM' });
     errors.push(...live.errors);
     if (live.value.enabled && campaignType !== 'popular_vote') errors.push({ field: 'liveLeaderboardEnabled', code: 'UNSUPPORTED_CAMPAIGN_TYPE' });
     if (live.value.enabled && privacyMode === 'secret_ballot') errors.push({ field: 'liveLeaderboardEnabled', code: 'SECRET_LIVE_RESULT_FORBIDDEN' });
@@ -108,7 +112,8 @@ function normalizeCampaign(input = {}, options = {}) {
             campaignType,
             privacyMode,
             resultVisibility,
-            officialResultTopN: [5, 10].includes(officialResultTopN) ? officialResultTopN : 5,
+            officialResultTopN: Number.isInteger(officialResultTopN) && officialResultTopN >= OFFICIAL_RESULT_TOP_N_MIN && officialResultTopN <= OFFICIAL_RESULT_TOP_N_MAX ? officialResultTopN : 5,
+            resultReleasePolicy: ['manual', 'automatic'].includes(resultReleasePolicy) ? resultReleasePolicy : 'automatic',
             discoveryMode: clean(input.discoveryMode || input.DiscoveryMode || 'eligible_only', 24) === 'public_listing' ? 'public_listing' : 'eligible_only',
             openAt: clean(input.openAt || input.OpenAt, 32) || null,
             closeAt: clean(input.closeAt || input.CloseAt, 32) || null,
@@ -175,4 +180,4 @@ function canonicalHash(value) {
     return crypto.createHash('sha256').update(JSON.stringify(sort(value))).digest('hex');
 }
 
-module.exports = { CONTRACT_VERSION, VISIBILITY_CONTRACT_VERSION, COMPANY_WIDE_DISCOVERY_MODE, PUBLISHED_LIFECYCLE_STATUSES, EXCLUDED_LIFECYCLE_STATUSES, CAMPAIGN_TYPES, PRIVACY_MODES, RESULT_VISIBILITY, RULE_ATTRIBUTES, RULE_OPERATORS, RULE_EFFECTS, clean, positiveInt, normalizeCode, formatCampaignCode, campaignVisibilityContract, campaignCatalogueAccess, normalizeCampaign, normalizeRule, normalizeRules, evaluateEligibility, canonicalHash };
+module.exports = { CONTRACT_VERSION, VISIBILITY_CONTRACT_VERSION, COMPANY_WIDE_DISCOVERY_MODE, PUBLISHED_LIFECYCLE_STATUSES, EXCLUDED_LIFECYCLE_STATUSES, CAMPAIGN_TYPES, PRIVACY_MODES, RESULT_VISIBILITY, RULE_ATTRIBUTES, RULE_OPERATORS, RULE_EFFECTS, OFFICIAL_RESULT_TOP_N_MIN, OFFICIAL_RESULT_TOP_N_MAX, clean, positiveInt, normalizeCode, formatCampaignCode, campaignVisibilityContract, campaignCatalogueAccess, normalizeCampaign, normalizeRule, normalizeRules, evaluateEligibility, canonicalHash };

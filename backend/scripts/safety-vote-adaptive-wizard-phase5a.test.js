@@ -43,12 +43,30 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
     assert.equal(model.workflowProfileFor(survey).eligibilityRequired, true);
     assert(model.validateStep(5, survey).length >= 3);
 
+    for (const topN of [1,3,5,10,20,37,50,100]) assert.equal(model.officialResultTopNValid(topN), true, `Top ${topN} must be accepted`);
+    for (const topN of [0,2.5,101,'']) assert.equal(model.officialResultTopNValid(topN), false, `Top ${topN} must be rejected`);
+    const customOfficial = { ...model.createWizardDraft(), officialResultTopN:37 };
+    assert.equal(model.validateStep(7, customOfficial).some(error => error.includes('ผลอย่างเป็นทางการ')), false);
+
     const wizard = read('public/js/pages/safety-vote-campaign-wizard.js');
+    const nodeCampaignRoutes = read('backend/routes/safety-vote.js');
+    const phpCampaignRoutes = read('api/handlers/safety_vote.php');
+    const nodeRevisionRoutes = read('backend/routes/safety-vote-phase10-4.js');
+    const phpRevisionRoutes = read('api/handlers/safety_vote_phase10_4.php');
+    const nodeNextCycle = read('backend/services/safety-vote-next-cycle.js');
+    const phpNextCycle = read('api/lib/safety_vote_next_cycle.php');
     const node = read('backend/routes/safety-vote-phase2.js');
     const php = read('api/handlers/safety_vote_phase2.php');
     assert(wizard.includes('wizardStepsFor(state.draft)'));
     assert(wizard.includes('data-svw-eligibility-skipped'));
     assert(wizard.includes('!workflowProfileFor(state.draft).eligibilityRequired'));
+    assert(wizard.includes('data-svw-official-topn-preset'));
+    assert(wizard.includes('กำหนดจำนวนเอง'));
+    assert(wizard.includes('data-svw-field="officialResultTopN"'));
+    for (const source of [nodeCampaignRoutes, phpCampaignRoutes, nodeRevisionRoutes, phpRevisionRoutes, nodeNextCycle, phpNextCycle]) {
+        assert(source.includes('OfficialResultTopN'), 'Official Top N must survive every campaign lifecycle path');
+        assert(source.includes('ResultReleasePolicy'), 'Release policy must survive every campaign lifecycle path');
+    }
     for (const source of [node, php]) {
         assert(source.includes('ELIGIBILITY_NOT_REQUIRED'));
         assert(source.includes('JURY_CRITERIA_PRESENT'));

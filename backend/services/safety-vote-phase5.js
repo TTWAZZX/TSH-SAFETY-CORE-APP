@@ -27,7 +27,7 @@ function dashboardModelWithIntegrity(input={}){
  return model;
 }
 function officialTopNGroups(groups=[],configuredTopN){
- const topN=[5,10].includes(Number(configuredTopN))?Number(configuredTopN):5;
+ const configured=Number(configuredTopN),topN=Number.isInteger(configured)&&configured>=1&&configured<=100?configured:5;
  return{topN,groups:(groups||[]).map(group=>{const ranked=(group.rows||[]).filter(row=>row.rank!=null&&row.state!=='no_result'&&Number(row.value||0)>0),boundary=ranked.length?Number(ranked[Math.min(topN,ranked.length)-1]?.rank||topN):null;return{...group,rows:boundary==null?[]:ranked.filter(row=>Number(row.rank)<=boundary)};})};
 }
 function officialResultPolicy(campaign={}){

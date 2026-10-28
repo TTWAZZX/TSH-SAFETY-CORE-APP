@@ -9,6 +9,14 @@ export function wizardStepsFor(draft = {}) {
 }
 
 export const WIZARD_STEPS = Object.freeze(wizardStepsFor({ campaignType: 'survey' }));
+export const OFFICIAL_RESULT_TOP_N_MIN = 1;
+export const OFFICIAL_RESULT_TOP_N_MAX = 100;
+export const OFFICIAL_RESULT_TOP_N_PRESETS = Object.freeze([3, 5, 10, 20, 50]);
+
+export function officialResultTopNValid(value) {
+    const topN = Number(value);
+    return Number.isInteger(topN) && topN >= OFFICIAL_RESULT_TOP_N_MIN && topN <= OFFICIAL_RESULT_TOP_N_MAX;
+}
 
 export const CORE_TEMPLATES = Object.freeze([
     { key: 'survey', label: 'แบบสำรวจความคิดเห็น', description: 'เก็บคำตอบหนึ่งข้อหรือหลายข้อ', privacyMode: 'identified', questionType: 'rating' },
@@ -233,7 +241,7 @@ export function validateStep(step, draft) {
     if (step === 6 && !scheduleValid(draft)) errors.push('วันเวลาเปิดต้องอยู่ก่อนวันเวลาปิด');
     if (step === 7) {
         if (!privacyValid(draft)) errors.push('การแสดงผลไม่สอดคล้องกับความเป็นส่วนตัว');
-        if (![5,10].includes(Number(draft.officialResultTopN))) errors.push('ผลอย่างเป็นทางการต้องกำหนดเป็น Top 5 หรือ Top 10');
+        if (!officialResultTopNValid(draft.officialResultTopN)) errors.push(`ผลอย่างเป็นทางการต้องกำหนดจำนวนเต็ม ${OFFICIAL_RESULT_TOP_N_MIN}–${OFFICIAL_RESULT_TOP_N_MAX} อันดับ`);
         if (!['manual','automatic'].includes(String(draft.resultReleasePolicy))) errors.push('นโยบายเผยแพร่ผลต้องเป็นแบบอัตโนมัติหรือให้แอดมินเผยแพร่');
         if (draft.liveLeaderboardEnabled && draft.campaignType !== 'popular_vote') errors.push('Live Leaderboard รองรับเฉพาะแคมเปญโหวตยอดนิยม');
         if (draft.liveLeaderboardEnabled && draft.questions.some(question => Number(question.maxSelections) !== 1 || !hasOptions(question.questionType))) errors.push('Live Leaderboard รองรับเฉพาะคำถามแบบตัวเลือกที่เลือกได้สูงสุด 1 รายการ');

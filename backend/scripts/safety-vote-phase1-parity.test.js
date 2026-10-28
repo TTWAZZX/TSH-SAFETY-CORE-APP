@@ -11,6 +11,10 @@ const phpBin = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const fixture = {
     campaigns: [
         { campaignCode:' road safety 2569 ', titleTh:'โหวตภาพความปลอดภัย', campaignType:'popular_vote', privacyMode:'identified', resultVisibility:'hidden_until_close' },
+        { campaignCode:'TOPN-CUSTOM', titleTh:'ผลแบบกำหนดเอง', campaignType:'popular_vote', privacyMode:'identified', resultVisibility:'hidden_until_close', officialResultTopN:37 },
+        { campaignCode:'TOPN-ZERO', titleTh:'ผลไม่ถูกต้อง', campaignType:'popular_vote', privacyMode:'identified', resultVisibility:'hidden_until_close', officialResultTopN:0 },
+        { campaignCode:'TOPN-HIGH', titleTh:'ผลเกินขอบเขต', campaignType:'popular_vote', privacyMode:'identified', resultVisibility:'hidden_until_close', officialResultTopN:101 },
+        { campaignCode:'TOPN-FRACTION', titleTh:'ผลเป็นเศษส่วน', campaignType:'popular_vote', privacyMode:'identified', resultVisibility:'hidden_until_close', officialResultTopN:2.5 },
         { campaignCode:'KPO-SECRET', titleTh:'เลือกตั้ง คปอ.', campaignType:'secret_election', privacyMode:'secret_ballot', resultVisibility:'live' },
         { campaignCode:'', titleTh:'', campaignType:'unknown', privacyMode:'anonymous', resultVisibility:'published' },
     ],
@@ -48,6 +52,9 @@ const php = spawnSync(phpBin, [path.join(root, 'api', 'tests', 'safety_vote_phas
 });
 assert.strictEqual(php.status, 0, php.stderr || 'PHP fixture runner failed');
 assert.deepStrictEqual(JSON.parse(php.stdout), nodeResult, 'Node/PHP Safety Vote contract mismatch');
+assert.strictEqual(nodeResult.campaigns[1].ok, true, 'Custom Top N within 1-100 must be accepted');
+assert.strictEqual(nodeResult.campaigns[1].value.officialResultTopN, 37, 'Custom Top N must be preserved');
+for (const index of [2,3,4]) assert(nodeResult.campaigns[index].errors.some(error => error.field === 'officialResultTopN' && error.code === 'INVALID_RANGE'));
 
 const nodeRoute = fs.readFileSync(path.join(root, 'backend', 'routes', 'safety-vote.js'), 'utf8');
 const phpRoute = fs.readFileSync(path.join(root, 'api', 'handlers', 'safety_vote.php'), 'utf8');

@@ -10,16 +10,24 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 
 const root = path.resolve(__dirname, '..', '..');
 const ftpsHelper = path.join(__dirname, 'patrol-checkin-v2-ftps.ps1');
+const php = process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe';
 const baseUrl = 'https://dev.tshpcl.com/safety/tsh-safety-core';
-const productionBaseline = '5b439668b1efe273515fd9732f52c5f536f975fc';
-const confirmation = 'DEPLOY_SAFETY_VOTE_CAMPAIGN_GALLERY_R1';
+const productionBaseline = 'a188e35c6aaf7f3f73591b370539a63092d284f0';
+const confirmation = 'DEPLOY_SAFETY_VOTE_OFFICIAL_TOPN_R1';
 const runtimePaths = Object.freeze([
     'index.html',
     'public/js/main.js',
-    'public/js/pages/safety-vote-page-ux1.js',
+    'public/js/pages/admin.js',
+    'public/js/pages/admin-safety-vote-ux1.js',
+    'public/js/pages/safety-vote-campaign-wizard.js',
+    'public/js/pages/safety-vote-wizard-model.mjs',
+    'api/handlers/safety_vote.php',
+    'api/handlers/safety_vote_phase10_4.php',
+    'api/lib/safety_vote_phase1.php',
+    'api/lib/safety_vote_phase5.php',
 ]);
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-campaign-gallery-deploy-${stamp}`);
+const evidenceRoot = path.join(root, 'backups', 'production', `safety-vote-official-topn-deploy-${stamp}`);
 const candidateRoot = path.join(evidenceRoot, 'candidate');
 const rollbackRoot = path.join(evidenceRoot, 'rollback-package');
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -90,6 +98,7 @@ function prepare(commit, tree) {
         const target = under(candidateRoot, relative);
         fs.mkdirSync(path.dirname(target), { recursive: true });
         fs.writeFileSync(target, bytes);
+        if (relative.endsWith('.php')) assert.equal(run(php, ['-l', target]).status, 0, `PHP lint failed: ${relative}`);
         candidate.push({ path: relative, bytes: bytes.length, sha256: sha256(bytes), target });
 
         const baseline = gitBlob(productionBaseline, relative);
@@ -104,15 +113,24 @@ function prepare(commit, tree) {
 
     const index = gitBlob(commit, 'index.html').toString('utf8');
     const main = gitBlob(commit, 'public/js/main.js').toString('utf8');
-    const participant = gitBlob(commit, 'public/js/pages/safety-vote-page-ux1.js').toString('utf8');
+    const admin = gitBlob(commit, 'public/js/pages/admin.js').toString('utf8');
+    const adminUx = gitBlob(commit, 'public/js/pages/admin-safety-vote-ux1.js').toString('utf8');
+    const wizard = gitBlob(commit, 'public/js/pages/safety-vote-campaign-wizard.js').toString('utf8');
+    const model = gitBlob(commit, 'public/js/pages/safety-vote-wizard-model.mjs').toString('utf8');
+    const phpCore = gitBlob(commit, 'api/handlers/safety_vote.php').toString('utf8');
+    const phpPhase1 = gitBlob(commit, 'api/lib/safety_vote_phase1.php').toString('utf8');
     assert(index.includes('public/style.css?v=20261028-safety-vote-density-r5'), 'Mobile density stylesheet cache marker missing');
-    assert(index.includes('public/js/main.js?v=20261028-safety-vote-campaign-gallery-r1'), 'Campaign gallery main cache marker missing');
-    assert(main.includes('./pages/safety-vote-page-ux1.js?v=20261028-safety-vote-campaign-gallery-r1'), 'Campaign gallery participant cache marker missing');
-    assert(participant.includes("choice ? 'campaign-choice-options'"), 'Campaign-wide participant choice gallery missing');
-    assert(participant.includes("null, 'campaign-public-works'"), 'Campaign-wide public work gallery missing');
+    assert(index.includes('public/js/main.js?v=20261028-safety-vote-official-topn-r1'), 'Official Top N main cache marker missing');
+    assert(main.includes('./pages/admin.js?v=20261028-safety-vote-official-topn-r1'), 'Official Top N Admin cache marker missing');
+    assert(admin.includes('./admin-safety-vote-ux1.js?v=20261028-safety-vote-official-topn-r1'), 'Official Top N Admin UX cache marker missing');
+    assert(adminUx.includes('./safety-vote-campaign-wizard.js?v=20261028-safety-vote-official-topn-r1'), 'Official Top N Wizard cache marker missing');
+    assert(wizard.includes('data-svw-official-topn-preset') && wizard.includes('กำหนดจำนวนเอง'), 'Official Top N custom UI missing');
+    assert(model.includes('OFFICIAL_RESULT_TOP_N_MAX = 100') && model.includes('officialResultTopNValid'), 'Official Top N Browser validation missing');
+    assert(phpCore.includes('SAFETY_VOTE_OFFICIAL_RESULT_TOP_N_MAX') && phpCore.includes('OfficialResultTopN,ResultReleasePolicy'), 'Official Top N PHP lifecycle integration missing');
+    assert(phpPhase1.includes('SAFETY_VOTE_OFFICIAL_RESULT_TOP_N_MAX=100'), 'Official Top N PHP validation missing');
 
     const manifest = {
-        contract: '2026-10-28-safety-vote-campaign-gallery-r1',
+        contract: '2026-10-28-safety-vote-official-topn-r1',
         productionBaseline,
         candidate: { commit, tree },
         runtimePaths,
@@ -127,7 +145,7 @@ function prepare(commit, tree) {
 
 async function httpsVerify(candidate, commit) {
     const publicFiles = [];
-    for (const file of candidate) {
+    for (const file of candidate.filter(item => !item.path.startsWith('api/'))) {
         const response = await fetch(`${baseUrl}/${file.path}?release=${commit.slice(0, 12)}-${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' }, cache: 'no-store' });
         assert.equal(response.status, 200, `HTTPS ${file.path} returned ${response.status}`);
         const bytes = Buffer.from(await response.arrayBuffer());
@@ -141,6 +159,29 @@ async function httpsVerify(candidate, commit) {
     const health = await fetch(`${baseUrl}/api/index.php?route=safety-vote/admin/health&release=${Date.now()}`, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' });
     assert.equal(health.status, 401, 'Anonymous Admin health must remain denied');
     return { publicFiles, publicBranding: branding.status, anonymousAdminHealth: health.status };
+}
+
+async function authenticatedSmoke() {
+    const employeeId = String(process.env.PROD_UAT_ADMIN_ID || '').trim();
+    const password = String(process.env.PROD_UAT_ADMIN_PASSWORD || '');
+    assert(employeeId && password, 'Production UAT Admin credentials are required');
+    const login = await fetch(`${baseUrl}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ employeeId, password }) });
+    const loginBody = await login.json().catch(() => null);
+    assert.equal(login.status, 200, 'Production Admin login failed');
+    assert(loginBody?.token, 'Production Admin token missing');
+    const get = async route => {
+        const response = await fetch(`${baseUrl}/api/index.php?route=${route}&release=${Date.now()}`, { headers: { Authorization: `Bearer ${loginBody.token}`, Accept: 'application/json', 'Cache-Control': 'no-cache' }, cache: 'no-store' });
+        return { response, body: await response.json().catch(() => null) };
+    };
+    const health = await get('safety-vote/admin/health');
+    const campaigns = await get('safety-vote/admin/campaigns');
+    assert.equal(health.response.status, 200, 'Authenticated Safety Vote health failed');
+    assert.equal(health.body?.success, true, 'Authenticated Safety Vote health response failed');
+    assert.equal(health.body?.data?.ready, true, 'Safety Vote health is not ready');
+    assert.equal(campaigns.response.status, 200, 'Authenticated campaign catalogue failed');
+    assert.equal(campaigns.body?.success, true, 'Authenticated campaign catalogue response failed');
+    assert(/no-store/i.test(health.response.headers.get('cache-control') || ''), 'Authenticated health must be no-store');
+    return { schemaVersion: health.body?.data?.schemaVersion || null, campaignTotal: Number(campaigns.body?.data?.total), capabilities: health.body?.data?.capabilities || {}, responseBodiesRecorded: false };
 }
 
 function rollbackRuntime() {
@@ -176,14 +217,15 @@ async function main() {
     for (const file of prepared.candidate) assert(ftps('upload', file.path, file.target).ok, `Upload failed: ${file.path}`);
     const deployed = prepared.candidate.map(file => doubleDownload(file.path, 'deployed', file.sha256));
     const https = await httpsVerify(prepared.candidate, commit);
+    const authenticated = await authenticatedSmoke();
     const result = {
-        contract: '2026-10-28-safety-vote-campaign-gallery-r1',
+        contract: '2026-10-28-safety-vote-official-topn-r1',
         generatedAt: new Date().toISOString(),
-        decision: 'PASS_SAFETY_VOTE_CAMPAIGN_GALLERY_PRODUCTION_DEPLOYMENT',
+        decision: 'PASS_SAFETY_VOTE_OFFICIAL_TOPN_PRODUCTION_DEPLOYMENT',
         candidate: { branch, commit, tree, productionBaseline, runtimePaths: runtimePaths.length },
         remoteBefore: prepared.remoteBefore,
         deployment: { uploaded: prepared.candidate.length, doubleDownloadVerified: deployed.length, httpsVerified: https.publicFiles.length },
-        smoke: { publicBranding: https.publicBranding, anonymousAdminHealth: https.anonymousAdminHealth },
+        smoke: { publicBranding: https.publicBranding, anonymousAdminHealth: https.anonymousAdminHealth, authenticated },
         rollbackPackage: { manifestSha256: prepared.manifestSha256, restoreFiles: prepared.restore.length, verified: true },
         constraints: { schemaChanged: false, businessDataChanged: false, externalDeliveryChanged: false, notificationsSent: false },
         rollback: { attempted: false, packageReady: true },
@@ -197,6 +239,6 @@ main().catch(error => {
     try { rollback = rollbackRuntime(); }
     catch (rollbackError) { rollback = { attempted: true, pass: false, error: rollbackError.message }; }
     writeJson('failure.json', { generatedAt: new Date().toISOString(), decision: rollback.attempted && rollback.pass ? 'HOLD_DEPLOYMENT_FAILED_RUNTIME_ROLLED_BACK' : 'HOLD_DEPLOYMENT_ROLLBACK_INCOMPLETE', error: error.message, rollback });
-    process.stderr.write(`Safety Vote campaign gallery deployment failed: ${error.message}\n`);
+    process.stderr.write(`Safety Vote Official Top N deployment failed: ${error.message}\n`);
     process.exitCode = 1;
 });
