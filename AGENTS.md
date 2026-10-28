@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Mobile Density Production Deployment (PASS, 2026-10-28)
+
+- Immutable commit `5b439668b1efe273515fd9732f52c5f536f975fc` was deployed to the PHP shared-hosting Production target. The guarded release uploaded exactly `index.html`, `public/js/session.js` and `public/style.css`; FTPS double-download and public HTTPS SHA-256 verification matched `3/3`.
+- Mobile density now covers shell/navigation/action bars, catalogue/detail/intro, choices/media/review, Submission/Nomination/Jury, Results/Gallery/Receipt/states and all six workflow profiles. Deterministic Browser UAT passed 18/18 workflow/viewports at 320x568, 390x844 and 430x932 with zero horizontal overflow, 44 px minimum visible touch targets and no fixed-action overlap. Visual evidence contains 36 top/bottom screenshots plus six contact sheets under `backups/local/safety-vote-mobile-all-workflows-20261028020330/`.
+- Production public smoke passed: Branding returned `200`, anonymous Admin health remained `401`, the anonymous browser entry returned `200` with bootstrap `ready`, the `safety-vote-density-r5` and `session-expiry-preflight-r1` cache chains loaded, and there were zero console/page errors. The stored bearer returned `403` for authenticated health and campaigns, so authenticated post-deploy GET smoke remains unverified; no login was attempted because it would create login/audit state.
+- Runtime rollback evidence is `backups/production/safety-vote-mobile-density-deploy-20261028020431/`; rollback-manifest SHA-256 is `2ef0fee5b200c0042cbb79b04874ba3141a686bf097f8101d33ff060c6a3f22f` and result SHA-256 is `249f07da8e99cdd2bc4fc7ccaac733e65298bf5a5fe5b38b842c4c232b6308d3`. No schema, business-data, external-delivery or notification change occurred, and rollback was not required. Decision: `PASS_SAFETY_VOTE_MOBILE_DENSITY_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Phase 7 Production Deployment (PASS, 2026-10-27)
 
 - Immutable commit `820e97ab38602eb9d748745b537502d0d991814a` was deployed to the PHP shared-hosting Production target. The guarded release uploaded 167 runtime files after per-file remote double-download SHA-256 checks and created a matching runtime rollback package.
