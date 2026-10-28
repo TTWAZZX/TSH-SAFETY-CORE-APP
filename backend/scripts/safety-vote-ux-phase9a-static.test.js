@@ -37,6 +37,7 @@ ok(user.includes('promotionHistoryMarkup') && user.includes('promotions.data?.hi
 ok(user.includes('กำลังดูในฐานะผู้ดูแลระบบ') && user.includes('previewOnly'), 'Admin preview is visibly read-only');
 ok(!user.includes('setInterval(') && user.includes('schedulePromotionCarousel(delay = 6000)'), 'carousel uses one restartable auto-rotation timer');
 ok(user.includes('data-svp-promotion-carousel') && user.includes('visibilitychange') && user.includes('promotionPointerStartX'), 'carousel supports visibility pause, controls and swipe');
+ok(user.includes('promotionAdminPreview') && user.includes('promotions.data?.adminPreview === true') && user.includes('|| state.promotionAdminPreview'), 'Admin promotion preview never writes participant engagement analytics');
 ok(user.includes("matchMedia('(prefers-reduced-motion: reduce)').matches") && user.includes('mouseenter') && user.includes('focusin'), 'carousel respects motion preference and interaction pause');
 ok(user.includes('svp-promotion__backdrop') && user.includes('svp-promotion__foreground'), 'promotion image uses decorative cover and complete foreground layers');
 ok(css.includes('.svp-promotion__backdrop') && css.includes('object-fit: cover') && css.includes('.svp-promotion__foreground') && css.includes('object-fit: contain'), 'responsive layered image fit contract');

@@ -39,11 +39,11 @@ const state = {
     liveView: false, liveResults: null, liveError: null, liveInFlight: false, livePaused: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null,
     discoveryRefreshing: false, discoveryRefreshHandler: null, notificationsExpanded: false, catalogueMode: 'legacy_discovery',
     peopleLabels: {}, peoplePickerCleanup: null, officialResults: null, publicWorks: [],
-    promotionTimer: null, promotionPaused: false, promotionVisibilityHandler: null, promotionPointerStartX: null
+    promotionTimer: null, promotionPaused: false, promotionVisibilityHandler: null, promotionPointerStartX: null, promotionAdminPreview: false
 };
 
 function trackPromotionEvent(promotionId, eventType) {
-    if (!isSafetyVoteEngagementV1Enabled() || !promotionId) return;
+    if (!isSafetyVoteEngagementV1Enabled() || !promotionId || state.promotionAdminPreview) return;
     const key = `${Number(promotionId)}:${eventType}`;
     if (state.trackedPromotionEvents.has(key)) return;
     state.trackedPromotionEvents.add(key);
@@ -681,7 +681,7 @@ async function load() {
             API.get('/safety-vote/notifications', { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } }))
         ]);
         state.campaigns = campaigns.data.rows || []; state.catalogueMode = campaigns.data.catalogueMode || 'legacy_discovery'; state.nominations = nominations.data.rows || []; state.assignments = assignments.data.rows || []; state.notifications = notifications.data.rows || [];
-        state.promotions = []; state.promotionHistory = []; state.notificationCenter = []; state.promotionIndex = 0;
+        state.promotions = []; state.promotionHistory = []; state.notificationCenter = []; state.promotionIndex = 0; state.promotionAdminPreview = false;
         if (isSafetyVoteEngagementV1Enabled()) {
             const [promotions, center] = await Promise.all([
                 API.get('/safety-vote/me/promotions', { suppressErrorLog: true }).catch(() => ({ data: { rows: [], history: [] } })),
@@ -689,6 +689,7 @@ async function load() {
             ]);
             state.promotions = promotions.data?.rows || [];
             state.promotionHistory = promotions.data?.history || [];
+            state.promotionAdminPreview = promotions.data?.adminPreview === true;
             state.notificationCenter = center.data?.rows || [];
         }
     } catch (error) {
