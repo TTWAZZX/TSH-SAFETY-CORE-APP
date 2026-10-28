@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Campaign-wide Gallery Navigation Production Deployment (PASS, 2026-10-28)
+
+- Immutable commit `a188e35c6aaf7f3f73591b370539a63092d284f0` was deployed to the PHP shared-hosting Production target. The guarded release uploaded exactly `index.html`, `public/js/main.js` and `public/js/pages/safety-vote-page-ux1.js`; FTPS double-download and public HTTPS SHA-256 verification matched `3/3`.
+- Participant choice images and Public Work Gallery images now share campaign-wide navigation groups. Browser regression proved navigation from image 10/12 through 11/12 and 12/12 while preserving the correct question-specific choice, and mobile choice/media/review UAT passed at 320x568, 390x844 and 430x932 without horizontal overflow.
+- Production post-deploy GET checks returned `200` for all three runtime files and confirmed the `20261028-safety-vote-campaign-gallery-r1`, `campaign-choice-options` and `campaign-public-works` markers. Public Branding returned `200`; anonymous Admin health remained `401`. Authenticated interactive gallery UAT was not performed because it would require a Production login/session and potential audit state.
+- Runtime rollback evidence is `backups/production/safety-vote-campaign-gallery-deploy-20261028025233/`; rollback-manifest SHA-256 is `4b481d48e57449776de3dd7b1d786073cbf545f3f8a8659ee641d331f5f76162` and result SHA-256 is `c84a887618ce4fabc76e29b71c102c006feec4e710fc4699d991a2a09501af72`. No schema, business-data, external-delivery or notification change occurred, and rollback was not required. Decision: `PASS_SAFETY_VOTE_CAMPAIGN_GALLERY_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Mobile Density Production Deployment (PASS, 2026-10-28)
 
 - Immutable commit `5b439668b1efe273515fd9732f52c5f536f975fc` was deployed to the PHP shared-hosting Production target. The guarded release uploaded exactly `index.html`, `public/js/session.js` and `public/style.css`; FTPS double-download and public HTTPS SHA-256 verification matched `3/3`.
