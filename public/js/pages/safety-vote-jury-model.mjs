@@ -1,4 +1,4 @@
-export const JURY_VIEW_LABELS = Object.freeze({ draft: 'รอดำเนินการ', submitted: 'ส่งแล้ว', recused: 'ถอนตัวแล้ว' });
+export const JURY_VIEW_LABELS = Object.freeze({ draft: 'รอประเมิน', submitted: 'ส่งผลแล้ว', recused: 'ถอนตัวแล้ว' });
 
 export function valueOf(source = {}, ...keys) {
     for (const key of keys) if (source[key] !== undefined && source[key] !== null) return source[key];
@@ -17,7 +17,7 @@ export function filterAssignments(assignments = [], { view = 'draft', query = ''
     const normalized = String(query).trim().toLocaleLowerCase('th');
     return assignments.filter(item => assignmentState(item) === view).filter(item => {
         if (!normalized) return true;
-        return ['CampaignTitle', 'campaignTitle', 'AssignmentScope', 'assignmentScope', 'Status', 'status', 'StageID', 'stageId']
+        return ['CampaignTitle', 'campaignTitle', 'StageName', 'stageName', 'AssignmentScope', 'assignmentScope', 'Status', 'status', 'StageID', 'stageId']
             .some(key => String(item[key] ?? '').toLocaleLowerCase('th').includes(normalized));
     });
 }

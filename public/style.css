@@ -692,6 +692,8 @@ body {
 .svp-notification-list span { color: #64748b; }
 .svp-assignment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
 .svp-assignment-grid button { display: grid; }
+.svp-assignment-grid button span { color: #475569; font-weight: 700; }
+.svp-assignment-grid button small { color: #64748b; line-height: 1.45; }
 .svp-detail-header {
     display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 1rem; align-items: start; margin-top: 1rem;
     padding: clamp(1rem, 2vw, 1.6rem); border-radius: 1rem; background: #064e3b; color: #fff;
@@ -6324,6 +6326,7 @@ body[data-active-page="safety-vote"] {
     .svj-shell[data-sv-jury-workspace] .sv-role-nav__item {
         flex: 1 1 0;
         min-width: 0;
+        min-height: var(--svp-mobile-control-height, 44px);
         justify-content: center;
         padding: .3rem .35rem;
         border-radius: .55rem;
@@ -6357,7 +6360,7 @@ body[data-active-page="safety-vote"] {
         grid-template-columns: 1.5rem minmax(0, 1fr);
         gap: .3rem;
         width: 100%;
-        min-height: var(--svp-mobile-control-height);
+        min-height: var(--svp-mobile-control-height, 44px);
         padding: .25rem .4rem;
     }
     .svj-shell[data-sv-jury-workspace] .sv-journey-steps button > span {
@@ -6618,7 +6621,7 @@ body[data-active-page="safety-vote"] {
     .svj-shell[data-sv-jury-workspace] .svj-action-bar .sv-button {
         width: auto;
         min-width: 0 !important;
-        min-height: var(--svp-mobile-control-height);
+        min-height: var(--svp-mobile-control-height, 44px);
         padding: .3rem .45rem;
         font-size: .72rem;
         line-height: 1.15;

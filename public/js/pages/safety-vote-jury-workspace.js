@@ -4,7 +4,7 @@ import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, openSafetyVoteRea
 import {
     JURY_VIEW_LABELS, assignmentProgress, assignmentState, buildScorePayload, filterAssignments,
     normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateScoreSheet, valueOf
-} from './safety-vote-jury-model.mjs?v=20261008-safety-vote-ux4-r1';
+} from './safety-vote-jury-model.mjs?v=20261028-safety-vote-jury-assignment-ux-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261024-safety-vote-gallery-r1';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261024-safety-vote-gallery-r1';
@@ -54,8 +54,14 @@ function stateMarkup() {
 }
 
 function assignmentCard(item) {
-    const status = assignmentState(item), scope = String(valueOf(item, 'AssignmentScope', 'assignmentScope')) === 'candidate' ? 'เฉพาะรายการที่มอบหมาย' : 'ทุกรายการในรอบ';
-    return `<button type="button" class="svj-card" data-svj-assignment="${Number(item.id)}"><span class="svj-card__top"><span class="sv-status-badge sv-status-badge--${status === 'draft' ? 'scheduled' : status === 'submitted' ? 'published' : 'closed'}"><span class="sv-status-dot"></span>${JURY_VIEW_LABELS[status]}</span><span>ชุดที่ ${Number(valueOf(item, 'SheetVersion', 'sheetVersion') || 1)}</span></span><strong>${escHtml(valueOf(item, 'CampaignTitle', 'campaignTitle') || 'งานประเมิน Safety Vote')}</strong><span>รอบประเมิน #${Number(valueOf(item, 'StageID', 'stageId'))}</span><small>${escHtml(scope)}${status === 'submitted' ? ` · ส่ง ${dateTime(valueOf(item, 'SubmittedAt', 'submittedAt'))}` : ''}</small></button>`;
+    const status = assignmentState(item), scope = String(valueOf(item, 'AssignmentScope', 'assignmentScope')) === 'candidate' ? 'เฉพาะผลงานที่มอบหมาย' : 'ทุกผลงานในรอบ';
+    const scoreCount = Math.max(0, Number(valueOf(item, 'ScoreCount', 'scoreCount') || 0));
+    const expectedCount = Math.max(0, Number(valueOf(item, 'ExpectedScoreCount', 'expectedScoreCount') || 0));
+    const stageName = valueOf(item, 'StageName', 'stageName') || 'รอบประเมิน';
+    const statusLabel = status === 'draft' && scoreCount > 0 ? 'กำลังประเมิน' : status === 'draft' ? 'รอให้คะแนน' : status === 'submitted' ? 'ส่งผลประเมินแล้ว' : 'ถอนตัวจากการประเมิน';
+    const actionLabel = status === 'draft' && scoreCount > 0 ? 'ประเมินต่อ' : status === 'draft' ? 'เริ่มประเมิน' : 'ดูรายละเอียด';
+    const progress = status === 'submitted' ? `ส่ง ${dateTime(valueOf(item, 'SubmittedAt', 'submittedAt'))}` : expectedCount ? `ประเมินแล้ว ${scoreCount}/${expectedCount} รายการ` : scope;
+    return `<button type="button" class="svj-card" data-svj-assignment="${Number(item.id)}"><span class="svj-card__top"><span class="sv-status-badge sv-status-badge--${status === 'draft' ? 'scheduled' : status === 'submitted' ? 'published' : 'closed'}"><span class="sv-status-dot"></span>${escHtml(statusLabel)}</span><span>${escHtml(actionLabel)}</span></span><strong>${escHtml(valueOf(item, 'CampaignTitle', 'campaignTitle') || 'งานตัดสิน Safety Vote')}</strong><span>${escHtml(stageName)}</span><small>${escHtml(scope)} · ${escHtml(progress)}</small></button>`;
 }
 
 function renderList() {
@@ -128,9 +134,10 @@ function actionBarMarkup() {
 
 function renderDetail() {
     releaseSafetyVoteImages(state.page);
-    const assignment = state.detail.assignment, status = assignmentState(assignment), campaignTitle = valueOf(state.selected || {}, 'CampaignTitle', 'campaignTitle') || 'งานประเมิน Safety Vote';
+    const assignment = state.detail.assignment, status = assignmentState(assignment), campaignTitle = valueOf(assignment, 'CampaignTitle', 'campaignTitle') || valueOf(state.selected || {}, 'CampaignTitle', 'campaignTitle') || 'งานตัดสิน Safety Vote';
+    const stageName = valueOf(assignment, 'StageName', 'stageName') || 'รอบประเมิน';
     const body = state.mode === 'receipt' ? receiptMarkup() : state.mode === 'review' ? reviewMarkup() : status === 'draft' ? editMarkup() : lockedMarkup();
-    state.page.innerHTML = `<div class="svj-shell svj-shell--detail" data-sv-jury-workspace="2026-10-08-safety-vote-ux4-r1">${safetyVoteRoleNav({ active: 'jury', showJury: true, juryCount: state.assignments.length })}<header class="svj-detail-header"><button type="button" class="sv-icon-button" data-svj-action="back-list" aria-label="กลับงานประเมินของฉัน">←</button><div><p class="sv-eyebrow">รอบประเมิน #${Number(valueOf(assignment, 'StageID', 'stageId'))} · ชุดที่ ${Number(valueOf(assignment, 'SheetVersion', 'sheetVersion') || 1)}</p><h1>${escHtml(campaignTitle)}</h1><p>${state.detail.blind ? 'การประเมินแบบปกปิดตัวตน — ใช้เฉพาะชื่อแทนที่เซิร์ฟเวอร์ส่งมา' : 'ประเมินตามรายการและเกณฑ์ที่ได้รับมอบหมาย'}</p></div><span class="sv-status-badge sv-status-badge--${status === 'draft' ? 'scheduled' : status === 'submitted' ? 'published' : 'closed'}"><span class="sv-status-dot"></span>${JURY_VIEW_LABELS[status]}</span></header>${state.detail.blind ? '<section class="svj-blind-notice" role="note"><strong>Blind judging</strong><span>ห้ามใช้ข้อมูลนอกหน้าจอนี้เพื่อพยายามระบุตัวผู้ส่งผลงาน</span></section>' : ''}<main class="svj-main" aria-live="polite">${body}</main>${actionBarMarkup()}</div>`;
+    state.page.innerHTML = `<div class="svj-shell svj-shell--detail" data-sv-jury-workspace="2026-10-28-safety-vote-jury-assignment-ux-r1">${safetyVoteRoleNav({ active: 'jury', showJury: true, juryCount: state.assignments.length })}<header class="svj-detail-header"><button type="button" class="sv-icon-button" data-svj-action="back-list" aria-label="กลับงานประเมินของฉัน">←</button><div><p class="sv-eyebrow">${escHtml(stageName)}${Number(valueOf(assignment, 'SheetVersion', 'sheetVersion') || 1) > 1 ? ` · เปิดประเมินใหม่ครั้งที่ ${Number(valueOf(assignment, 'SheetVersion', 'sheetVersion'))}` : ''}</p><h1>${escHtml(campaignTitle)}</h1><p>${state.detail.blind ? 'การประเมินแบบปกปิดตัวตน — ใช้เฉพาะชื่อแทนที่เซิร์ฟเวอร์ส่งมา' : 'ประเมินตามรายการและเกณฑ์ที่ได้รับมอบหมาย'}</p></div><span class="sv-status-badge sv-status-badge--${status === 'draft' ? 'scheduled' : status === 'submitted' ? 'published' : 'closed'}"><span class="sv-status-dot"></span>${JURY_VIEW_LABELS[status]}</span></header>${state.detail.blind ? '<section class="svj-blind-notice" role="note"><strong>Blind judging</strong><span>ห้ามใช้ข้อมูลนอกหน้าจอนี้เพื่อพยายามระบุตัวผู้ส่งผลงาน</span></section>' : ''}<main class="svj-main" aria-live="polite">${body}</main>${actionBarMarkup()}</div>`;
     state.page.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'jury', current: 'jury', campaign: { CampaignType: 'jury_scoring', TitleTh: campaignTitle }, onPage: true }));
     bindDetail();
     bindSafetyVoteImageGallery(state.page);hydrateSafetyVoteImages(state.page);
