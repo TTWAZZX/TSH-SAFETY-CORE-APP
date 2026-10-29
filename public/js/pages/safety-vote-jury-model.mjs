@@ -8,6 +8,7 @@ export function valueOf(source = {}, ...keys) {
 export function assignmentState(assignment = {}) {
     const status = String(valueOf(assignment, 'Status', 'status') || 'Draft').toLowerCase();
     const conflict = String(valueOf(assignment, 'ConflictState', 'conflictState') || 'clear').toLowerCase();
+    if (status === 'revoked') return 'revoked';
     if (status === 'recused' || conflict === 'recused') return 'recused';
     if (status === 'submitted') return 'submitted';
     return 'draft';
@@ -23,9 +24,10 @@ export function filterAssignments(assignments = [], { view = 'draft', query = ''
 }
 
 export function assignmentProgress(assignments = []) {
-    const submitted = assignments.filter(item => assignmentState(item) === 'submitted').length;
-    const recused = assignments.filter(item => assignmentState(item) === 'recused').length;
-    return { submitted, recused, pending: assignments.length - submitted - recused, total: assignments.length };
+    const visible = assignments.filter(item => assignmentState(item) !== 'revoked');
+    const submitted = visible.filter(item => assignmentState(item) === 'submitted').length;
+    const recused = visible.filter(item => assignmentState(item) === 'recused').length;
+    return { submitted, recused, pending: visible.length - submitted - recused, total: visible.length };
 }
 
 export function scoreKey(candidateId, criterionId) {

@@ -4,7 +4,7 @@ import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, openSafetyVoteRea
 import {
     JURY_VIEW_LABELS, assignmentProgress, assignmentState, buildScorePayload, filterAssignments,
     normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateDraftScoreSheet, validateScoreSheet, valueOf
-} from './safety-vote-jury-model.mjs?v=20261028-safety-vote-jury-scoring-r3';
+} from './safety-vote-jury-model.mjs?v=20261029-safety-vote-jury-revocation-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261024-safety-vote-gallery-r1';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261024-safety-vote-gallery-r1';
@@ -441,7 +441,7 @@ async function loadQueue(initialAssignmentId = null) {
     state.loading = true; state.error = null; state.denied = false; state.moduleDisabled = false; state.screen = 'list'; render();
     try {
         const response = await API.get('/safety-vote/jury/assignments', { suppressErrorLog: true });
-        state.assignments = response.data.rows || []; clearStaleDrafts(state.assignments); state.loading = false;
+        state.assignments = (response.data.rows || []).filter(item => assignmentState(item) !== 'revoked'); clearStaleDrafts(state.assignments); state.loading = false;
         if (initialAssignmentId) return openAssignment(Number(initialAssignmentId));
         renderList();
     } catch (error) {

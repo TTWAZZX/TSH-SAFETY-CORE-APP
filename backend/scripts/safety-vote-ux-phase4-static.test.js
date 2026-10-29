@@ -51,7 +51,10 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('คุณมีสิทธิ์กรรมการสำหรับแคมเปญนี้') && page.includes('data-svp-jury'), 'participant preview must distinguish jury access and provide a direct action');
     check(page.includes('รอให้คะแนน') && page.includes('กำลังประเมิน') && !page.includes('แบบประเมิน #'), 'assignment cards must use plain-language states instead of internal IDs');
     for (const source of [nodePhase4, phpPhase4]) check(source.includes('StageName') && source.includes('ScoreCount') && source.includes('ExpectedScoreCount'), 'jury assignment projection must expose stage and progress parity');
-    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
+    for (const source of [nodePhase4, phpPhase4]) check(source.includes("Status<>'Revoked'") && source.includes('ASSIGNMENT_NOT_FOUND'), 'revoked assignments must be hidden from juror queues and direct detail access');
+    check(workspace.includes("assignmentState(item) !== 'revoked'"), 'jury workspace must defensively remove revoked assignments');
+    check(page.includes("'submitted', 'recused', 'revoked'"), 'participant task strip must exclude revoked jury assignments');
+    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 4'), 'Phase 4 scoped CSS marker is missing');
     check(css.includes('.svj-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
     check(css.includes('min-height: 44px'), '44 px touch targets are not enforced');
@@ -63,13 +66,16 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     const assignments = [
         { id: 1, Status: 'Draft', CampaignTitle: 'แนวคิด ก', StageID: 2 },
         { id: 2, Status: 'Submitted', CampaignTitle: 'แนวคิด ข', StageID: 2 },
-        { id: 3, Status: 'Recused', ConflictState: 'recused', CampaignTitle: 'แนวคิด ค', StageID: 3 }
+        { id: 3, Status: 'Recused', ConflictState: 'recused', CampaignTitle: 'แนวคิด ค', StageID: 3 },
+        { id: 4, Status: 'Revoked', CampaignTitle: 'ถอนสิทธิ์', StageID: 3 }
     ];
     check(model.assignmentState(assignments[0]) === 'draft', 'Draft state mapping is wrong');
     check(model.assignmentState(assignments[1]) === 'submitted', 'Submitted state mapping is wrong');
     check(model.assignmentState(assignments[2]) === 'recused', 'Recused state mapping is wrong');
+    check(model.assignmentState(assignments[3]) === 'revoked', 'Revoked state mapping is wrong');
+    check(model.filterAssignments(assignments, { view: 'draft' }).every(item => Number(item.id) !== 4), 'Revoked assignment must not fall back to Draft');
     check(model.filterAssignments(assignments, { view: 'draft', query: 'ก' }).length === 1, 'Thai queue search/filter is wrong');
-    check(JSON.stringify(model.assignmentProgress(assignments)) === JSON.stringify({ submitted: 1, recused: 1, pending: 1, total: 3 }), 'queue progress is wrong');
+    check(JSON.stringify(model.assignmentProgress(assignments)) === JSON.stringify({ submitted: 1, recused: 1, pending: 1, total: 3 }), 'queue progress must exclude revoked assignments');
 
     const detail = {
         candidates: [{ id: 10, candidateNo: 'A01', displayName: 'Candidate A01' }],

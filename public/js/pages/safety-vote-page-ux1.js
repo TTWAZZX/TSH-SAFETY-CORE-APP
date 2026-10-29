@@ -4,7 +4,7 @@ import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261027-safety-vote-jury-work-media-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
-import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261028-safety-vote-jury-scoring-r3';
+import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261029-safety-vote-jury-revocation-r1';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-duplicate-media-r3';
 import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';
@@ -92,7 +92,7 @@ function promotionHistoryMarkup() {
 
 function taskStripMarkup() {
     if (!isSafetyVoteEngagementV1Enabled()) return '';
-    const open = state.campaigns.filter(item => participationState(item) === 'open' && Number(item.DiscoveryOnly || 0) !== 1), pending = state.nominations.filter(item => String(valueOf(item, 'ConsentState', 'consentState')) === 'pending'), jury = state.assignments.filter(item => !['submitted', 'recused'].includes(String(valueOf(item, 'Status', 'status')).toLowerCase()));
+    const open = state.campaigns.filter(item => participationState(item) === 'open' && Number(item.DiscoveryOnly || 0) !== 1), pending = state.nominations.filter(item => String(valueOf(item, 'ConsentState', 'consentState')) === 'pending'), jury = state.assignments.filter(item => !['submitted', 'recused', 'revoked'].includes(String(valueOf(item, 'Status', 'status')).toLowerCase()));
     const total = open.length + pending.length + jury.length;
     return `<section class="svp-my-tasks" aria-labelledby="svp-my-tasks-title"><div><p class="sv-eyebrow">รายการส่วนตัว</p><h2 id="svp-my-tasks-title">สิ่งที่คุณต้องทำ</h2><p>${total ? `มี ${total} รายการที่รอดำเนินการ` : 'ขณะนี้ไม่มีรายการที่ต้องดำเนินการ'}</p></div><div class="svp-my-tasks__grid">${open.length ? `<button type="button" data-svp-campaign="${Number(open[0].id)}"><strong>${open.length}</strong><span>กิจกรรมที่เข้าร่วมได้</span></button>` : ''}${pending.length ? `<button type="button" data-svp-scroll="consent"><strong>${pending.length}</strong><span>คำเสนอชื่อรอยืนยัน</span></button>` : ''}${jury.length ? `<button type="button" data-svp-jury="${Number(jury[0].id)}"><strong>${jury.length}</strong><span>งานประเมิน</span></button>` : ''}${!total ? '<span class="svp-my-tasks__done">✓ คุณจัดการรายการทั้งหมดแล้ว</span>' : ''}</div></section>`;
 }
@@ -728,7 +728,7 @@ async function load() {
             API.get('/safety-vote/jury/assignments', { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } })),
             API.get('/safety-vote/notifications', { suppressErrorLog: true }).catch(() => ({ data: { rows: [] } }))
         ]);
-        state.campaigns = campaigns.data.rows || []; state.catalogueMode = campaigns.data.catalogueMode || 'legacy_discovery'; state.nominations = nominations.data.rows || []; state.assignments = assignments.data.rows || []; state.notifications = notifications.data.rows || [];
+        state.campaigns = campaigns.data.rows || []; state.catalogueMode = campaigns.data.catalogueMode || 'legacy_discovery'; state.nominations = nominations.data.rows || []; state.assignments = (assignments.data.rows || []).filter(item => String(valueOf(item, 'Status', 'status')).toLowerCase() !== 'revoked'); state.notifications = notifications.data.rows || [];
         state.promotions = []; state.promotionHistory = []; state.notificationCenter = []; state.promotionIndex = 0; state.promotionAdminPreview = false;
         if (isSafetyVoteEngagementV1Enabled()) {
             const [promotions, center] = await Promise.all([
