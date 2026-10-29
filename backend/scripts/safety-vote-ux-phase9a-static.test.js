@@ -21,11 +21,16 @@ ok(!/DROP\s+TABLE|DELETE\s+FROM/i.test(rollback) && rollback.includes("'engageme
 
 const nodeRoute = read('backend/routes/safety-vote-engagement.js'), phpRoute = read('api/handlers/safety_vote_engagement.php');
 for (const marker of ['/admin/engagement/action-center', '/admin/promotions', '/me/promotions', '/notification-center']) { ok(nodeRoute.includes(marker), `Node ${marker}`); ok(phpRoute.includes(marker), `PHP ${marker}`); }
-for (const text of [nodeRoute, phpRoute]) { ok(text.includes('SafetyVote_EligibleVoters'), 'promotion visibility remains eligibility-filtered'); ok(text.includes('SAFETY_VOTE_MANAGE') && text.includes('SAFETY_VOTE_VIEW'), 'existing capability contract reused'); ok(!text.includes('SafetyVote_BallotAnswers SET') && !text.includes('SafetyVote_Ballots SET'), 'no ballot mutation'); }
+for (const text of [nodeRoute, phpRoute]) { ok(text.includes('SAFETY_VOTE_MANAGE') && text.includes('SAFETY_VOTE_VIEW'), 'existing capability contract reused'); ok(!text.includes('SafetyVote_BallotAnswers SET') && !text.includes('SafetyVote_Ballots SET'), 'no ballot mutation'); }
+for (const text of [nodeRoute, phpRoute]) { ok(text.includes('c.IsHidden=0') && text.includes('c.IsTest=0') && !text.includes('ev.EmployeeID=?'), 'published promotions are visible company-wide while hidden and test campaigns stay excluded'); }
 for (const text of [nodeRoute, phpRoute]) { ok(text.includes('MAX(Priority)') && text.includes('automaticPriority'), 'promotion order is allocated automatically'); ok(text.includes('EndAt<=NOW()') && text.includes('history'), 'expired published promotions remain available as history'); }
 for (const text of [nodeRoute, phpRoute]) { ok(text.includes('adminPreview') && text.includes('ADMIN'), 'Admin can preview active promotions without joining voter eligibility'); }
+const nodeCoreRoute = read('backend/routes/safety-vote.js'), phpCoreRoute = read('api/handlers/safety_vote.php');
+for (const text of [nodeCoreRoute, phpCoreRoute]) { ok(text.includes('promotion_desktop') && text.includes('promotion_mobile') && text.includes('promotion_library') && text.includes("c.Status<>'Voided'") && text.includes('c.IsHidden=0') && text.includes('c.IsTest=0'), 'authenticated module users can read visible campaign promotion media'); }
 const nodePhase2 = read('backend/routes/safety-vote-phase2.js'), phpPhase2 = read('api/handlers/safety_vote_phase2.php');
-for (const text of [nodePhase2, phpPhase2]) { ok(text.includes('PreviewOnly') && text.includes('previewOnly') && text.includes("'Certified'"), 'Admin read-only campaign preview retains completed campaign access'); }
+for (const text of [nodePhase2, phpPhase2]) { ok(text.includes('PreviewOnly') && text.includes('previewOnly') && text.includes("'Certified'"), 'Admin read-only campaign preview retains completed campaign access'); ok(text.includes('discoveryOnly') && text.includes('promotion'), 'active promotion detail is available read-only without participation eligibility'); }
+const nodePhase3 = read('backend/routes/safety-vote-phase3.js'), phpPhase3 = read('api/handlers/safety_vote_phase3.php');
+for (const text of [nodePhase3, phpPhase3]) { ok(text.includes('discoveryOnly') && text.includes('promotion') && text.includes('public_listing_preview'), 'advanced campaign detail preserves company-wide promotion read-only access'); }
 
 const index = read('index.html'), admin = read('public/js/pages/admin-safety-vote-ux1.js'), user = read('public/js/pages/safety-vote-page-ux1.js'), css = read('public/style.css');
 ok(/safetyVoteEngagementV1:\s*(true|false)/.test(index), 'explicit client feature flag');

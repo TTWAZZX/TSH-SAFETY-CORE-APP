@@ -200,6 +200,9 @@ async function canReadPrivateFile(req,file){
     if(String(file.FilePurpose||'').toLowerCase()==='candidate_gallery'){
         try{const[[assigned]]=await db.query("SELECT g.id FROM SafetyVote_GalleryItems g JOIN SafetyVote_Candidates c ON c.id=g.OwnerID AND g.OwnerType='candidate' JOIN SafetyVote_JuryAssignments a ON a.CampaignVersionID=c.CampaignVersionID AND a.JurorEmployeeID=? AND a.Status IN ('Draft','Submitted') AND (a.CandidateID IS NULL OR a.CandidateID=c.id) WHERE g.FileID=? AND g.Status='Active' LIMIT 1",[actor(req),file.id]);if(assigned)return true;}catch(error){if(!['ER_NO_SUCH_TABLE','ER_BAD_FIELD_ERROR'].includes(error.code))throw error;}
     }
+    if(['promotion_desktop','promotion_mobile','promotion_library'].includes(String(file.FilePurpose||'').toLowerCase())){
+        try{const[[visible]]=await db.query("SELECT c.id FROM SafetyVote_Campaigns c WHERE c.id=? AND c.Status<>'Voided' AND c.IsHidden=0 AND c.IsTest=0 LIMIT 1",[file.CampaignID]);if(visible)return true;}catch(error){if(!['ER_NO_SUCH_TABLE','ER_BAD_FIELD_ERROR'].includes(error.code))throw error;}
+    }
     const restricted=Boolean(file.SubmissionID||file.QuestionID)||['submission','answer'].includes(String(file.FilePurpose||'').toLowerCase());
     if(restricted){
         if(String(file.UploadedBy||'')===actor(req))return true;
