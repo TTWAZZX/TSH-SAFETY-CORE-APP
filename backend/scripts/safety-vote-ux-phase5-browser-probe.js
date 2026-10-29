@@ -63,8 +63,8 @@ async function inspectPage(viewport, screen) {
     return ev(`(()=>{const visible=node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none'},nodes=[...document.querySelectorAll('button,a')].filter(visible),targets=nodes.map(node=>{const r=node.getBoundingClientRect();return{tag:node.tagName,w:r.width,h:r.height,text:(node.textContent||node.getAttribute('aria-label')||'').trim().slice(0,70)}}),bad=targets.filter(x=>x.w<43.5||x.h<43.5);return{viewport:${JSON.stringify(viewport)},screen:${JSON.stringify(screen)},overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2,badTouch:bad,heading:Boolean(document.querySelector('h1')),roleNav:Boolean(document.querySelector('.sv-role-nav[aria-label]')),workspace:Boolean(document.querySelector('[data-sv-operations]')),suppressed:document.querySelectorAll('.svo-kpi.is-suppressed').length}})()`);
 }
 
-async function navigate(mode, campaignId, privacy = 'confidential') {
-    await cmd('Page.navigate', { url: `${origin}/__ux5-admin/${mode}?campaign=${campaignId}&privacy=${privacy}` });
+async function navigate(mode, campaignId, privacy = 'confidential', type = 'hybrid_scoring') {
+    await cmd('Page.navigate', { url: `${origin}/__ux5-admin/${mode}?campaign=${campaignId}&privacy=${privacy}&type=${type}&live=0` });
 }
 
 async function confirmAction(selector, label) {
@@ -84,7 +84,7 @@ const viewports = [
 
 (async () => {
     assert(chromePath, 'Chrome or Edge is required');
-    assert(fixture.campaignId && fixture.secretCampaignId, 'Guarded campaign fixtures are required');
+    assert(fixture.campaignId && fixture.secretCampaignId && fixture.workflowCampaigns, 'Guarded campaign fixtures are required');
     chrome = spawn(chromePath, ['--headless=new', '--disable-gpu', '--no-sandbox', '--remote-allow-origins=*', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore', windowsHide: true });
     let targets;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -127,6 +127,8 @@ const viewports = [
         assert(!body.includes('SV-V01') && !body.includes('private fixture detail') && !body.includes('Alice Real'), `${name} protected data leaked into Operations UI`);
         assert(body.includes('Privacy threshold') && body.includes('exact result hash'), `${name} privacy/certification wording`);
         assert(body.includes('3/6') && body.includes('งานที่กรรมการส่งแล้ว') && body.includes('ถอนตัว 1'), `${name} jury-progress aggregation`);
+        assert(body.includes('ติดตามความพร้อมงานตัดสิน') && body.includes('แสดงความคืบหน้าโดยไม่เปิดเผยคะแนน'), `${name} privacy-safe Jury readiness panel`);
+        assert(body.includes('รอบกรรมการ') && body.includes('ส่งแล้ว · กรอก'), `${name} stage-specific Jury progress mapping`);
         assert(!body.includes('ความคืบหน้างานกรรมการ ไม่พร้อมใช้งาน'), `${name} jury-progress must not render a partial-data warning`);
         await shot(`operations-${name}.png`);
 
@@ -150,13 +152,35 @@ const viewports = [
         matrix.push({ ...layout, suppressionSafe: true, timelineSafe: true, certificationOwnership: true });
     }
 
+    const workflowExpectations = {
+        survey: 'ภาพรวมการตอบแบบสำรวจ',
+        popular_vote: 'ภาพรวมการเข้าร่วม',
+        submission_challenge: 'ความพร้อมผลงานที่ส่งเข้าร่วม',
+        nomination: 'ความพร้อมรายการเสนอชื่อ'
+    };
+    await cmd('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, mobile: true, deviceScaleFactor: 1 });
+    for (const [type, expectedTitle] of Object.entries(workflowExpectations)) {
+        await navigate('full', fixture.workflowCampaigns[type], 'confidential', type);
+        await wait(`Boolean(document.body?.textContent?.includes(${JSON.stringify(expectedTitle)}))`, `${type} workflow observation`);
+        const layout = await inspectPage('390x844', type);
+        assert.strictEqual(layout.overflow, false, `${type} horizontal overflow`);
+        assert.deepStrictEqual(layout.badTouch, [], `${type} touch targets ${JSON.stringify(layout.badTouch)}`);
+        const body = await ev(`document.body.textContent`);
+        assert(body.includes('กำลังรออะไรอยู่'), `${type} waiting-for state missing`);
+        assert(!body.includes('SV-V01') && !body.includes('private fixture detail'), `${type} protected data leaked`);
+        if (type !== 'popular_vote') assert(!await ev(`Boolean(document.querySelector('[data-svo-live-results]'))`), `${type} must not render Live Results`);
+        await shot(`workflow-${type}-390x844.png`);
+    }
+
     await cmd('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, mobile: true, deviceScaleFactor: 1 });
     expectHttpError = true;
-    await navigate('full', fixture.secretCampaignId, 'secret_ballot');
+    await navigate('full', fixture.secretCampaignId, 'secret_ballot', 'secret_election');
     await wait(`Boolean(document.querySelector('.svo-privacy-state'))`, 'secret-ballot organization privacy state');
     expectHttpError = false;
     assert(await ev(`document.querySelector('.svo-privacy-state')?.textContent.includes('SECRET_DIMENSION_FORBIDDEN')`), 'secret dimension denial contract missing');
     assert(!await ev(`document.body.textContent.includes('SV-V')`), 'secret workspace disclosed employee identifiers');
+    assert(await ev(`document.body.textContent.includes('ความพร้อมการเลือกตั้งลับ')&&document.body.textContent.includes('ไม่แสดงคะแนนสดหรือตัวเลือกของผู้ใช้สิทธิ์')`), 'secret workflow privacy observation missing');
+    assert(!await ev(`Boolean(document.querySelector('[data-svo-live-results]'))`), 'Secret Election must not render Live Results');
     await shot('secret-dimension-forbidden-390x844.png');
 
     expectHttpError = true;

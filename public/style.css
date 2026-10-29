@@ -1155,6 +1155,22 @@ body {
 .svo-stage-list article > div { display: grid; min-width: 0; gap: .15rem; }
 .svo-stage-list span, .svo-stage-list small { color: #64748b; font-size: .75rem; }
 .svo-stage-list strong { overflow-wrap: anywhere; }
+.svo-panel--jury-readiness { border-color: #99f6e4; background: linear-gradient(180deg, #ffffff, #f0fdfa); }
+.svo-jury-readiness-note { display: grid; gap: .2rem; margin-top: .85rem; border: 1px solid #bae6fd; border-radius: .8rem; padding: .8rem; background: #f0f9ff; color: #0c4a6e; }
+.svo-jury-readiness-note span { font-size: .82rem; line-height: 1.55; }
+.svo-jury-readiness-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin-top: .8rem; }
+.svo-jury-readiness-grid article { display: grid; min-width: 0; gap: .2rem; border: 1px solid #dbeafe; border-radius: .8rem; padding: .8rem; background: #fff; }
+.svo-jury-readiness-grid span, .svo-jury-readiness-grid small { color: #64748b; font-size: .75rem; }
+.svo-jury-readiness-grid strong { color: #0f172a; font-size: 1.35rem; overflow-wrap: anywhere; }
+.svo-jury-readiness-state { display: grid; gap: .2rem; margin-top: .8rem; border-radius: .8rem; padding: .8rem; }
+.svo-jury-readiness-state span { font-size: .82rem; line-height: 1.5; }
+.svo-jury-readiness-state.is-ready { border: 1px solid #6ee7b7; background: #ecfdf5; color: #065f46; }
+.svo-jury-readiness-state.is-pending { border: 1px solid #fcd34d; background: #fffbeb; color: #92400e; }
+.svo-panel--workflow { margin-top: 1rem; }
+.svo-workflow-description { margin: .7rem 0 0; color: #475569; font-size: .88rem; line-height: 1.55; }
+.svo-workflow-waiting { display: grid; gap: .35rem; margin-top: .8rem; border: 1px solid #fcd34d; border-radius: .8rem; padding: .8rem; background: #fffbeb; color: #78350f; }
+.svo-workflow-waiting ul { display: grid; gap: .25rem; margin: 0; padding-left: 1.2rem; }
+.svo-workflow-waiting li { line-height: 1.45; }
 .svo-privacy-state, .svo-cert-note { border: 1px solid #a5b4fc; border-radius: .8rem; padding: .85rem; background: #eef2ff; color: #3730a3; }
 .svo-privacy-state p { margin: .3rem 0 0; }
 .svo-analytics-list { display: grid; gap: .55rem; }
@@ -1183,6 +1199,8 @@ body {
     .svo-grid { grid-template-columns: 1fr; }
     .svo-panel--results { grid-column: auto; }
 }
+@media (max-width: 767px) { .svo-jury-readiness-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 430px) { .svo-jury-readiness-grid { grid-template-columns: 1fr; } }
 @media (max-width: 767px) {
     .svp-eligibility-granted { grid-template-columns: auto minmax(0, 1fr); }
     .svp-eligibility-granted .sv-button { grid-column: 1 / -1; width: 100%; }

@@ -37,7 +37,7 @@ async function campaign(db, { code, status = 'Open', type = 'hybrid_scoring', pr
         await db.query("INSERT INTO Employees VALUES(?,?,?,?,'User','B','Operator',?,'x',0)", [`SV-V${number}`, `Voter ${number}`, department, unit, `voter${number}@local`]);
     }
     await db.query("INSERT INTO Admin_UserPermissions VALUES('SV-OPS-LIMITED','SAFETY_VOTE_RESULT_VIEW',1),('SV-OPS-LIMITED','SAFETY_VOTE_MANAGE',0),('SV-OPS-LIMITED','SAFETY_VOTE_EXPORT',0),('SV-OPS-DENIED','SAFETY_VOTE_RESULT_VIEW',0)");
-    for (const migration of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql']) {
+    for (const migration of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261015_safety_vote_live_results.sql', '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql', '20261020_safety_vote_eligibility_amendments.sql', '20261024_safety_vote_question_images.sql', '20261024_safety_vote_candidate_submission_gallery.sql', '20261024_safety_vote_company_wide_visibility.sql', '20261024_safety_vote_eligibility_removal_policy.sql', '20261025_safety_vote_company_visibility_remediation.sql', '20261025_safety_vote_official_topn_next_cycle.sql', '20261025_safety_vote_result_release_policy.sql', '20261025_safety_vote_jury_work_items_atomic_media.sql']) {
         await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', migration), 'utf8'));
     }
 
@@ -68,7 +68,19 @@ async function campaign(db, { code, status = 'Open', type = 'hybrid_scoring', pr
     const secret = await campaign(db, { code: 'UX5-SECRET', title: 'เลือกตั้งลับสำหรับตรวจ Privacy', type: 'secret_election', privacy: 'secret_ballot', threshold: 5 });
     const [secretSnapshot] = await db.query("INSERT INTO SafetyVote_EligibilitySnapshots(CampaignVersionID,SnapshotNo,Status,RuleHash,RowsHash,EligibleCount,AccountReadyCount,WarningCount,FrozenAt,FrozenBy,CreatedBy) VALUES(?,1,'frozen',REPEAT('e',64),REPEAT('f',64),6,6,0,NOW(),'SV-ADMIN','SV-ADMIN')", [secret.versionId]);
     for (let index = 1; index <= 6; index++) await db.query("INSERT INTO SafetyVote_EligibleVoters(SnapshotID,EmployeeID,EmployeeNameSnapshot,MasterPresent,AccountReady,EligibilityState,InclusionSource) VALUES(?,?,?,1,1,'eligible','rule')", [secretSnapshot.insertId, `SV-V${String(index).padStart(2, '0')}`, `Voter ${index}`]);
-    const due = await campaign(db, { code: 'UX5-DUE', status: 'Draft', title: 'กำหนดการที่ถึงเวลา', privacy: 'identified', openOffset: -120, closeOffset: 240 });
+    const due = await campaign(db, { code: 'UX5-DUE', status: 'Scheduled', type: 'jury_scoring', title: 'กำหนดการที่ถึงเวลา', privacy: 'identified', openOffset: -120, closeOffset: 240 });
+    const [dueStage] = await db.query("INSERT INTO SafetyVote_Stages(CampaignVersionID,StageKey,StageName,StageType,SequenceNo,AdvanceRuleJson,Status,CreatedBy,UpdatedBy) VALUES(?,'JURY','รอบพร้อมเปิด','jury',1,'{\"blind\":true}','Draft','SV-ADMIN','SV-ADMIN')", [due.versionId]);
+    await db.query("INSERT INTO SafetyVote_Candidates(CampaignVersionID,StageID,OptionID,CandidateNo,SourceType,DisplayName,SortOrder,CreatedBy,UpdatedBy) VALUES(?,?,NULL,'WORK-1','admin_curated','ผลงานพร้อมประเมิน',1,'SV-ADMIN','SV-ADMIN')", [due.versionId, dueStage.insertId]);
+    await db.query("INSERT INTO SafetyVote_JuryCriteria(CampaignVersionID,StageID,CriterionCode,Title,MinScore,MaxScore,Weight,SortOrder,CreatedBy,UpdatedBy) VALUES(?,?,'READY','เกณฑ์พร้อมเปิด',1,10,100,1,'SV-ADMIN','SV-ADMIN')", [due.versionId, dueStage.insertId]);
+    await db.query("INSERT INTO SafetyVote_JuryAssignments(CampaignVersionID,StageID,JurorEmployeeID,AssignmentScope,Status,ConflictState,AssignedBy) VALUES(?,?,'SV-V01','stage','Draft','clear','SV-ADMIN')", [due.versionId, dueStage.insertId]);
+    const survey = await campaign(db, { code: 'UX5-SURVEY', title: 'Survey observation', type: 'survey', privacy: 'confidential' });
+    const popular = await campaign(db, { code: 'UX5-POPULAR', title: 'Popular Vote observation', type: 'popular_vote', privacy: 'confidential' });
+    await db.query('UPDATE SafetyVote_CampaignVersions SET LiveLeaderboardEnabled=1 WHERE id=?', [popular.versionId]);
+    const submission = await campaign(db, { code: 'UX5-SUBMIT', title: 'Submission observation', type: 'submission_challenge', privacy: 'identified' });
+    for (const [index, status] of ['Draft', 'Submitted', 'RevisionRequested', 'Accepted', 'Finalist'].entries()) await db.query('INSERT INTO SafetyVote_Submissions(CampaignID,CampaignVersionID,SubmitterEmployeeID,SubmissionCode,Title,Status) VALUES(?,?,?,?,?,?)', [submission.id, submission.versionId, `SV-V${String(index + 1).padStart(2, '0')}`, `UX5-SUB-${index + 1}`, `Work ${index + 1}`, status]);
+    const nomination = await campaign(db, { code: 'UX5-NOM', title: 'Nomination observation', type: 'nomination', privacy: 'identified' });
+    const nominationRows = [['SV-V01', 'SV-V05', 'pending', 'PendingConsent'], ['SV-V02', 'SV-V06', 'accepted', 'Submitted'], ['SV-V03', 'SV-V07', 'accepted', 'Accepted'], ['SV-V04', 'SV-V08', 'accepted', 'Finalist']];
+    for (const [nominator, nominee, consent, status] of nominationRows) await db.query("INSERT INTO SafetyVote_Nominations(CampaignID,CampaignVersionID,NominatorEmployeeID,NomineeEmployeeID,NomineeNameSnapshot,StatementText,ConsentRequired,ConsentState,Status) VALUES(?,?,?,?,?,'Reason',1,?,?)", [nomination.id, nomination.versionId, nominator, nominee, `Nominee ${nominee}`, consent, status]);
     await db.end();
 
     server = spawn(process.execPath, [path.join(__dirname, 'safety-vote-phase1-node-fixture-host.js')], {
@@ -82,7 +94,7 @@ async function campaign(db, { code, status = 'Open', type = 'hybrid_scoring', pr
         await sleep(150);
     }
     assert(ready, 'Fixture did not start');
-    const browser = spawnSync(process.execPath, [path.join(__dirname, 'safety-vote-ux-phase5-browser-probe.js'), 'http://127.0.0.1:5115', JSON.stringify({ campaignId: main.id, secretCampaignId: secret.id })], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 360000 });
+    const browser = spawnSync(process.execPath, [path.join(__dirname, 'safety-vote-ux-phase5-browser-probe.js'), 'http://127.0.0.1:5115', JSON.stringify({ campaignId: main.id, secretCampaignId: secret.id, workflowCampaigns: { survey: survey.id, popular_vote: popular.id, submission_challenge: submission.id, nomination: nomination.id } })], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 360000 });
     process.stdout.write(browser.stdout || '');
     process.stderr.write(browser.stderr || '');
     if (browser.error) console.error(browser.error.stack || browser.error);

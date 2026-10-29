@@ -4,14 +4,14 @@ import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourney
 import {
     juryProgress, metricView, notificationSummary, operationalWarnings, preferredSnapshot,
     safeTimeline, snapshotReadiness, stageRows, statusCounts, valueOf
-} from './safety-vote-operations-model.mjs?v=20261008-safety-vote-ux5-r1';
+} from './safety-vote-operations-model.mjs?v=20261029-safety-vote-workflow-observation-r1';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const state = {
     container: null, campaign: null, onClose: null, onNavigate: null, operations: null, analytics: null, analyticsPrivacy: false,
-    juryRows: [], stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false,
+    juryRows: [], juryReadiness: null, stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false,
     moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false,
     notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null,
     livePaused: false, liveInFlight: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null
@@ -53,7 +53,9 @@ function stateMarkup() {
 
 function metricCard(label, metric) {
     const view = metricView(metric);
-    return `<article class="svo-kpi ${view.visible ? '' : 'is-suppressed'}"><span>${escHtml(label)}</span><strong>${escHtml(view.label)}</strong>${view.visible && view.percentage !== null ? `<small>${view.percentage.toLocaleString('th-TH')}%</small>` : `<small>${view.reason === 'PRIVACY_THRESHOLD' ? 'ต่ำกว่าเกณฑ์ความเป็นส่วนตัว' : 'ไม่เปิดเผยตามนโยบาย'}</small>`}</article>`;
+    const defaults = ['ผู้มีสิทธิ์', 'เริ่มแล้ว', 'ส่งแล้ว', 'บัตรที่รับ'];
+    const index = defaults.indexOf(label), displayLabel = index >= 0 ? kpiLabels()[index] : label;
+    return `<article class="svo-kpi ${view.visible ? '' : 'is-suppressed'}"><span>${escHtml(displayLabel)}</span><strong>${escHtml(view.label)}</strong>${view.visible && view.percentage !== null ? `<small>${view.percentage.toLocaleString('th-TH')}%</small>` : `<small>${view.reason === 'PRIVACY_THRESHOLD' ? 'ต่ำกว่าเกณฑ์ความเป็นส่วนตัว' : 'ไม่เปิดเผยตามนโยบาย'}</small>`}</article>`;
 }
 
 function eligibilityAdmissionsMarkup() {
@@ -74,10 +76,101 @@ function timelineMarkup() {
 }
 
 function stagesMarkup() {
+    if (!isJuryCampaign()) {
+        const rows = (state.stages || []).map(stage => ({ id: Number(valueOf(stage, 'id', 'ID') || 0), name: String(valueOf(stage, 'StageName', 'stageName') || 'รอบกิจกรรม'), type: String(valueOf(stage, 'StageType', 'stageType') || 'stage'), status: String(valueOf(stage, 'Status', 'status') || 'Draft'), sequence: Number(valueOf(stage, 'SequenceNo', 'sequenceNo') || 0) })).sort((a, b) => a.sequence - b.sequence);
+        if (!rows.length) return `<div class="svo-empty-inline"><strong>แคมเปญนี้ไม่มีรอบย่อย</strong><span>ติดตามสถานะหลักได้จากกำหนดการและแผงความพร้อมด้านบน</span></div>`;
+        return `<div class="svo-stage-list">${rows.map(row => `<article><div><span>รอบ ${row.sequence || row.id}</span><strong>${escHtml(row.name)}</strong><small>${escHtml(row.type)}</small></div><div><strong>${escHtml(row.status)}</strong><span>สถานะรอบกิจกรรม</span></div></article>`).join('')}</div>`;
+    }
     const rows = stageRows(state.stages, state.juryRows);
     const all = juryProgress(state.juryRows);
     if (!rows.length && !all.total) return `<div class="svo-empty-inline"><strong>แคมเปญนี้ไม่มีรอบกรรมการ</strong><span>พื้นที่นี้จะแสดงเมื่อมี stage หรือ jury assignment ตาม contract เดิม</span></div>`;
-    return `<div class="svo-jury-overview"><div><strong>${all.submitted}/${all.total}</strong><span>งานที่กรรมการส่งแล้ว</span></div><div class="svj-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${all.percent}" aria-label="ความคืบหน้างานกรรมการ ${all.percent} เปอร์เซ็นต์"><span style="width:${all.percent}%"></span></div><small>ถอนตัว ${all.recused} · Conflict ${all.conflict}</small></div><div class="svo-stage-list">${rows.map(row => `<article><div><span>รอบ ${row.sequence || row.id}</span><strong>${escHtml(row.name)}</strong><small>${escHtml(row.type)} · ${escHtml(row.status)}</small></div><div><strong>${row.jury.submitted}/${row.jury.total}</strong><span>ส่งแล้ว</span></div></article>`).join('')}</div>`;
+    return `<div class="svo-jury-overview"><div><strong>${all.submitted}/${all.total}</strong><span>งานที่กรรมการส่งแล้ว</span></div><div class="svj-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${all.percent}" aria-label="ความคืบหน้างานกรรมการ ${all.percent} เปอร์เซ็นต์"><span style="width:${all.percent}%"></span></div><small>กำลังประเมิน ${all.draft} · ถอนตัว ${all.recused} · Conflict ${all.conflict}</small></div><div class="svo-stage-list">${rows.map(row => `<article><div><span>รอบ ${row.sequence || row.id}</span><strong>${escHtml(row.name)}</strong><small>${escHtml(row.type)} · ${escHtml(row.status)}${row.jury.lastActivityAt ? ` · ล่าสุด ${dateTime(row.jury.lastActivityAt)}` : ''}</small></div><div><strong>${row.jury.submitted}/${row.jury.total}</strong><span>ส่งแล้ว · กรอก ${row.jury.scoreCount}/${row.jury.expectedScoreCount} ช่อง</span></div></article>`).join('')}</div>`;
+}
+
+function isJuryCampaign() {
+    return ['jury_scoring', 'hybrid_scoring'].includes(campaignType());
+}
+
+function campaignType() {
+    return String(state.campaign?.CampaignType || state.campaign?.campaignType || state.operations?.campaign?.campaignType || 'survey').toLowerCase();
+}
+
+function isPopularVote() { return campaignType() === 'popular_vote'; }
+
+function juryObservationMarkup() {
+    const progress = juryProgress(state.juryRows), readiness = state.juryReadiness || {};
+    const minJurors = Math.max(1, Number(readiness.minJurors || 1));
+    const submittedJurors = Number(readiness.submittedJurors ?? progress.submittedJurors ?? 0);
+    const remainingJurors = Math.max(0, Number(readiness.remainingJurors ?? (minJurors - submittedJurors)));
+    const quorumMet = readiness.quorumMet === true || submittedJurors >= minJurors;
+    return `<section class="svo-panel svo-panel--jury-readiness" aria-labelledby="svo-jury-readiness-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Jury readiness</p><h2 id="svo-jury-readiness-title">ติดตามความพร้อมงานตัดสิน</h2></div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh">รีเฟรช</button></div><div class="svo-jury-readiness-note" role="note"><strong>แสดงความคืบหน้าโดยไม่เปิดเผยคะแนน</strong><span>ระหว่างที่กรรมการทำงาน ระบบไม่แสดงคะแนนรายข้อ คะแนนรวม อันดับ หรือ blind identity เพื่อลดอคติและรักษาความเป็นอิสระของการตัดสิน</span></div><div class="svo-jury-readiness-grid"><article><span>งานที่ส่งแล้ว</span><strong>${progress.submitted}/${progress.total}</strong><small>กำลังประเมิน ${progress.draft} งาน</small></article><article><span>กรรมการที่ส่งงาน</span><strong>${submittedJurors}/${minJurors}</strong><small>${quorumMet ? 'ถึงจำนวนขั้นต่ำแล้ว' : `ยังขาดอย่างน้อย ${remainingJurors} คน`}</small></article><article><span>ช่องประเมินที่บันทึก</span><strong>${progress.scoreCount}/${progress.expectedScoreCount}</strong><small>${progress.scorePercent}% ของงานที่ยังใช้งาน</small></article><article><span>ข้อขัดข้อง</span><strong>${progress.conflict + progress.recused}</strong><small>ถอนตัว ${progress.recused} · Conflict ${progress.conflict}</small></article></div><div class="svo-jury-readiness-state ${quorumMet ? 'is-ready' : 'is-pending'}" role="status"><strong>${quorumMet ? 'จำนวนกรรมการถึงเกณฑ์ขั้นต่ำ' : 'ยังไม่ถึงเกณฑ์ขั้นต่ำสำหรับคำนวณผล'}</strong><span>${quorumMet ? 'แอดมินยังไม่เห็นคะแนนระหว่างทาง ผลจะเกิดหลังปิดรอบและเข้าสู่ workflow คำนวณ/ตรวจสอบ/รับรองตามสิทธิ์' : `ต้องมีกรรมการส่งงานอย่างน้อย ${minJurors} คน ขณะนี้ส่งแล้ว ${submittedJurors} คน`}</span></div></section>`;
+}
+
+function workflowCard(label, value, detail = '') {
+    return `<article><span>${escHtml(label)}</span><strong>${escHtml(String(value))}</strong><small>${escHtml(detail)}</small></article>`;
+}
+
+function resultWaitingItem() {
+    const status = String(state.operations?.campaign?.status || state.campaign?.Status || 'Draft');
+    const snapshot = snapshotReadiness(state.snapshots)[0] || null;
+    if (status === 'Draft' || status === 'Scheduled') return 'รอเปิดแคมเปญตามกำหนดการ';
+    if (status === 'Open') return 'รอปิดรับข้อมูลก่อนเข้าสู่กระบวนการผล';
+    if (!snapshot) return 'รอคำนวณและสร้าง Result Snapshot';
+    if (snapshot.status === 'Calculated') return 'รอตรึงผล (Freeze)';
+    if (snapshot.status === 'Frozen') return 'รอผู้มีสิทธิ์รับรองผล';
+    if (snapshot.status === 'Certified') return 'รอเผยแพร่ผลอย่างเป็นทางการ';
+    if (snapshot.status === 'Published') return 'เผยแพร่ผลอย่างเป็นทางการแล้ว';
+    return `สถานะผลปัจจุบัน: ${snapshot.status}`;
+}
+
+function workflowObservationMarkup() {
+    const type = campaignType(), metrics = state.operations?.workflow?.metrics || {}, funnel = state.operations?.funnel || {};
+    const visible = metric => metricView(metric).label;
+    let title = 'ติดตามความพร้อมแคมเปญ', description = 'แสดงข้อมูลรวมตามประเภทกิจกรรมโดยไม่เปิดเผยข้อมูลรายบุคคล', cards = [], waiting = [];
+    if (type === 'survey') {
+        title = 'ภาพรวมการตอบแบบสำรวจ';
+        const incomplete = Math.max(0, Number(funnel.started?.value || 0) - Number(funnel.submitted?.value || 0));
+        cards = [workflowCard('เริ่มตอบแล้ว', visible(funnel.started), 'ผ่านเกณฑ์ความเป็นส่วนตัว'), workflowCard('ส่งคำตอบแล้ว', visible(funnel.submitted), 'แบบตอบที่ส่งสำเร็จ'), workflowCard('ยังตอบไม่ครบ', incomplete, 'เริ่มแล้วแต่ยังไม่ส่ง'), workflowCard('คำตอบที่ระบบรับ', visible(funnel.accepted), 'ไม่นับคำตอบที่ระบบปฏิเสธ')];
+        if (incomplete) waiting.push(`รอผู้ตอบส่งแบบสำรวจอีก ${incomplete} รายการ`);
+    } else if (type === 'secret_election') {
+        title = 'ความพร้อมการเลือกตั้งลับ'; description = 'แสดงเฉพาะจำนวนและการกระทบยอด ไม่แสดงคะแนนสดหรือตัวเลือกของผู้ใช้สิทธิ์';
+        cards = [workflowCard('เริ่มใช้สิทธิ์', visible(funnel.started), 'ไม่เปิดเผยรายชื่อ'), workflowCard('ส่งบัตรแล้ว', visible(funnel.submitted), 'ข้อมูลรวมเท่านั้น'), workflowCard('บัตรที่รับ', visible(funnel.accepted), 'ผ่านการตรวจสอบ'), workflowCard('บัตรที่ปฏิเสธ', Number(metrics.ballotRejected || 0), 'ใช้ตรวจสุขภาพกระบวนการ')];
+        if (state.operations?.health?.reconciliation !== 'balanced') waiting.push('ต้องตรวจสอบการกระทบยอดบัตรก่อนดำเนินการผล');
+    } else if (type === 'submission_challenge') {
+        title = 'ความพร้อมผลงานที่ส่งเข้าร่วม';
+        cards = [workflowCard('ผลงานทั้งหมด', Number(metrics.submissionTotal || 0), 'รวมทุกสถานะ'), workflowCard('รอตรวจ', Number(metrics.submissionPendingReview || 0), 'ส่งแล้วและรอผู้ตรวจ'), workflowCard('ขอให้แก้ไข', Number(metrics.submissionRevision || 0), 'รอผู้ส่งแก้ไข'), workflowCard('ผ่าน/เข้ารอบ', Number(metrics.submissionAccepted || 0) + Number(metrics.submissionFinalist || 0), `Finalist ${Number(metrics.submissionFinalist || 0)}`)];
+        if (Number(metrics.submissionPendingReview || 0)) waiting.push(`รอตรวจผลงาน ${Number(metrics.submissionPendingReview)} รายการ`);
+        if (Number(metrics.submissionRevision || 0)) waiting.push(`รอแก้ไขผลงาน ${Number(metrics.submissionRevision)} รายการ`);
+    } else if (type === 'nomination' || type === 'award') {
+        title = 'ความพร้อมรายการเสนอชื่อ';
+        cards = [workflowCard('เสนอชื่อทั้งหมด', Number(metrics.nominationTotal || 0), 'รวมทุกสถานะ'), workflowCard('รอยินยอม', Number(metrics.nominationPendingConsent || 0), 'ผู้ถูกเสนอชื่อยังไม่ตอบรับ'), workflowCard('รอตรวจ', Number(metrics.nominationPendingReview || 0), 'ยินยอมแล้วและรอพิจารณา'), workflowCard('ผ่าน/เข้ารอบ', Number(metrics.nominationAccepted || 0) + Number(metrics.nominationFinalist || 0), `Finalist ${Number(metrics.nominationFinalist || 0)}`)];
+        if (Number(metrics.nominationPendingConsent || 0)) waiting.push(`รอการยินยอม ${Number(metrics.nominationPendingConsent)} รายการ`);
+        if (Number(metrics.nominationPendingReview || 0)) waiting.push(`รอตรวจรายการเสนอชื่อ ${Number(metrics.nominationPendingReview)} รายการ`);
+    } else {
+        title = 'ภาพรวมการเข้าร่วม';
+        cards = [workflowCard('ผู้มีสิทธิ์', visible(funnel.eligible), 'ตาม Eligibility Snapshot'), workflowCard('เริ่มแล้ว', visible(funnel.started), 'ข้อมูลรวม'), workflowCard('ส่งแล้ว', visible(funnel.submitted), 'ข้อมูลรวม'), workflowCard('ระบบรับแล้ว', visible(funnel.accepted), 'ผ่านการตรวจสอบ')];
+    }
+    waiting.push(resultWaitingItem());
+    return `<section class="svo-panel svo-panel--workflow" aria-labelledby="svo-workflow-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Workflow observation</p><h2 id="svo-workflow-title">${escHtml(title)}</h2></div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh">รีเฟรช</button></div><p class="svo-workflow-description">${escHtml(description)}</p><div class="svo-jury-readiness-grid">${cards.join('')}</div><div class="svo-workflow-waiting" role="status"><strong>กำลังรออะไรอยู่</strong><ul>${waiting.map(item => `<li>${escHtml(item)}</li>`).join('')}</ul></div></section>`;
+}
+
+function liveResultsPanelMarkup(campaign) {
+    return `<section class="svo-panel svo-panel--live" aria-labelledby="svo-live-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Live Results</p><h2 id="svo-live-title">ผลโหวตสด</h2></div><div class="svo-inline-actions"><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div></div><div data-svo-live-results>${Number(campaign.LiveLeaderboardEnabled)?liveResultsMarkup(state.liveResults,{admin:true,error:state.liveError,loading:state.liveInFlight,paused:state.livePaused}):liveResultsMarkup(null,{error:{code:'LIVE_RESULTS_DISABLED'}})}</div></section>`;
+}
+
+function observationMarkup(campaign) {
+    if (isJuryCampaign()) return `${juryObservationMarkup()}<section class="svo-workflow-waiting svo-workflow-waiting--standalone" role="status"><strong>กำลังรออะไรอยู่</strong><ul><li>${escHtml(resultWaitingItem())}</li></ul></section>`;
+    const workflow = workflowObservationMarkup();
+    return isPopularVote() ? `${workflow}${liveResultsPanelMarkup(campaign)}` : workflow;
+}
+
+function kpiLabels() {
+    const type = campaignType();
+    if (type === 'survey') return ['ผู้มีสิทธิ์', 'เริ่มตอบ', 'ส่งคำตอบ', 'คำตอบที่รับ'];
+    if (type === 'submission_challenge') return ['ผู้มีสิทธิ์', 'เริ่มเข้าร่วม', 'ส่งผลงาน', 'รายการที่รับ'];
+    if (type === 'nomination' || type === 'award') return ['ผู้มีสิทธิ์', 'เริ่มเสนอชื่อ', 'ส่งเสนอชื่อ', 'รายการที่รับ'];
+    if (type === 'secret_election') return ['ผู้มีสิทธิ์', 'เริ่มใช้สิทธิ์', 'ส่งบัตร', 'บัตรที่รับ'];
+    return ['ผู้มีสิทธิ์', 'เริ่มแล้ว', 'ส่งแล้ว', 'บัตรที่รับ'];
 }
 
 function analyticsMarkup() {
@@ -139,8 +232,11 @@ function render() {
     if (state.error || state.denied || state.moduleDisabled) { state.container.innerHTML = stateMarkup(); bind(); return; }
     const campaign = state.campaign || {}, operations = state.operations || {}, funnel = operations.funnel || {}, status = operations.campaign?.status || campaign.Status || 'Draft';
     const notificationCounts = statusCounts(operations.notifications || []), exportCounts = statusCounts(operations.exports || []);
-    state.container.innerHTML = `<div class="svo-shell" data-sv-operations="2026-10-20-auto-eligibility-notice-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svo-hero"><button type="button" class="sv-icon-button" data-svo-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ศูนย์ปฏิบัติการ Safety Vote</p><h1>${escHtml(campaign.TitleTh || campaign.titleTh || 'แคมเปญ Safety Vote')}</h1><p>${escHtml(campaign.CampaignCode || campaign.campaignCode || '')} · ข้อมูลรวมสำหรับติดตามความพร้อม ไม่ใช่หน้ารับรองหรือคำนวณผล</p></div>${safetyVoteStatusBadge(status)}</header>${warningMarkup()}${state.actionError ? `<div class="svo-action-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.actionNotice ? `<div class="svo-action-message is-success" role="status">${escHtml(state.actionNotice)}</div>` : ''}<section class="svo-kpi-grid" aria-label="Funnel การเข้าร่วมที่ผ่านเกณฑ์ความเป็นส่วนตัว">${metricCard('ผู้มีสิทธิ์', funnel.eligible)}${metricCard('เริ่มแล้ว', funnel.started)}${metricCard('ส่งแล้ว', funnel.submitted)}${metricCard('บัตรที่รับ', funnel.accepted)}</section>${eligibilityAdmissionsMarkup()}<div class="svo-privacy-banner" role="note"><strong>Privacy threshold ทำงานที่เซิร์ฟเวอร์</strong><span>ค่าที่ถูกปกปิดจะไม่ถูกคำนวณย้อนกลับ และหน้าจอนี้ไม่อ่านตัวเลือกลงคะแนน รายชื่อผู้ลงคะแนน หรือ blind identity</span></div><section class="svo-panel svo-panel--live" aria-labelledby="svo-live-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Live Results</p><h2 id="svo-live-title">ผลโหวตสด</h2></div><div class="svo-inline-actions"><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div></div><div data-svo-live-results>${Number(campaign.LiveLeaderboardEnabled)?liveResultsMarkup(state.liveResults,{admin:true,error:state.liveError,loading:state.liveInFlight,paused:state.livePaused}):liveResultsMarkup(null,{error:{code:'LIVE_RESULTS_DISABLED'}})}</div></section><main class="svo-grid"><section class="svo-panel svo-panel--timeline" aria-labelledby="svo-timeline-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Lifecycle</p><h2 id="svo-timeline-title">กำหนดการและ Timeline</h2></div><span>${escHtml(operations.campaign?.timeZone || 'Asia/Bangkok')}</span></div><dl class="svo-schedule"><div><dt>เปิด</dt><dd>${dateTime(operations.campaign?.scheduledOpenAt)}</dd></div><div><dt>ปิด</dt><dd>${dateTime(operations.campaign?.scheduledCloseAt)}</dd></div></dl>${timelineMarkup()}</section><section class="svo-panel" aria-labelledby="svo-jury-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Stage health</p><h2 id="svo-jury-title">รอบและงานกรรมการ</h2></div></div>${stagesMarkup()}</section><section class="svo-panel" aria-labelledby="svo-analytics-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Privacy-safe analytics</p><h2 id="svo-analytics-title">การเข้าร่วมตามหน่วยงาน</h2></div></div>${analyticsMarkup()}</section><section class="svo-panel" aria-labelledby="svo-notification-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Delivery health</p><h2 id="svo-notification-title">สถานะการแจ้งเตือน</h2></div><span>${Number(notificationCounts.Failed || 0) ? 'ต้องตรวจสอบ' : 'ติดตามจากสถานะรวม'}</span></div>${notificationMarkup()}</section><section class="svo-panel svo-panel--results" aria-labelledby="svo-result-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Result readiness</p><h2 id="svo-result-title">Snapshot และรายงาน</h2></div><span>Export สำเร็จ ${Number(exportCounts.Completed || 0)}</span></div>${resultsMarkup()}</section></main><footer class="svo-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svo-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button>${status === 'Open' ? `<button type="button" class="sv-button sv-button--danger" data-svo-action="close-campaign" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ปิดรับคะแนน</button>` : ''}<button type="button" class="sv-button sv-button--primary" data-svo-action="process-schedule" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ประมวลผลกำหนดการ</button></div></footer></div>`;
+    const observationPanel = observationMarkup(campaign);
+    state.container.innerHTML = `<div class="svo-shell" data-sv-operations="2026-10-29-jury-readiness-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svo-hero"><button type="button" class="sv-icon-button" data-svo-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ศูนย์ปฏิบัติการ Safety Vote</p><h1>${escHtml(campaign.TitleTh || campaign.titleTh || 'แคมเปญ Safety Vote')}</h1><p>${escHtml(campaign.CampaignCode || campaign.campaignCode || '')} · ข้อมูลรวมสำหรับติดตามความพร้อม ไม่ใช่หน้ารับรองหรือคำนวณผล</p></div>${safetyVoteStatusBadge(status)}</header>${warningMarkup()}${state.actionError ? `<div class="svo-action-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.actionNotice ? `<div class="svo-action-message is-success" role="status">${escHtml(state.actionNotice)}</div>` : ''}<section class="svo-kpi-grid" aria-label="Funnel การเข้าร่วมที่ผ่านเกณฑ์ความเป็นส่วนตัว">${metricCard('ผู้มีสิทธิ์', funnel.eligible)}${metricCard('เริ่มแล้ว', funnel.started)}${metricCard('ส่งแล้ว', funnel.submitted)}${metricCard('บัตรที่รับ', funnel.accepted)}</section>${eligibilityAdmissionsMarkup()}<div class="svo-privacy-banner" role="note"><strong>Privacy threshold ทำงานที่เซิร์ฟเวอร์</strong><span>ค่าที่ถูกปกปิดจะไม่ถูกคำนวณย้อนกลับ และหน้าจอนี้ไม่อ่านตัวเลือกลงคะแนน รายชื่อผู้ลงคะแนน หรือ blind identity</span></div>${observationPanel}<main class="svo-grid"><section class="svo-panel svo-panel--timeline" aria-labelledby="svo-timeline-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Lifecycle</p><h2 id="svo-timeline-title">กำหนดการและ Timeline</h2></div><span>${escHtml(operations.campaign?.timeZone || 'Asia/Bangkok')}</span></div><dl class="svo-schedule"><div><dt>เปิด</dt><dd>${dateTime(operations.campaign?.scheduledOpenAt)}</dd></div><div><dt>ปิด</dt><dd>${dateTime(operations.campaign?.scheduledCloseAt)}</dd></div></dl>${timelineMarkup()}</section><section class="svo-panel" aria-labelledby="svo-jury-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Stage health</p><h2 id="svo-jury-title">รอบและงานกรรมการ</h2></div></div>${stagesMarkup()}</section><section class="svo-panel" aria-labelledby="svo-analytics-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Privacy-safe analytics</p><h2 id="svo-analytics-title">การเข้าร่วมตามหน่วยงาน</h2></div></div>${analyticsMarkup()}</section><section class="svo-panel" aria-labelledby="svo-notification-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Delivery health</p><h2 id="svo-notification-title">สถานะการแจ้งเตือน</h2></div><span>${Number(notificationCounts.Failed || 0) ? 'ต้องตรวจสอบ' : 'ติดตามจากสถานะรวม'}</span></div>${notificationMarkup()}</section><section class="svo-panel svo-panel--results" aria-labelledby="svo-result-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Result readiness</p><h2 id="svo-result-title">Snapshot และรายงาน</h2></div><span>Export สำเร็จ ${Number(exportCounts.Completed || 0)}</span></div>${resultsMarkup()}</section></main><footer class="svo-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svo-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button>${status === 'Open' ? `<button type="button" class="sv-button sv-button--danger" data-svo-action="close-campaign" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ปิดรับคะแนน</button>` : ''}<button type="button" class="sv-button sv-button--primary" data-svo-action="process-schedule" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ประมวลผลกำหนดการ</button></div></footer></div>`;
     state.container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'operations', campaign, onPage: typeof state.onNavigate !== 'function' }));
+    const stageTitle = state.container.querySelector('#svo-jury-title');
+    if (stageTitle && !isJuryCampaign()) stageTitle.textContent = 'รอบและสถานะแคมเปญ';
     bind(); bindSafetyVoteImageGallery(state.container); hydrateLiveResultImages(state.container);
 }
 
@@ -177,6 +273,7 @@ async function loadData() {
         state.analyticsPrivacy = analytics.status === 'rejected' && analytics.reason?.code === 'SECRET_DIMENSION_FORBIDDEN';
         state.analytics = analytics.status === 'fulfilled' ? analytics.value.data : null;
         state.juryRows = jury.status === 'fulfilled' ? jury.value.data?.rows || [] : [];
+        state.juryReadiness = jury.status === 'fulfilled' ? jury.value.data?.readiness || null : null;
         state.stages = stages.status === 'fulfilled' ? stages.value.data?.rows || [] : [];
         state.snapshots = snapshots.status === 'fulfilled' ? snapshots.value.data?.rows || [] : [];
         state.manageUnavailable = [jury, stages].some(result => result.status === 'rejected' && (Number(result.reason?.status) === 403 || result.reason?.code === 'PERMISSION_DENIED'));
@@ -280,9 +377,9 @@ function bind() {
 export async function renderSafetyVoteOperationsWorkspace(container, { campaign = null, onClose = null, onNavigate = null } = {}) {
     if (!isSafetyVoteUxV1Enabled() || !container || !campaign?.id) return false;
     stopLivePolling();
-    Object.assign(state, { container, campaign, onClose, onNavigate, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null, livePaused: false, liveInFlight: false, liveFailures: 0 });
+    Object.assign(state, { container, campaign, onClose, onNavigate, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], juryReadiness: null, stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null, livePaused: false, liveInFlight: false, liveFailures: 0 });
     await loadData();
-    if (Number(campaign.LiveLeaderboardEnabled) && String(campaign.Status) === 'Open') {
+    if (isPopularVote() && Number(campaign.LiveLeaderboardEnabled) && String(campaign.Status) === 'Open') {
         state.liveVisibilityHandler = () => { if (document.hidden) { clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer); state.liveAbort?.abort(); } else if (!state.livePaused) loadLiveResults(false); };
         document.addEventListener('visibilitychange', state.liveVisibilityHandler);
         await loadLiveResults(false);

@@ -29,7 +29,14 @@ const migrations = [
     '20261008_safety_vote_phase4_jury_scoring.sql',
     '20261008_safety_vote_phase5_operations.sql',
     '20261008_safety_vote_phase6_secret_election.sql',
-    '20261008_safety_vote_phase7_integrations_governance.sql'
+    '20261008_safety_vote_phase7_integrations_governance.sql',
+    '20261009_safety_vote_phase10_4_media_versioning.sql',
+    '20261015_safety_vote_live_results.sql',
+    '20261016_safety_vote_participation_attempts.sql',
+    '20261016_safety_vote_campaign_governance.sql',
+    '20261020_safety_vote_eligibility_amendments.sql',
+    '20261025_safety_vote_official_topn_next_cycle.sql',
+    '20261025_safety_vote_result_release_policy.sql'
 ];
 
 async function waitReady(url) {
@@ -91,10 +98,12 @@ function normalize(rows) {
 
     const nodeSource = fs.readFileSync(path.join(root, 'backend', 'routes', 'safety-vote-phase4.js'), 'utf8');
     const phpSource = fs.readFileSync(path.join(root, 'api', 'handlers', 'safety_vote_phase4.php'), 'utf8');
-    const qualified = 'SELECT a.Status,a.ConflictState,COUNT(*) total';
-    const grouped = 'GROUP BY a.Status,a.ConflictState';
-    assert(nodeSource.includes(qualified) && nodeSource.includes(grouped), 'Node jury-progress columns are not qualified');
-    assert(phpSource.includes(qualified) && phpSource.includes(grouped), 'PHP jury-progress columns are not qualified');
+    const qualified = 'SELECT a.StageID,a.Status,a.ConflictState,COUNT(*) total';
+    const grouped = 'GROUP BY a.StageID,a.Status,a.ConflictState';
+    assert(nodeSource.includes(qualified) && nodeSource.includes(grouped), 'Node jury-progress stage aggregation is missing');
+    assert(phpSource.includes(qualified) && phpSource.includes(grouped), 'PHP jury-progress stage aggregation is missing');
+    assert(nodeSource.includes('ExpectedScoreCount') && nodeSource.includes('scoreValuesExposed:false'), 'Node privacy-safe readiness projection is incomplete');
+    assert(phpSource.includes('ExpectedScoreCount') && phpSource.includes("'scoreValuesExposed'=>false"), 'PHP privacy-safe readiness projection is incomplete');
     assert(!nodeSource.includes('SELECT Status,ConflictState,COUNT(*) total FROM SafetyVote_JuryAssignments a JOIN'), 'Node ambiguous query remains');
     assert(!phpSource.includes('SELECT Status,ConflictState,COUNT(*) total FROM SafetyVote_JuryAssignments a JOIN'), 'PHP ambiguous query remains');
 
@@ -132,12 +141,14 @@ function normalize(rows) {
         const base = `http://127.0.0.1:${ports[label]}/api/safety-vote`;
         const response = await api(base, `/admin/campaigns/${campaignIds[label]}/jury/progress`);
         assert.strictEqual(response.status, 200, `${label} jury-progress failed: ${response.text}`);
+        assert((response.body?.data?.rows || []).every(row => Number(row.StageID) > 0), `${label} jury-progress omitted StageID`);
+        assert.deepStrictEqual(response.body?.data?.readiness, { minJurors: 1, submittedJurors: 1, activeJurors: 3, remainingJurors: 0, quorumMet: true, scoreValuesExposed: false }, `${label} readiness summary mismatch`);
         outputs[label] = normalize(response.body?.data?.rows);
         assert.deepStrictEqual(outputs[label], expected, `${label} jury-progress aggregation mismatch`);
     }
     assert.deepStrictEqual(outputs.php, outputs.node, 'Node/PHP jury-progress response mismatch');
 
-    console.log('Safety Vote Phase 9.1 Jury Progress regression: PASS (qualified SQL, populated Node/PHP endpoint parity, exact Draft/Submitted/Recused aggregation)');
+    console.log('Safety Vote Phase 9.1 Jury Progress regression: PASS (StageID mapping, privacy-safe readiness and Node/PHP aggregation parity)');
 })().catch(error => {
     console.error(error.stack || error);
     process.exitCode = 1;

@@ -15,6 +15,8 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     const css = read('public/style.css');
     const main = read('public/js/main.js');
     const html = read('index.html');
+    const nodePhase5 = read('backend/routes/safety-vote-phase5.js');
+    const phpPhase5 = read('api/handlers/safety_vote_phase5.php');
     const preflight = read('docs/safety-vote-ux-phase5-preflight-scope.md');
     const model = await import(pathToFileURL(path.join(root, 'public', 'js', 'pages', 'safety-vote-operations-model.mjs')).href);
     let checks = 0;
@@ -42,6 +44,17 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(!workspace.includes('notificationPreview.rows'), 'notification employee rows must not be rendered');
     check(workspace.includes('หน้าจอนี้ไม่แสดงรายชื่อ'), 'notification preview needs privacy-safe wording');
     check(workspace.includes('หน้าจอนี้ไม่อ่านตัวเลือกลงคะแนน'), 'ballot/blind identity privacy wording is missing');
+    check(workspace.includes('ติดตามความพร้อมงานตัดสิน') && workspace.includes('ไม่เปิดเผยคะแนน'), 'Jury readiness observation panel is missing');
+    check(workspace.includes('scoreValuesExposed') === false, 'frontend must not depend on score values');
+    for (const marker of ['survey', 'popular_vote', 'secret_election', 'submission_challenge', 'nomination', 'jury_scoring']) check(workspace.includes(marker), `workflow observation is missing ${marker}`);
+    check(workspace.includes('workflowObservationMarkup') && workspace.includes('กำลังรออะไรอยู่'), 'workflow-aware observation/waiting panel is missing');
+    check(workspace.includes('isPopularVote()') && workspace.includes('liveResultsPanelMarkup'), 'Live Results must be bounded to Popular Vote');
+    check(workspace.includes('ไม่แสดงคะแนนสดหรือตัวเลือกของผู้ใช้สิทธิ์'), 'Secret Election privacy wording is missing');
+    for (const marker of ['2026-10-29-safety-vote-workflow-observation-r1', 'submissionPendingReview', 'nominationPendingConsent', 'selectionValuesIncluded']) {
+        check(nodePhase5.includes(marker), `Node workflow observation marker is missing: ${marker}`);
+        check(phpPhase5.includes(marker), `PHP workflow observation marker is missing: ${marker}`);
+    }
+    check(nodePhase5.includes('identityFieldsIncluded:false') && phpPhase5.includes("'identityFieldsIncluded'=>false"), 'workflow observation must exclude identity fields in Node/PHP');
     check(workspace.includes('Promise.allSettled'), 'partial-data loading is missing');
     check(workspace.includes('partialIssues') && workspace.includes('ไม่พร้อมใช้งาน'), 'partial state is incomplete');
     check(workspace.includes('normalizeSettledHttp') && workspace.includes('INVALID_API_RESPONSE'), 'non-JSON HTTP failures must become declared partial states');
@@ -59,11 +72,14 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(css.includes('@media (max-width: 430px)') && css.includes('@media (max-width: 767px)') && css.includes('@media (max-width: 1023px)'), 'required responsive breakpoints are incomplete');
     check(css.includes('@media (prefers-reduced-motion: reduce)'), 'reduced-motion handling is missing');
     check(css.includes('overflow-x: clip'), 'horizontal overflow containment is missing');
+    check(css.includes('.svo-workflow-waiting') && css.includes('.svo-panel--workflow'), 'workflow observation responsive styling is missing');
 
     check(model.metricView({ visible: false, suppressed: true, reason: 'PRIVACY_THRESHOLD', value: null }).label === 'ปกปิด', 'suppressed metric must not reveal a number');
     check(model.metricView({ visible: true, value: 8, percentage: 80 }).value === 8, 'visible aggregate metric is incorrect');
     const jury = model.juryProgress([{ Status: 'Draft', ConflictState: 'clear', total: 2 }, { Status: 'Submitted', ConflictState: 'clear', total: 3 }, { Status: 'Recused', ConflictState: 'recused', total: 1 }]);
     check(jury.total === 6 && jury.submitted === 3 && jury.recused === 1 && jury.percent === 50, 'jury progress aggregation is incorrect');
+    const detailedJury = model.juryProgress([{ Status: 'Draft', ConflictState: 'clear', total: 1, ScoreCount: 3, ExpectedScoreCount: 5 }, { Status: 'Submitted', ConflictState: 'clear', total: 1, ScoreCount: 5, ExpectedScoreCount: 5, DistinctJurors: 1 }]);
+    check(detailedJury.scoreCount === 8 && detailedJury.expectedScoreCount === 10 && detailedJury.scorePercent === 80 && detailedJury.submittedJurors === 1, 'privacy-safe Jury readiness aggregation is incorrect');
     const ready = model.snapshotReadiness([{ id: 9, SnapshotNo: 2, Status: 'Frozen', ResultHash: 'a'.repeat(64) }, { id: 10, SnapshotNo: 3, Status: 'Certified', ResultHash: 'b'.repeat(64) }]);
     check(ready[0].aggregateExportReady && !ready[0].certifiedReportReady, 'Frozen snapshot export readiness is incorrect');
     check(ready[1].aggregateExportReady && ready[1].certifiedReportReady, 'Certified snapshot report readiness is incorrect');

@@ -22,18 +22,28 @@ export function statusCounts(rows = []) {
 }
 
 export function juryProgress(rows = []) {
-    const result = { total: 0, draft: 0, submitted: 0, recused: 0, conflict: 0, percent: 0 };
+    const result = { total: 0, draft: 0, submitted: 0, recused: 0, conflict: 0, percent: 0, scoreCount: 0, expectedScoreCount: 0, scorePercent: 0, submittedJurors: 0, lastActivityAt: null };
     for (const row of rows || []) {
         const total = Number(valueOf(row, 'total', 'Total') || 0);
         const status = String(valueOf(row, 'Status', 'status') || '').toLowerCase();
         const conflict = String(valueOf(row, 'ConflictState', 'conflictState') || '').toLowerCase();
+        const scoreCount = Number(valueOf(row, 'ScoreCount', 'scoreCount') || 0);
+        const expectedScoreCount = Number(valueOf(row, 'ExpectedScoreCount', 'expectedScoreCount') || 0);
+        const lastActivityAt = valueOf(row, 'LastActivityAt', 'lastActivityAt');
         result.total += total;
         if (status === 'draft') result.draft += total;
         if (status === 'submitted') result.submitted += total;
         if (status === 'recused') result.recused += total;
-        if (conflict && conflict !== 'clear') result.conflict += total;
+        if (status !== 'recused' && conflict && conflict !== 'clear') result.conflict += total;
+        if (status === 'draft' || status === 'submitted') {
+            result.scoreCount += scoreCount;
+            result.expectedScoreCount += expectedScoreCount;
+        }
+        if (status === 'submitted' && conflict !== 'recused') result.submittedJurors += Number(valueOf(row, 'DistinctJurors', 'distinctJurors') || 0);
+        if (lastActivityAt && (!result.lastActivityAt || String(lastActivityAt) > String(result.lastActivityAt))) result.lastActivityAt = lastActivityAt;
     }
     result.percent = result.total ? Math.round(result.submitted / result.total * 100) : 0;
+    result.scorePercent = result.expectedScoreCount ? Math.round(result.scoreCount / result.expectedScoreCount * 100) : 0;
     return result;
 }
 
@@ -92,7 +102,7 @@ export function operationalWarnings({ operations = {}, jury = [], snapshots = []
     if (reconciliation && reconciliation !== 'balanced') warnings.push({ tone: 'danger', code: 'RECONCILIATION', text: 'ยอดการเข้าร่วมและบัตรที่รับยังไม่สมดุล ห้ามใช้ตัวเลขเพื่อประกาศผล' });
     if (!operations.campaign?.scheduledOpenAt || !operations.campaign?.scheduledCloseAt) warnings.push({ tone: 'warning', code: 'SCHEDULE', text: 'กำหนดเวลาเปิดหรือปิดยังไม่ครบ กรุณาตรวจในพื้นที่จัดการแคมเปญ' });
     const progress = juryProgress(jury);
-    if (progress.total && progress.submitted < progress.total) warnings.push({ tone: 'warning', code: 'JURY_PENDING', text: `ยังมีงานประเมินที่ไม่ส่ง ${progress.total - progress.submitted} งาน` });
+    if (progress.draft) warnings.push({ tone: 'warning', code: 'JURY_PENDING', text: `ยังมีงานประเมินที่กำลังดำเนินการ ${progress.draft} งาน` });
     if ((stages || []).length && !snapshotReadiness(snapshots).length) warnings.push({ tone: 'info', code: 'RESULT_PENDING', text: 'ยังไม่มี Result Snapshot สำหรับตรวจความพร้อมหรือสร้างรายงาน' });
     for (const issue of partialIssues || []) warnings.push({ tone: 'info', code: issue.code || 'PARTIAL', text: issue.message || 'ข้อมูลบางส่วนไม่พร้อมใช้งาน' });
     return warnings;

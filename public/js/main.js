@@ -19,7 +19,7 @@ const loadPatrolPage = lazyPage('./pages/patrol.js?v=20261026-patrol-mode-state-
 const loadCccfPage = lazyPage('./pages/cccf.js?v=20260907-cccf-permanent-pdf-layout-r2', 'loadCccfPage');
 const loadKpiPage = lazyPage('./pages/kpi.js?v=20261011-design-system-a11y-r1', 'loadKpiPage');
 const loadYokotenPage = lazyPage('./pages/yokoten.js?v=20260825-yokoten-department-relevance-r1', 'loadYokotenPage');
-const loadAdminPage = lazyPage('./pages/admin.js?v=20261028-safety-vote-official-topn-r1', 'loadAdminPage');
+const loadAdminPage = lazyPage('./pages/admin.js?v=20261029-safety-vote-workflow-observation-r1', 'loadAdminPage');
 const loadMachineSafetyPage = lazyPage('./pages/machine-safety.js?v=20261011-design-system-a11y-r1', 'loadMachineSafetyPage');
 const loadForkliftPage = lazyPage('./pages/forklift.js?v=20261011-design-system-a11y-r1', 'loadForkliftPage');
 const loadOjtPage = lazyPage('./pages/ojt.js?v=20260820-card-image-phase2d', 'loadOjtPage');
