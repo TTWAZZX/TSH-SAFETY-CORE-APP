@@ -20,7 +20,7 @@ const baselines = Object.freeze({
     'api/handlers/safety_vote_phase4.php': 'e29261d191616dcf9165d424a99f812107f9eabb',
     'index.html': '5b27162cd1073d78335148dbe16887ae7e68700d',
     'public/js/main.js': '5b27162cd1073d78335148dbe16887ae7e68700d',
-    'public/js/pages/safety-vote-page-ux1.js': '5058212e9f78ed7e3235a6d5efd46cb55fee2b14',
+    'public/js/pages/safety-vote-page-ux1.js': 'd5f2e5ba305d0adb8f399985ef8f4f5828fff710',
     'public/js/pages/safety-vote-jury-workspace.js': '4886262892fd1fdb6d57d32cbc355a36c795b832',
     'public/js/pages/safety-vote-jury-model.mjs': '4886262892fd1fdb6d57d32cbc355a36c795b832',
 });
