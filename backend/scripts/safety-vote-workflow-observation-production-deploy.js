@@ -80,7 +80,7 @@ function prepare(commit) {
         candidates.push({ path: relative, target, bytes: bytes.length, sha256: sha256(bytes) }); restore.push({ path: relative, rollback, bytes: before.bytes, sha256: before.sha256 }); remoteBefore.push({ path: relative, sha256: before.sha256, doubleDownloadMatched: true });
     }
     const index = blob(commit, 'index.html').toString('utf8'), main = blob(commit, 'public/js/main.js').toString('utf8'), operations = blob(commit, 'public/js/pages/admin-safety-vote-operations.js').toString('utf8');
-    assert(index.includes('20261029-safety-vote-workflow-observation-r1')); assert(main.includes('20261029-safety-vote-workflow-observation-r1')); assert(operations.includes('workflowObservationMarkup')); assert(operations.includes('20261029-workflow-observation-r1')); assert(operations.includes('กำลังรออะไรอยู่'));
+    assert(index.includes('20261029-safety-vote-workflow-observation-r1')); assert(main.includes('20261029-safety-vote-workflow-observation-r1')); assert(operations.includes('workflowObservationMarkup')); assert(operations.includes('20261029-safety-vote-workflow-observation-r1')); assert(operations.includes('กำลังรออะไรอยู่'));
     const manifest = { contract: '2026-10-29-safety-vote-workflow-observation-r1', baseline, commit, runtime: candidates.map(({ target, ...item }) => item), restore: restore.map(({ rollback, ...item }) => item), schemaChanged: false, businessDataChanged: false, externalDeliveryChanged: false };
     return { candidates, restore, remoteBefore, manifestSha256: writeJson('rollback-manifest.json', manifest) };
 }
