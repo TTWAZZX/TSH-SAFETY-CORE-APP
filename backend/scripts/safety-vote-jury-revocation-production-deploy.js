@@ -21,8 +21,8 @@ const baselines = Object.freeze({
     'index.html': '5b27162cd1073d78335148dbe16887ae7e68700d',
     'public/js/main.js': '5b27162cd1073d78335148dbe16887ae7e68700d',
     'public/js/pages/safety-vote-page-ux1.js': 'd5f2e5ba305d0adb8f399985ef8f4f5828fff710',
-    'public/js/pages/safety-vote-jury-workspace.js': '4886262892fd1fdb6d57d32cbc355a36c795b832',
-    'public/js/pages/safety-vote-jury-model.mjs': '4886262892fd1fdb6d57d32cbc355a36c795b832',
+    'public/js/pages/safety-vote-jury-workspace.js': 'd5f2e5ba305d0adb8f399985ef8f4f5828fff710',
+    'public/js/pages/safety-vote-jury-model.mjs': 'd5f2e5ba305d0adb8f399985ef8f4f5828fff710',
 });
 const runtime = Object.freeze(Object.keys(baselines));
 const publicRuntime = Object.freeze(runtime.filter(relative => relative !== 'api/handlers/safety_vote_phase4.php'));
