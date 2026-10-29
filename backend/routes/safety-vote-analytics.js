@@ -89,10 +89,11 @@ router.post('/engagement/promotions/:id/events', permit('SAFETY_VOTE_VIEW'), asy
     const id = positiveInt(req.params.id), eventType = analytics.normalizeEventType(req.body?.eventType);
     if (!id || !eventType) return fail(res, 400, 'VALIDATION_FAILED', 'Promotion and aggregate event type are required.');
     try {
-        const [[promotion]] = await db.query("SELECT p.id,p.CampaignID,c.CurrentVersionID FROM SafetyVote_Promotions p JOIN SafetyVote_Campaigns c ON c.id=p.CampaignID WHERE p.id=? AND p.Status='Published' AND p.StartAt<=NOW() AND p.EndAt>NOW() AND c.Status<>'Voided'", [id]);
+        const [[promotion]] = await db.query("SELECT p.id,p.CampaignID FROM SafetyVote_Promotions p JOIN SafetyVote_Campaigns c ON c.id=p.CampaignID WHERE p.id=? AND p.Status='Published' AND p.StartAt<=NOW() AND p.EndAt>NOW() AND c.Status<>'Voided' AND c.IsHidden=0 AND c.IsTest=0", [id]);
         if (!promotion) return fail(res, 404, 'PROMOTION_NOT_AVAILABLE', 'Promotion is not available.');
-        const [[eligible]] = await db.query("SELECT 1 ok FROM SafetyVote_EligibilitySnapshots s JOIN SafetyVote_EligibleVoters ev ON ev.SnapshotID=s.id WHERE s.CampaignVersionID=? AND s.Status='frozen' AND ev.EmployeeID=? LIMIT 1", [promotion.CurrentVersionID, actor(req)]);
-        if (!eligible) return fail(res, 403, 'CAMPAIGN_NOT_ELIGIBLE', 'Campaign eligibility is required.');
+        // Published promotions are company-visible. Record only an aggregate
+        // counter for any authenticated Safety Vote viewer who can see them;
+        // no employee identity or voting eligibility is stored here.
         await db.query('INSERT INTO SafetyVote_EngagementCounters(CampaignID,PromotionID,MetricDay,MetricKey,MetricCount) VALUES(?,?,CURRENT_DATE,?,1) ON DUPLICATE KEY UPDATE MetricCount=MetricCount+1', [promotion.CampaignID, id, eventType]);
         return res.status(202).json({ success: true, data: { accepted: true, aggregateOnly: true, identityStored: false } });
     } catch { return fail(res, 500, 'ENGAGEMENT_EVENT_FAILED', 'Unable to record the aggregate engagement event.'); }
