@@ -7,6 +7,7 @@ const activeProductionDeployScripts = Object.freeze([
     'patrol-self-checkin-mode-production-deploy.js',
     'safety-vote-phase7-production-deploy.js',
     'safety-vote-mobile-density-production-deploy.js',
+    'safety-vote-eligibility-freeze-race-production-deploy.js',
     'safety-vote-phase96-guarded-feature-deploy.js',
     'safety-vote-wizard-layout-production-deploy.js',
 ]);

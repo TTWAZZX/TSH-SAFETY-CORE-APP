@@ -409,6 +409,13 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
             return true;
         } catch (error) {
             writeRecovery();
+            if (error?.code === 'VERSION_CONFLICT') {
+                const conflict = new Error('แคมเปญนี้ถูกบันทึกจากแท็บหรือเซสชันอื่น กรุณารีโหลดหน้าเพื่อรับข้อมูลล่าสุดก่อนบันทึกต่อ โดยฉบับที่กำลังแก้ไขยังเก็บไว้สำหรับกู้คืน');
+                conflict.code = error.code;
+                conflict.details = error.details;
+                setSaveState('error', 'ข้อมูลเปลี่ยนจากอีกแท็บ — กรุณารีโหลด');
+                throw conflict;
+            }
             setSaveState('error', 'บันทึกไม่สำเร็จ — ลองอีกครั้ง');
             throw error;
         }
@@ -732,7 +739,29 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
         catch(error){state.errors=[error?.message||'ตรวจสอบรายชื่อไม่สำเร็จ'];setSaveState('error','ตรวจสอบไม่สำเร็จ — ลองอีกครั้ง');render();}
     };
 
-    const freezeEligibility = () => openSafetyVoteConfirmDialog({title:'ยืนยันการตรึงรายชื่อผู้มีสิทธิ์',description:`ระบบจะบันทึกรายชื่อผู้มีสิทธิ์ ${Number(state.draft.eligibilityPreview?.eligibleCount||0).toLocaleString('th-TH')} คนเป็น snapshot สำหรับแคมเปญนี้ การเปลี่ยนกฎภายหลังต้องตรวจสอบและตรึงใหม่`,confirmLabel:'ยืนยันและตรึงรายชื่อ',onConfirm:async()=>{const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/eligibility/freeze`,{reason:'Safety Vote UX Phase 2 readiness wizard'});state.draft.eligibilityFrozen=true;state.draft.eligibilityPreview={...state.draft.eligibilityPreview,...response.data};setSaveState('saved','ตรึงรายชื่อผู้มีสิทธิ์แล้ว');render();}});
+    const freezeEligibility = () => openSafetyVoteConfirmDialog({
+        title:'ยืนยันการตรึงรายชื่อผู้มีสิทธิ์',
+        description:`ระบบจะบันทึกรายชื่อผู้มีสิทธิ์ ${Number(state.draft.eligibilityPreview?.eligibleCount||0).toLocaleString('th-TH')} คนเป็น snapshot สำหรับแคมเปญนี้ การเปลี่ยนกฎภายหลังต้องตรวจสอบและตรึงใหม่`,
+        confirmLabel:'ยืนยันและตรึงรายชื่อ',
+        onConfirm:async()=>{
+            // A rule-field change may still have an 800 ms campaign autosave queued.
+            // Drain it before the final rules write so two requests never reuse the
+            // same campaign RowVersion and produce a false 409 after a valid freeze.
+            clearTimeout(state.timer);
+            state.timer = null;
+            readFields();
+            await state.saveChain;
+            if (!await saveRules()) throw new Error('ยังบันทึกกฎผู้มีสิทธิ์ไม่ได้ กรุณาตรวจสอบข้อมูลแล้วลองอีกครั้ง');
+            setSaveState('saving','กำลังตรึงรายชื่อผู้มีสิทธิ์…');
+            const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/eligibility/freeze`,{reason:'Safety Vote UX Phase 2 readiness wizard'});
+            state.draft.eligibilityFrozen=true;
+            state.draft.eligibilityPreview={...state.draft.eligibilityPreview,...response.data};
+            state.dirty=false;
+            clearRecovery();
+            setSaveState('saved','ตรึงรายชื่อผู้มีสิทธิ์แล้ว');
+            render();
+        }
+    });
 
     const readinessLabel = blocker => ({
         ACTIVE_QUESTIONS: 'ยังไม่มีคำถามที่เปิดใช้งาน', CONTENT_PRESENT: 'ยังไม่มีคำถามที่เปิดใช้งาน',

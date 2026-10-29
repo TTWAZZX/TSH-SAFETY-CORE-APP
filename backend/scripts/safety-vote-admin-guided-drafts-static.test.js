@@ -32,7 +32,7 @@ ok(duplicateFlow.includes('/campaigns/${Number(campaignId)}/duplicate'), 'duplic
 ok(!duplicateFlow.includes('/config-copy') && !duplicateFlow.includes('/builder`') && !duplicateFlow.includes('/eligibility/rules`'), 'duplicate action performs no client-side partial copy writes');
 ok(duplicateFlow.includes("state.view = 'draft'") && duplicateFlow.includes('state.selectedId = newCampaignId') && duplicateFlow.includes('await load()'), 'duplicate action returns to and selects the new Draft');
 ok(!duplicateFlow.includes('openCampaignWizard('), 'duplicate action does not redirect into the creation wizard');
-ok(/safety-vote-campaign-wizard\.js\?v=(?:20261027-safety-vote-(?:option-image-r2|jury-work-media-r[12]|jury-score-ux-r1)|20261028-safety-vote-official-topn-r1)/.test(admin), 'lifecycle cache-bust chain');
+ok(/safety-vote-campaign-wizard\.js\?v=20261029-safety-vote-eligibility-freeze-race-r1/.test(admin), 'lifecycle cache-bust chain');
 ok(admin.includes('/safety-vote/admin/permissions') && admin.includes('duplicateCampaign: false'), 'permission capability fails closed in the UI');
 ok(duplicateFlow.includes('เป็นฉบับร่างครบถ้วนแล้ว'), 'duplicate completion is explicit');
 
@@ -59,6 +59,10 @@ ok(wizard.includes('sessionStorage.setItem(recoveryKey') && wizard.includes('ses
 ok(wizard.includes("window.addEventListener('beforeunload', beforeUnload)") && wizard.includes("window.removeEventListener('beforeunload', beforeUnload)"), 'unsaved-change browser guard has cleanup');
 ok(wizard.includes('data-svw-recovery="restore"') && wizard.includes('data-svw-recovery="discard"'), 'recovery requires explicit user choice');
 ok(wizard.includes('svw-readiness-summary') && wizard.includes('serverUpdatedAt'), 'readiness and last-edited metadata');
+ok(wizard.includes("error?.code === 'VERSION_CONFLICT'") && wizard.includes('ถูกบันทึกจากแท็บหรือเซสชันอื่น') && wizard.includes('ยังเก็บไว้สำหรับกู้คืน'), 'version conflicts preserve the local recovery draft and explain the required reload in Thai');
+const freezeEligibilityFlow = wizard.slice(wizard.indexOf('const freezeEligibility = () =>'), wizard.indexOf('const readinessLabel'));
+ok(freezeEligibilityFlow.includes('clearTimeout(state.timer)') && freezeEligibilityFlow.includes('await state.saveChain') && freezeEligibilityFlow.includes('await saveRules()'), 'eligibility freeze drains pending autosave and persists current rules before snapshot');
+ok(freezeEligibilityFlow.indexOf('await state.saveChain') < freezeEligibilityFlow.indexOf('await saveRules()') && freezeEligibilityFlow.indexOf('await saveRules()') < freezeEligibilityFlow.indexOf('/eligibility/freeze'), 'eligibility freeze request order prevents stale RowVersion races');
 const openCampaignFlow = wizard.slice(wizard.indexOf('const openCampaign = () =>'), wizard.indexOf('const beforeUnload'));
 ok(openCampaignFlow.includes('/readiness') && openCampaignFlow.indexOf('/readiness') < openCampaignFlow.indexOf('/lifecycle/${command}'), 'campaign open checks authoritative server readiness before lifecycle mutation');
 ok(openCampaignFlow.includes('readiness.data?.blockers') && wizard.includes('PRODUCTION_VISIBILITY'), 'campaign open maps authoritative readiness blockers for Admin feedback');
