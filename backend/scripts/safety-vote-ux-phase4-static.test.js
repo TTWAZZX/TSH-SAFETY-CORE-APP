@@ -11,6 +11,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
 (async () => {
     const page = read('public/js/pages/safety-vote-page-ux1.js');
     const workspace = read('public/js/pages/safety-vote-jury-workspace.js');
+    const campaignWizard = read('public/js/pages/safety-vote-campaign-wizard.js');
     const components = read('public/js/pages/safety-vote-ux-components.js');
     const css = read('public/style.css');
     const main = read('public/js/main.js');
@@ -52,9 +53,12 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(page.includes('รอให้คะแนน') && page.includes('กำลังประเมิน') && !page.includes('แบบประเมิน #'), 'assignment cards must use plain-language states instead of internal IDs');
     for (const source of [nodePhase4, phpPhase4]) check(source.includes('StageName') && source.includes('ScoreCount') && source.includes('ExpectedScoreCount'), 'jury assignment projection must expose stage and progress parity');
     for (const source of [nodePhase4, phpPhase4]) check(source.includes("Status<>'Revoked'") && source.includes('ASSIGNMENT_NOT_FOUND'), 'revoked assignments must be hidden from juror queues and direct detail access');
+    for (const source of [nodePhase4, phpPhase4]) check(source.includes('ORDER BY SheetVersion DESC,id DESC LIMIT 1 FOR UPDATE') && source.includes('SAFETY_VOTE_JURY_RESTORE'), 'Admin restore must reactivate the latest revoked sheet with an explicit audit action');
+    for (const source of [nodePhase4, phpPhase4]) check(source.includes("UPDATE SafetyVote_CampaignRoles SET IsActive=1,RevokedAt=NULL,RevokedBy=NULL"), 'Admin restore must reactivate the existing scoped Jury role');
+    check(campaignWizard.includes('data-svw-restore-juror') && campaignWizard.includes("response.data?.restored===true"), 'Admin history must expose a direct restore action and confirmation state');
     check(workspace.includes("assignmentState(item) !== 'revoked'"), 'jury workspace must defensively remove revoked assignments');
     check(page.includes("'submitted', 'recused', 'revoked'"), 'participant task strip must exclude revoked jury assignments');
-    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
+    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation|jury-restore)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation|jury-restore)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 4'), 'Phase 4 scoped CSS marker is missing');
     check(css.includes('.svj-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
     check(css.includes('min-height: 44px'), '44 px touch targets are not enforced');

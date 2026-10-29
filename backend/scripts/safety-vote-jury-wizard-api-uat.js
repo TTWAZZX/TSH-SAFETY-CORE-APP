@@ -152,16 +152,33 @@ async function lifecycle(label, base, name) {
     assert.strictEqual((await call(base, `/jury/assignments/${liveId}`, { token: 'sv-user2' })).status, 200, 'Restored assignment must become readable again');
     assert.strictEqual(Number((await db.query('SELECT COUNT(*) count FROM SafetyVote_JuryScores WHERE AssignmentID=?', [liveId]))[0][0].count), 1);
     assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${liveId}`, { method: 'DELETE' })).status, 200);
+    response = await call(base, `/admin/campaigns/${campaignId}/jury/assignments`, { method: 'POST', body: { stageId, jurorEmployeeId: 'SV-USER2' } });
+    assert.strictEqual(response.status, 200, JSON.stringify(response.data));
+    assert.strictEqual(response.data.data.restored, true);
+    assert.strictEqual(Number(response.data.data.id), liveId, 'Repeated revoke/restore must reuse the same assignment');
+    assert.strictEqual(Number((await db.query('SELECT COUNT(*) count FROM SafetyVote_JuryAssignments WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) AND JurorEmployeeID=?', [campaignId, 'SV-USER2']))[0][0].count), 1);
+    assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${liveId}`, { method: 'DELETE' })).status, 200);
     await db.query("UPDATE SafetyVote_JuryAssignments SET Status='Submitted' WHERE id=?", [immutableId]);
     assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${immutableId}`, { method: 'DELETE' })).status, 409);
-    const [[proof]] = await db.query("SELECT (SELECT COUNT(*) FROM SafetyVote_JuryAssignments WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?)) assignments,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE CampaignID=? AND Action IN ('SAFETY_VOTE_JURY_ASSIGN','SAFETY_VOTE_JURY_REVOKE')) auditRows,(SELECT COUNT(*) FROM SafetyVote_CampaignRoles WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) AND CampaignRole='jury' AND IsActive=1) activeRoles,(SELECT COUNT(*) FROM SafetyVote_MediaMutations WHERE CampaignID=?) mediaMutations,(SELECT COUNT(*) FROM SafetyVote_Files WHERE CampaignID=?) mediaFiles", [campaignId, campaignId, campaignId, campaignId, campaignId]);
-    assert.strictEqual(Number(proof.assignments), 2);
+    const reopened = await call(base, `/admin/jury/assignments/${immutableId}/reopen`, { method: 'POST', body: { reason: 'Juror reconsidered after submission' } });
+    assert.strictEqual(reopened.status, 201, JSON.stringify(reopened.data));
+    const reopenedId = Number(reopened.data.data.id);
+    assert.strictEqual(Number(reopened.data.data.sheetVersion), 2);
+    assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${reopenedId}`, { method: 'DELETE' })).status, 200);
+    response = await call(base, `/admin/campaigns/${campaignId}/jury/assignments`, { method: 'POST', body: { stageId, jurorEmployeeId: 'SV-USER' } });
+    assert.strictEqual(response.status, 200, JSON.stringify(response.data));
+    assert.strictEqual(response.data.data.restored, true);
+    assert.strictEqual(Number(response.data.data.id), reopenedId, 'The latest revoked sheet must be restored even when an older submitted sheet exists');
+    assert.strictEqual(Number(response.data.data.sheetVersion), 2);
+    assert.strictEqual((await call(base, `/admin/campaigns/${campaignId}/jury/assignments/${reopenedId}`, { method: 'DELETE' })).status, 200);
+    const [[proof]] = await db.query("SELECT (SELECT COUNT(*) FROM SafetyVote_JuryAssignments WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?)) assignments,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE CampaignID=? AND Action IN ('SAFETY_VOTE_JURY_ASSIGN','SAFETY_VOTE_JURY_RESTORE','SAFETY_VOTE_JURY_REVOKE','SAFETY_VOTE_JURY_REOPEN')) auditRows,(SELECT COUNT(*) FROM SafetyVote_CampaignRoles WHERE CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) AND CampaignRole='jury' AND IsActive=1) activeRoles,(SELECT COUNT(*) FROM SafetyVote_MediaMutations WHERE CampaignID=?) mediaMutations,(SELECT COUNT(*) FROM SafetyVote_Files WHERE CampaignID=?) mediaFiles", [campaignId, campaignId, campaignId, campaignId, campaignId]);
+    assert.strictEqual(Number(proof.assignments), 3);
     assert(Number(proof.auditRows) >= 4);
     assert.strictEqual(Number(proof.activeRoles), 1);
     assert.strictEqual(Number(proof.mediaMutations), 1);
     assert.strictEqual(Number(proof.mediaFiles), 1);
     await db.end();
-    console.log(`PASS ${label} adaptive readiness, live add/revoke/restore with retained Draft scores and immutable submitted assignment`);
+    console.log(`PASS ${label} adaptive readiness, repeated add/revoke/restore, latest-sheet restoration, retained Draft scores and immutable submitted history`);
 }
 
 (async () => {

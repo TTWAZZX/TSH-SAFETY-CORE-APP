@@ -37,7 +37,7 @@ const ok = (value, label) => { assert(value, label); checks.push(label); };
     ok(nodeRoute.includes("if(row.Status==='Submitted')") && phpRoute.includes("if($row['Status']==='Submitted')"), 'submitted assignments remain immutable');
     ok(nodeRoute.includes('retainedDraftScores') && phpRoute.includes("'retainedDraftScores'"), 'revoking an unsubmitted juror retains Draft score evidence on both runtimes');
     ok(nodeRoute.includes('ScoreCount FROM SafetyVote_JuryAssignments') && phpRoute.includes('ScoreCount FROM SafetyVote_JuryAssignments'), 'Admin assignment projection reports retained Draft score counts');
-    ok(nodeRoute.includes('restored:Boolean(revoked)') && phpRoute.includes("'restored'=>(bool)$restorable"), 'revoked assignment is restored instead of duplicated');
+    ok(nodeRoute.includes("const restored=Boolean(current&&['Revoked','Recused'].includes(current.Status))") && phpRoute.includes("$restored=(bool)($current&&in_array($current['Status'],['Revoked','Recused'],true))"), 'revoked assignment is restored instead of duplicated');
     ok(nodeRoute.includes('SELECT id,StageKey,StageName') && phpRoute.includes('SELECT id,StageKey,StageName'), 'stage writes return persisted IDs on both runtimes');
     ok(css.includes('.svw-jury-builder') && css.includes('@media (max-width:700px)'), 'responsive Jury Wizard styles');
     ok(!modelSource.includes("jury_scoring', label: 'การประกวดโดยคณะกรรมการ', description: 'กำหนดเกณฑ์และมอบหมายกรรมการ', privacyMode: 'confidential', questionType: 'single_choice', advancedRequired: true"), 'jury campaign no longer requires legacy advanced workspace');
