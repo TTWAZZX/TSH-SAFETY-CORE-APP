@@ -30,6 +30,7 @@ async function seed(name) {
     const db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: name, multipleStatements: true });
     await db.query("CREATE TABLE Admin_RolePermissions(role VARCHAR(50),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(role,permission));CREATE TABLE Admin_UserPermissions(employee_id VARCHAR(20),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(employee_id,permission));CREATE TABLE Master_Departments(id INT PRIMARY KEY,Name VARCHAR(100),Status VARCHAR(20),CreatedAt DATETIME,is_safety_core TINYINT);CREATE TABLE Master_SafetyUnits(id INT PRIMARY KEY,name VARCHAR(100),short_code VARCHAR(30),department_id INT,sort_order INT,created_at DATETIME);CREATE TABLE Master_Positions(id INT PRIMARY KEY,Name VARCHAR(100),IsSupervisorPatrol TINYINT,PatrolPassPct DECIMAL(5,2));CREATE TABLE Employees(EmployeeID VARCHAR(20) PRIMARY KEY,EmployeeName VARCHAR(255),Department VARCHAR(100),Unit VARCHAR(100),Role VARCHAR(50),Team VARCHAR(100),Position VARCHAR(100),CompanyEmail VARCHAR(150),Password VARCHAR(255),MustChangePassword TINYINT);INSERT INTO Master_Departments VALUES(1,'Safety','Active',NOW(),1);INSERT INTO Master_SafetyUnits VALUES(10,'Core','CORE',1,1,NOW());INSERT INTO Master_Positions VALUES(100,'Officer',0,NULL);INSERT INTO Employees VALUES('SV-ADMIN','Admin','Safety','Core','Admin','A','Officer','admin@example.test','x',0),('SV-USER','Juror One','Safety','Core','User','A','Officer','one@example.test','x',0),('SV-USER2','Juror Two','Safety','Core','User','A','Officer','two@example.test','x',0);");
     for (const file of migrations) await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', file), 'utf8'));
+    await db.query("INSERT INTO Admin_UserPermissions(employee_id,permission,granted) VALUES('SV-USER','SAFETY_VOTE_JURY',0),('SV-USER2','SAFETY_VOTE_JURY',0) ON DUPLICATE KEY UPDATE granted=VALUES(granted)");
     await db.query("UPDATE SafetyVote_Settings SET SettingValue='1',UpdatedBy='jury-wizard-uat' WHERE SettingKey='module_enabled'");
     await db.end();
 }
@@ -42,8 +43,8 @@ async function wait(url) {
     throw new Error(`Fixture did not start: ${url}`);
 }
 
-async function call(base, route, { method = 'GET', body } = {}) {
-    const headers = { Authorization: 'Bearer sv-admin', Accept: 'application/json' };
+async function call(base, route, { method = 'GET', body, token = 'sv-admin' } = {}) {
+    const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const response = await fetch(base + route, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await response.text();
@@ -118,6 +119,13 @@ async function lifecycle(label, base, name) {
     response = await call(base, `/admin/campaigns/${campaignId}/jury/assignments`, { method: 'POST', body: { stageId, jurorEmployeeId: 'SV-USER2' } });
     assert.strictEqual(response.status, 201, JSON.stringify(response.data));
     const liveId = Number(response.data.data.id);
+    response = await call(base, '/jury/assignments', { token: 'sv-user2' });
+    assert.strictEqual(response.status, 200, JSON.stringify(response.data));
+    assert(response.data.data.rows.some(row => Number(row.id) === liveId), 'Live-added juror must receive the assignment without global Jury permission');
+    assert.strictEqual((await call(base, `/campaigns/${campaignId}/jury/assignments`, { token: 'sv-user2' })).status, 200);
+    assert.strictEqual((await call(base, `/jury/assignments/${liveId}`, { token: 'sv-user2' })).status, 200);
+    assert.strictEqual((await call(base, `/jury/assignments/${liveId}`, { token: 'sv-user' })).status, 404, 'A juror must not open another juror assignment');
+    assert.strictEqual((await call(base, `/jury/assignments/${immutableId}`, { token: 'sv-user' })).status, 200, 'Pre-open assignment must remain accessible after opening');
     await db.query("INSERT INTO SafetyVote_JuryScores(AssignmentID,CandidateID,CriterionID,Score,BoundedComment,Status) SELECT ?,c.id,cr.id,3,'retained draft proof','Draft' FROM SafetyVote_Candidates c JOIN SafetyVote_JuryCriteria cr ON cr.CampaignVersionID=c.CampaignVersionID WHERE c.CampaignVersionID=(SELECT CurrentVersionID FROM SafetyVote_Campaigns WHERE id=?) LIMIT 1", [liveId, campaignId]);
     response = await call(base, `/admin/campaigns/${campaignId}/jury/assignments`);
     assert.strictEqual(response.status, 200);
