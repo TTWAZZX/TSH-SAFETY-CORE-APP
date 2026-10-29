@@ -155,7 +155,8 @@ function workflowObservationMarkup() {
 }
 
 function liveResultsPanelMarkup(campaign) {
-    return `<section class="svo-panel svo-panel--live" aria-labelledby="svo-live-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Live Results</p><h2 id="svo-live-title">ผลโหวตสด</h2></div><div class="svo-inline-actions"><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-refresh">Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-toggle">${state.livePaused?'Resume':'Pause'}</button></div></div><div data-svo-live-results>${Number(campaign.LiveLeaderboardEnabled)?liveResultsMarkup(state.liveResults,{admin:true,error:state.liveError,loading:state.liveInFlight,paused:state.livePaused}):liveResultsMarkup(null,{error:{code:'LIVE_RESULTS_DISABLED'}})}</div></section>`;
+    const enabled = Number(campaign.LiveLeaderboardEnabled) === 1;
+    return `<section class="svo-panel svo-panel--live" aria-labelledby="svo-live-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Live Results</p><h2 id="svo-live-title">ผลโหวตสด</h2></div><div class="svo-inline-actions"><button type="button" class="sv-button ${enabled?'sv-button--danger':'sv-button--primary'}" data-svo-action="live-availability" ${state.manageUnavailable||state.busy||String(campaign.Status)!=='Open'?'disabled':''}>${enabled?'ปิด Live':'เปิด Live'}</button><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-refresh" ${!enabled?'disabled':''}>Refresh</button><button type="button" class="sv-button sv-button--secondary" data-svo-action="live-toggle" ${!enabled?'disabled':''}>${state.livePaused?'Resume':'Pause'}</button></div></div><p class="svo-help">${enabled?`เปิดให้ผู้เข้าร่วมตามเงื่อนไข ${escHtml(campaign.LiveLeaderboardVisibility||'after_submit')} · Top ${Number(campaign.LiveLeaderboardTopN||5)} · ไม่กระทบบัตรลงคะแนนเดิม`:'Admin สามารถเปิด Live ระหว่างแคมเปญได้โดยเปลี่ยนเฉพาะสถานะการแสดงผล บัตรและคำตอบเดิมจะไม่ถูกแก้ไข'}</p><div data-svo-live-results>${enabled?liveResultsMarkup(state.liveResults,{admin:true,error:state.liveError,loading:state.liveInFlight,paused:state.livePaused}):liveResultsMarkup(null,{error:{code:'LIVE_RESULTS_DISABLED'}})}</div></section>`;
 }
 
 function observationMarkup(campaign) {
@@ -201,6 +202,12 @@ function stopLivePolling() {
     if (state.container) clearLiveResultImages(state.container);
 }
 
+function startLiveVisibilityPolling() {
+    if (state.liveVisibilityHandler) document.removeEventListener('visibilitychange', state.liveVisibilityHandler);
+    state.liveVisibilityHandler = () => { if (document.hidden) { clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer); state.liveAbort?.abort(); } else if (!state.livePaused) loadLiveResults(false); };
+    document.addEventListener('visibilitychange', state.liveVisibilityHandler);
+}
+
 function updateLivePanel() {
     const panel = state.container?.querySelector('[data-svo-live-results]'); if (!panel) return;
     panel.innerHTML = liveResultsMarkup(state.liveResults, { admin: true, error: state.liveError, loading: state.liveInFlight && !state.liveResults, paused: state.livePaused });
@@ -224,6 +231,22 @@ async function loadLiveResults(manual = true) {
     try { const response = await API.get(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/live-results`, { suppressErrorLog: true, signal: state.liveAbort.signal }); state.liveResults = response.data; state.liveError = null; state.liveFailures = 0; }
     catch (error) { if (error?.name !== 'AbortError') { state.liveError = error; state.liveFailures = Math.min(2, state.liveFailures + 1); } }
     finally { state.liveInFlight = false; state.liveAbort = null; updateLivePanel(); if (!manual || !state.livePaused) scheduleLivePolling(); }
+}
+
+async function changeLiveAvailability() {
+    const enabled = Number(state.campaign?.LiveLeaderboardEnabled) !== 1;
+    await runAction(async () => {
+        const reason = window.prompt(`ระบุเหตุผลการ${enabled?'เปิด':'ปิด'} Live Leaderboard อย่างน้อย 10 ตัวอักษร`, enabled ? 'เปิดผลโหวตสดตามการตั้งค่าแคมเปญ' : 'ระงับผลโหวตสดโดยผู้ดูแลระบบ');
+        if (reason === null) throw new Error('ยกเลิกการเปลี่ยนสถานะ Live แล้ว');
+        if (reason.trim().length < 10) throw new Error('กรุณาระบุเหตุผลอย่างน้อย 10 ตัวอักษร');
+        const code = state.campaign.CampaignCode || state.campaign.campaignCode;
+        const expected = `${enabled?'ENABLE':'DISABLE'} LIVE ${code}`;
+        const confirmation = window.prompt(`พิมพ์ข้อความนี้ให้ตรงทุกตัวอักษรเพื่อยืนยัน:\n${expected}`, '');
+        if (confirmation !== expected) throw new Error('ข้อความยืนยันไม่ถูกต้อง');
+        const response = await API.put(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/live-settings`, { enabled, versionRowVersion: Number(state.campaign.VersionRowVersion || state.campaign.versionRowVersion), reason: reason.trim(), confirmation });
+        stopLivePolling(); state.campaign.LiveLeaderboardEnabled = enabled ? 1 : 0; state.campaign.VersionRowVersion = Number(response.data?.versionRowVersion); state.liveResults = null; state.liveError = null; state.livePaused = false; state.liveFailures = 0;
+        if (enabled) { startLiveVisibilityPolling(); await loadLiveResults(true); }
+    }, enabled ? 'เปิด Live Leaderboard แล้ว โดยคงบัตรและคำตอบเดิมทั้งหมด' : 'ปิด Live Leaderboard แล้ว โดยคงบัตรและคำตอบเดิมทั้งหมด');
 }
 
 function render() {
@@ -352,6 +375,7 @@ async function createReport(format, certified = false) {
 }
 
 function confirmAction(action) {
+    if (action === 'live-availability') { const enabling = Number(state.campaign?.LiveLeaderboardEnabled) !== 1; return openSafetyVoteConfirmDialog({ title: `${enabling?'เปิด':'ปิด'} Live Leaderboard`, description: enabling ? 'ระบบจะเริ่มแสดงอันดับตามค่าที่บันทึกไว้ใน Current Version โดยไม่แก้ไขหรือลบบัตรลงคะแนนและคำตอบเดิม' : 'ระบบจะหยุดแสดงอันดับชั่วคราว แต่บัตรลงคะแนน คำตอบ และผลรวมเดิมจะยังอยู่ครบ', confirmLabel: enabling ? 'ดำเนินการเปิด Live' : 'ดำเนินการปิด Live', tone: enabling ? 'default' : 'danger', onConfirm: changeLiveAvailability }); }
     if (action === 'process-schedule') return openSafetyVoteConfirmDialog({ title: 'ประมวลผลกำหนดการที่ถึงเวลา', description: 'คำสั่งนี้จะใช้ contract เดิมประมวลผลทุกแคมเปญที่ถึงเวลาเปิดหรือปิดในเขตเวลา Asia/Bangkok และบันทึก audit กรุณายืนยันว่าต้องการดำเนินการตอนนี้', confirmLabel: 'ยืนยันประมวลผล', onConfirm: processSchedule });
     if (action === 'close-campaign') return openSafetyVoteConfirmDialog({ title: 'ยืนยันปิดรับคะแนน', description: 'หลังปิดแล้วผู้ใช้จะส่งคะแนนเพิ่มไม่ได้ และผู้ดูแลจึงจะสร้าง Result Snapshot สำหรับตรวจสอบและรับรองได้', confirmLabel: 'ปิดรับคะแนน', tone: 'danger', onConfirm: closeCampaign });
     if (action === 'queue-notifications') return openSafetyVoteConfirmDialog({ title: 'จัดคิวเตือนผู้ยังไม่เข้าร่วม', description: 'ระบบจะจัดคิวข้อความในระบบให้ผู้มีสิทธิ์ที่ยังไม่ส่ง และระงับรายการซ้ำตาม suppression key หน้าจอนี้จะไม่สั่ง external dispatch', confirmLabel: 'ยืนยันจัดคิว', onConfirm: queueNotifications });
@@ -380,8 +404,7 @@ export async function renderSafetyVoteOperationsWorkspace(container, { campaign 
     Object.assign(state, { container, campaign, onClose, onNavigate, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], juryReadiness: null, stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null, livePaused: false, liveInFlight: false, liveFailures: 0 });
     await loadData();
     if (isPopularVote() && Number(campaign.LiveLeaderboardEnabled) && String(campaign.Status) === 'Open') {
-        state.liveVisibilityHandler = () => { if (document.hidden) { clearTimeout(state.liveTimer); clearInterval(state.liveCountdownTimer); state.liveAbort?.abort(); } else if (!state.livePaused) loadLiveResults(false); };
-        document.addEventListener('visibilitychange', state.liveVisibilityHandler);
+        startLiveVisibilityPolling();
         await loadLiveResults(false);
     }
     return true;

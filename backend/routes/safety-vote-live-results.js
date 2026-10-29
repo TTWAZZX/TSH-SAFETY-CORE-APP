@@ -73,5 +73,34 @@ async function handle(req, res, admin) {
 
 router.get('/campaigns/:id/live-results', permit('SAFETY_VOTE_VIEW'), (req, res) => handle(req, res, false));
 router.get('/admin/campaigns/:id/live-results', permit('SAFETY_VOTE_RESULT_VIEW'), (req, res) => handle(req, res, true));
+router.put('/admin/campaigns/:id/live-settings', permit('SAFETY_VOTE_MANAGE'), async (req, res) => {
+    const id = int(req.params.id), expectedVersion = int(req.body?.versionRowVersion), enabled = req.body?.enabled;
+    const reason = String(req.body?.reason || '').trim().slice(0, 500);
+    if (!id || !expectedVersion || typeof enabled !== 'boolean' || reason.length < 10) return fail(res, 400, 'VALIDATION_FAILED', 'Campaign ID, versionRowVersion, enabled and a reason of at least 10 characters are required.');
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        const [[row]] = await connection.query("SELECT c.id,c.CampaignCode,c.Status,c.CurrentVersionID,v.CampaignType,v.PrivacyMode,v.LiveLeaderboardEnabled,v.LiveLeaderboardTopN,v.LiveLeaderboardScoreMode,v.LiveLeaderboardVisibility,v.LiveLeaderboardRefreshSeconds,v.LiveLeaderboardPrivacyThreshold,v.RowVersion VersionRowVersion FROM SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID WHERE c.id=? AND c.Status<>'Voided' LIMIT 1 FOR UPDATE", [id]);
+        if (!row) { await connection.rollback(); return fail(res, 404, 'CAMPAIGN_NOT_FOUND', 'Campaign was not found.'); }
+        if (row.Status !== 'Open') { await connection.rollback(); return fail(res, 409, 'LIVE_SETTINGS_CAMPAIGN_NOT_OPEN', 'Operational Live settings can be changed only while the campaign is open.'); }
+        if (row.CampaignType !== 'popular_vote' || row.PrivacyMode === 'secret_ballot') { await connection.rollback(); return fail(res, 409, 'LIVE_RESULTS_UNSUPPORTED_CAMPAIGN_TYPE', 'This campaign does not support Live Leaderboard.'); }
+        if (Number(row.VersionRowVersion) !== expectedVersion) { await connection.rollback(); return fail(res, 409, 'VERSION_CONFLICT', 'Campaign version changed. Reload before updating Live settings.'); }
+        const confirmation = `${enabled ? 'ENABLE' : 'DISABLE'} LIVE ${row.CampaignCode}`;
+        if (String(req.body?.confirmation || '') !== confirmation) { await connection.rollback(); return fail(res, 400, 'LIVE_SETTINGS_CONFIRMATION_REQUIRED', `Type ${confirmation} exactly.`); }
+        if (enabled) {
+            const supported = live.supportedQuestions(row.CampaignType, await questions(row.CurrentVersionID));
+            if (!supported.ok) { await connection.rollback(); return fail(res, 409, supported.code, 'This campaign or question configuration does not support Live Leaderboard.'); }
+        }
+        const previous = Number(row.LiveLeaderboardEnabled) === 1;
+        const [updated] = await connection.query('UPDATE SafetyVote_CampaignVersions SET LiveLeaderboardEnabled=?,UpdatedBy=?,RowVersion=RowVersion+1 WHERE id=? AND RowVersion=?', [enabled ? 1 : 0, actor(req), row.CurrentVersionID, expectedVersion]);
+        if (Number(updated.affectedRows) !== 1) { await connection.rollback(); return fail(res, 409, 'VERSION_CONFLICT', 'Campaign version changed. Reload before updating Live settings.'); }
+        await connection.query('INSERT INTO SafetyVote_AuditLogs(CampaignID,CampaignVersionID,ActorEmployeeID,ActorRole,Action,TargetType,TargetID,StatusCode,BoundedDetail,MetadataJson,IPAddress,UserAgent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', [id, row.CurrentVersionID, actor(req), role(req), 'SAFETY_VOTE_LIVE_SETTINGS_UPDATE', 'SafetyVote_CampaignVersion', String(row.CurrentVersionID), 200, reason, JSON.stringify({ previousEnabled: previous, enabled, campaignStatus: row.Status, ballotsPreserved: true, answersPreserved: true, visibility: row.LiveLeaderboardVisibility, topN: Number(row.LiveLeaderboardTopN), privacyThreshold: Number(row.LiveLeaderboardPrivacyThreshold) }), req.ip || null, String(req.headers?.['user-agent'] || '').slice(0, 255) || null]);
+        await connection.commit();
+        return res.json({ success: true, data: { campaignId: id, versionId: Number(row.CurrentVersionID), versionRowVersion: expectedVersion + 1, enabled, previousEnabled: previous, config: { topN: Number(row.LiveLeaderboardTopN), scoreMode: row.LiveLeaderboardScoreMode, visibility: row.LiveLeaderboardVisibility, refreshSeconds: Number(row.LiveLeaderboardRefreshSeconds), privacyThreshold: Number(row.LiveLeaderboardPrivacyThreshold) }, ballotsPreserved: true, answersPreserved: true } });
+    } catch (error) {
+        await connection.rollback().catch(() => {});
+        return fail(res, 500, 'LIVE_SETTINGS_UPDATE_FAILED', 'Unable to update Live Leaderboard settings.');
+    } finally { connection.release(); }
+});
 
 module.exports = router;

@@ -26,8 +26,8 @@ async function wait(url) {
     throw new Error(`Fixture did not start: ${url}`);
 }
 
-async function call(base, route, token = 'sv-admin') {
-    const response = await fetch(`${base}${route}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+async function call(base, route, token = 'sv-admin', method = 'GET', body = null) {
+    const response = await fetch(`${base}${route}`, { method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body === null ? {} : { 'Content-Type': 'application/json' }) }, ...(body === null ? {} : { body: JSON.stringify(body) }) });
     const text = await response.text();
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text.slice(0, 2000) }; }
@@ -146,6 +146,17 @@ async function lifecycle(label, base, name, fixture) {
 
     const db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: name });
     try {
+        const [[preservedBefore]] = await db.query('SELECT (SELECT COUNT(*) FROM SafetyVote_Ballots WHERE CampaignVersionID=?) ballots,(SELECT COUNT(*) FROM SafetyVote_BallotAnswers a JOIN SafetyVote_Ballots b ON b.id=a.BallotID WHERE b.CampaignVersionID=?) answers,(SELECT RowVersion FROM SafetyVote_CampaignVersions WHERE id=?) versionRowVersion', [fixture.versionId, fixture.versionId, fixture.versionId]);
+        const disable = await call(base, `/admin/campaigns/${fixture.campaignId}/live-settings`, 'sv-admin', 'PUT', { enabled: false, versionRowVersion: Number(preservedBefore.versionRowVersion), reason: 'Operational Live toggle preservation test', confirmation: 'DISABLE LIVE SHE-001-2026' });
+        assert.strictEqual(disable.status, 200, JSON.stringify(disable.data));
+        assert.strictEqual(disable.data.data.enabled, false);
+        assert.strictEqual((await call(base, `/admin/campaigns/${fixture.campaignId}/live-results`)).data.code, 'LIVE_RESULTS_DISABLED');
+        const enable = await call(base, `/admin/campaigns/${fixture.campaignId}/live-settings`, 'sv-admin', 'PUT', { enabled: true, versionRowVersion: Number(disable.data.data.versionRowVersion), reason: 'Restore Live while preserving submitted votes', confirmation: 'ENABLE LIVE SHE-001-2026' });
+        assert.strictEqual(enable.status, 200, JSON.stringify(enable.data));
+        assert.strictEqual(enable.data.data.enabled, true);
+        const [[preservedAfter]] = await db.query('SELECT (SELECT COUNT(*) FROM SafetyVote_Ballots WHERE CampaignVersionID=?) ballots,(SELECT COUNT(*) FROM SafetyVote_BallotAnswers a JOIN SafetyVote_Ballots b ON b.id=a.BallotID WHERE b.CampaignVersionID=?) answers,(SELECT COUNT(*) FROM SafetyVote_AuditLogs WHERE CampaignID=? AND Action=\'SAFETY_VOTE_LIVE_SETTINGS_UPDATE\') auditRows', [fixture.versionId, fixture.versionId, fixture.campaignId]);
+        assert.deepStrictEqual([Number(preservedAfter.ballots), Number(preservedAfter.answers), Number(preservedAfter.auditRows)], [Number(preservedBefore.ballots), Number(preservedBefore.answers), 2], 'operational Live toggle must preserve every ballot/answer and create audit evidence');
+        assert.strictEqual((await call(base, `/admin/campaigns/${fixture.campaignId}/live-results`)).status, 200);
         await db.query('UPDATE SafetyVote_CampaignVersions SET LiveLeaderboardPrivacyThreshold=22 WHERE id=?', [fixture.versionId]);
         const threshold = await call(base, `/campaigns/${fixture.campaignId}/live-results`, 'sv-user');
         assert.strictEqual(threshold.status, 200);
