@@ -462,8 +462,13 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
     };
 
     const ensureJuryStage = async () => {
-        if (!await persistCampaign()) return null;
         let stage = (state.draft.juryStages || [])[0];
+        // A live campaign's structure is immutable. Juror assignment is an
+        // operational action, so reuse the persisted stage without attempting
+        // the Draft-only campaign update first.
+        if (state.liveJuryMode) return stage?.id ? stage : null;
+        if (!await persistCampaign()) return null;
+        stage = (state.draft.juryStages || [])[0];
         if (stage?.id) return stage;
         const response = await API.put(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/stages`, { stages: [{ stageKey: 'JURY_FINAL', stageName: 'รอบตัดสินโดยคณะกรรมการ', stageType: 'jury', sequenceNo: 1, advanceRule: { blind: Boolean(state.draft.juryBlind) }, resultVisibility: 'admin_only', status: 'Draft' }] });
         state.draft.juryStages = response.data?.rows || [];
@@ -636,7 +641,7 @@ export function renderSafetyVoteCampaignWizard(container, { campaignId = null, i
     };
 
     const assignJuror = async employeeId => {
-        try{clearTimeout(state.timer);readFields();const stage=await ensureJuryStage();if(!stage?.id)throw new Error('ยังไม่มีรอบการตัดสิน');setSaveState('saving','กำลังมอบหมายกรรมการ…');const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/jury/assignments`,{stageId:Number(stage.id),jurorEmployeeId:employeeId});await refreshJuryAssignments();if(!state.liveJuryMode)await saveJuryConfiguration();state.dirty=false;clearRecovery();const restored=response.data?.restored===true;setSaveState('saved',restored?'คืนสิทธิ์กรรมการแล้ว · คะแนน Draft เดิมยังอยู่':'เพิ่มกรรมการและบันทึกเกณฑ์แล้ว');showToast(restored?'คืนสิทธิ์กรรมการแล้ว':'เพิ่มกรรมการแล้ว','success');render();}
+        try{clearTimeout(state.timer);readFields();const stage=await ensureJuryStage();if(!stage?.id)throw new Error('ยังไม่มีรอบการตัดสิน');setSaveState('saving','กำลังมอบหมายกรรมการ…');const response=await API.post(`/safety-vote/admin/campaigns/${state.persisted.campaignId}/jury/assignments`,{stageId:Number(stage.id),jurorEmployeeId:employeeId});await refreshJuryAssignments();if(!state.liveJuryMode)await saveJuryConfiguration();state.dirty=false;clearRecovery();const restored=response.data?.restored===true;setSaveState('saved',restored?'คืนสิทธิ์กรรมการแล้ว · คะแนน Draft เดิมยังอยู่':state.liveJuryMode?'เพิ่มกรรมการแล้ว · ไม่กระทบเกณฑ์และคะแนนเดิม':'เพิ่มกรรมการและบันทึกเกณฑ์แล้ว');showToast(restored?'คืนสิทธิ์กรรมการแล้ว':'เพิ่มกรรมการแล้ว','success');render();}
         catch(error){const message=error?.message||'เพิ่มหรือคืนสิทธิ์กรรมการไม่สำเร็จ';showToast(message,'error');setSaveState('error',message);}
     };
 

@@ -12,7 +12,7 @@ import {
 } from './safety-vote-ux-components.js?v=20261010-safety-vote-ux9a-r1';
 import { campaignMetrics, isNearClose, sectionsForCampaign, statusGroup } from './safety-vote-ux-model.mjs?v=20261008-safety-vote-ux1-r1';
 import { CORE_TEMPLATES } from './safety-vote-wizard-model.mjs?v=20261029-safety-vote-live-topn-r1';
-import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261029-safety-vote-jury-restore-r1';
+import { renderSafetyVoteCampaignWizard } from './safety-vote-campaign-wizard.js?v=20261029-live-jury-assignment-r1';
 import { renderSafetyVoteOperationsWorkspace } from './admin-safety-vote-operations.js?v=20261029-live-operational-toggle-r1';
 import { renderSafetyVoteResultsWorkspace } from './admin-safety-vote-results.js?v=20261025-result-release-policy-r1';
 import { renderSafetyVoteGovernanceWorkspace } from './admin-safety-vote-governance.js?v=20261015-safety-vote-thai-time-r1';

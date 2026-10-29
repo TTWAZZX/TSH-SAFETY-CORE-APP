@@ -29,6 +29,9 @@ const ok = (value, label) => { assert(value, label); checks.push(label); };
 
     ok(wizard.includes('data-svw-criterion-field') && wizard.includes('safetyVotePeoplePickerMarkup') && wizard.includes('data-svw-revoke-juror'), 'wizard exposes criteria and shared People Picker assignment controls');
     ok(wizard.includes("['Scheduled','Open'].includes(campaignStatus)") && wizard.includes('liveJuryMode'), 'open campaign assignment-only mode');
+    const liveStageGuard = wizard.indexOf('if (state.liveJuryMode) return stage?.id ? stage : null;');
+    const draftCampaignSave = wizard.indexOf('if (!await persistCampaign()) return null;', liveStageGuard);
+    ok(liveStageGuard > -1 && draftCampaignSave > liveStageGuard, 'live Jury assignment reuses its persisted stage before any Draft-only campaign save');
     ok(admin.includes('data-sv-action="manage-live-jury"') && admin.includes("action === 'manage-live-jury'"), 'Admin campaign detail exposes live juror management');
     ok(wizard.includes('safetyVotePeoplePickerMarkup') && wizard.includes('/jury/assignments/${assignmentId}'), 'wizard uses shared governed People Picker and revoke API');
     ok(nodeRoute.includes("router.get('/admin/campaigns/:id/jury/master'") && phpRoute.includes("$juryMaster=route_params"), 'Node and PHP employee-master route parity');
