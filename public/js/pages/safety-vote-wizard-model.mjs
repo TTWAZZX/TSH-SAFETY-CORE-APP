@@ -12,10 +12,18 @@ export const WIZARD_STEPS = Object.freeze(wizardStepsFor({ campaignType: 'survey
 export const OFFICIAL_RESULT_TOP_N_MIN = 1;
 export const OFFICIAL_RESULT_TOP_N_MAX = 100;
 export const OFFICIAL_RESULT_TOP_N_PRESETS = Object.freeze([3, 5, 10, 20, 50]);
+export const LIVE_LEADERBOARD_TOP_N_MIN = 1;
+export const LIVE_LEADERBOARD_TOP_N_MAX = 100;
+export const LIVE_LEADERBOARD_TOP_N_PRESETS = Object.freeze([3, 5, 10, 20, 50]);
 
 export function officialResultTopNValid(value) {
     const topN = Number(value);
     return Number.isInteger(topN) && topN >= OFFICIAL_RESULT_TOP_N_MIN && topN <= OFFICIAL_RESULT_TOP_N_MAX;
+}
+
+export function liveLeaderboardTopNValid(value) {
+    const topN = Number(value);
+    return Number.isInteger(topN) && topN >= LIVE_LEADERBOARD_TOP_N_MIN && topN <= LIVE_LEADERBOARD_TOP_N_MAX;
 }
 
 export const CORE_TEMPLATES = Object.freeze([
@@ -245,7 +253,7 @@ export function validateStep(step, draft) {
         if (!['manual','automatic'].includes(String(draft.resultReleasePolicy))) errors.push('นโยบายเผยแพร่ผลต้องเป็นแบบอัตโนมัติหรือให้แอดมินเผยแพร่');
         if (draft.liveLeaderboardEnabled && draft.campaignType !== 'popular_vote') errors.push('Live Leaderboard รองรับเฉพาะแคมเปญโหวตยอดนิยม');
         if (draft.liveLeaderboardEnabled && draft.questions.some(question => Number(question.maxSelections) !== 1 || !hasOptions(question.questionType))) errors.push('Live Leaderboard รองรับเฉพาะคำถามแบบตัวเลือกที่เลือกได้สูงสุด 1 รายการ');
-        if (draft.liveLeaderboardEnabled && ![5,10].includes(Number(draft.liveLeaderboardTopN))) errors.push('จำนวนอันดับต้องเป็น Top 5 หรือ Top 10');
+        if (draft.liveLeaderboardEnabled && !liveLeaderboardTopNValid(draft.liveLeaderboardTopN)) errors.push(`จำนวนอันดับผลสดต้องอยู่ระหว่าง ${LIVE_LEADERBOARD_TOP_N_MIN}–${LIVE_LEADERBOARD_TOP_N_MAX}`);
         if (draft.liveLeaderboardEnabled && (Number(draft.liveLeaderboardRefreshSeconds) < 10 || Number(draft.liveLeaderboardRefreshSeconds) > 60)) errors.push('ความถี่อัปเดตต้องอยู่ระหว่าง 10–60 วินาที');
         if (draft.liveLeaderboardEnabled && Number(draft.liveLeaderboardPrivacyThreshold) < Math.max(5, Number(draft.privacyThreshold))) errors.push('จำนวนขั้นต่ำของผลสดต้องไม่น้อยกว่า Privacy threshold และข้อกำหนด Server');
     }

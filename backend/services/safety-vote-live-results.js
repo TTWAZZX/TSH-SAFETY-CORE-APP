@@ -2,6 +2,8 @@
 
 const CONTRACT_VERSION = '2026-10-16-safety-vote-empty-threshold-live-r1';
 const SERVER_MINIMUM_THRESHOLD = 5;
+const LIVE_LEADERBOARD_TOP_N_MIN = 1;
+const LIVE_LEADERBOARD_TOP_N_MAX = 100;
 const SCORE_MODES = Object.freeze(['count', 'percentage', 'count_percentage']);
 const VISIBILITY_MODES = Object.freeze(['after_submit', 'always', 'admin_only']);
 
@@ -12,7 +14,7 @@ function integer(value, fallback, minimum, maximum) {
 
 function normalizeConfig(input = {}, campaignPrivacyThreshold = SERVER_MINIMUM_THRESHOLD) {
     const enabled = input.liveLeaderboardEnabled === true || input.LiveLeaderboardEnabled === true || Number(input.liveLeaderboardEnabled ?? input.LiveLeaderboardEnabled) === 1;
-    const topN = [5, 10].includes(Number(input.liveLeaderboardTopN ?? input.LiveLeaderboardTopN)) ? Number(input.liveLeaderboardTopN ?? input.LiveLeaderboardTopN) : 5;
+    const topN = integer(input.liveLeaderboardTopN ?? input.LiveLeaderboardTopN, 5, LIVE_LEADERBOARD_TOP_N_MIN, LIVE_LEADERBOARD_TOP_N_MAX);
     const scoreMode = String(input.liveLeaderboardScoreMode ?? input.LiveLeaderboardScoreMode ?? 'count_percentage').toLowerCase();
     const visibility = String(input.liveLeaderboardVisibility ?? input.LiveLeaderboardVisibility ?? 'after_submit').toLowerCase();
     const refreshSeconds = integer(input.liveLeaderboardRefreshSeconds ?? input.LiveLeaderboardRefreshSeconds, 15, 10, 60);
@@ -22,7 +24,7 @@ function normalizeConfig(input = {}, campaignPrivacyThreshold = SERVER_MINIMUM_T
     const errors = [];
     const rawTopN = input.liveLeaderboardTopN ?? input.LiveLeaderboardTopN;
     const rawRefresh = input.liveLeaderboardRefreshSeconds ?? input.LiveLeaderboardRefreshSeconds;
-    if (rawTopN != null && rawTopN !== '' && ![5, 10].includes(Number(rawTopN))) errors.push({ field: 'liveLeaderboardTopN', code: 'INVALID_ENUM' });
+    if (rawTopN != null && rawTopN !== '' && (!Number.isInteger(Number(rawTopN)) || Number(rawTopN) < LIVE_LEADERBOARD_TOP_N_MIN || Number(rawTopN) > LIVE_LEADERBOARD_TOP_N_MAX)) errors.push({ field: 'liveLeaderboardTopN', code: 'INVALID_RANGE' });
     if (rawRefresh != null && rawRefresh !== '' && (!Number.isInteger(Number(rawRefresh)) || Number(rawRefresh) < 10 || Number(rawRefresh) > 60)) errors.push({ field: 'liveLeaderboardRefreshSeconds', code: 'OUT_OF_RANGE' });
     if (!SCORE_MODES.includes(scoreMode)) errors.push({ field: 'liveLeaderboardScoreMode', code: 'INVALID_ENUM' });
     if (!VISIBILITY_MODES.includes(visibility)) errors.push({ field: 'liveLeaderboardVisibility', code: 'INVALID_ENUM' });
@@ -76,4 +78,4 @@ function maskedQuestions(questions = [], topN = 5, empty = false) {
     });
 }
 
-module.exports = { CONTRACT_VERSION, SERVER_MINIMUM_THRESHOLD, SCORE_MODES, VISIBILITY_MODES, normalizeConfig, supportedQuestions, aggregate, maskedQuestions };
+module.exports = { CONTRACT_VERSION, SERVER_MINIMUM_THRESHOLD, LIVE_LEADERBOARD_TOP_N_MIN, LIVE_LEADERBOARD_TOP_N_MAX, SCORE_MODES, VISIBILITY_MODES, normalizeConfig, supportedQuestions, aggregate, maskedQuestions };

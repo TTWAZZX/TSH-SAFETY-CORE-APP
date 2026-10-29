@@ -38,7 +38,7 @@ async function seed(name) {
     const db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASS, database: name, multipleStatements: true });
     try {
         await db.query("CREATE TABLE Admin_RolePermissions(role VARCHAR(50),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(role,permission));CREATE TABLE Admin_UserPermissions(employee_id VARCHAR(20),permission VARCHAR(100),granted TINYINT,PRIMARY KEY(employee_id,permission));CREATE TABLE Employees(EmployeeID VARCHAR(20) PRIMARY KEY,Department VARCHAR(100)) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;INSERT INTO Employees VALUES('SV-USER','Production'),('SV-USER2','Production')");
-        for (const file of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261015_safety_vote_live_results.sql', '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql', '20261020_safety_vote_eligibility_amendments.sql']) {
+        for (const file of ['20261008_safety_vote_phase1_foundation.sql', '20261008_safety_vote_phase2_core_mvp.sql', '20261008_safety_vote_phase3_survey_submission.sql', '20261008_safety_vote_phase4_jury_scoring.sql', '20261008_safety_vote_phase5_operations.sql', '20261008_safety_vote_phase6_secret_election.sql', '20261008_safety_vote_phase7_integrations_governance.sql', '20261009_safety_vote_phase10_4_media_versioning.sql', '20261015_safety_vote_live_results.sql', '20261016_safety_vote_participation_attempts.sql', '20261016_safety_vote_campaign_governance.sql', '20261020_safety_vote_eligibility_amendments.sql', '20261024_safety_vote_eligibility_removal_policy.sql', '20261024_safety_vote_question_images.sql', '20261024_safety_vote_company_wide_visibility.sql', '20261024_safety_vote_candidate_submission_gallery.sql', '20261025_safety_vote_company_visibility_remediation.sql', '20261025_safety_vote_official_topn_next_cycle.sql', '20261025_safety_vote_result_release_policy.sql', '20261025_safety_vote_jury_work_items_atomic_media.sql']) {
             await db.query(fs.readFileSync(path.join(root, 'backend', 'migrations', file), 'utf8'));
         }
         await db.query("UPDATE SafetyVote_Settings SET SettingValue='1' WHERE SettingKey='module_enabled'");
@@ -108,7 +108,7 @@ async function browserUat(base, campaignId) {
         page.on('console', message => { if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) errors.push(message.text()); });
         page.on('response', response => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
         page.on('pageerror', error => errors.push(error.message));
-        await page.goto(`${base}/__ux5-admin/admin?campaign=${campaignId}`, { waitUntil: 'domcontentloaded' });
+        await page.goto(`${base}/__ux5-admin/admin?campaign=${campaignId}&type=popular_vote&live=1`, { waitUntil: 'domcontentloaded' });
         await page.locator('[data-svo-live-results] .sv-live-board').waitFor();
         assert.strictEqual(await page.locator('[data-svo-live-results] .sv-live-row').count(), 6);
         assert.strictEqual(await page.locator('.svo-shell').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true, 'admin mobile overflow');
@@ -120,11 +120,15 @@ async function browserUat(base, campaignId) {
 }
 
 async function lifecycle(label, base, name, fixture) {
-    const createResponse = await fetch(`${base}/admin/campaigns`, { method: 'POST', headers: { Authorization: 'Bearer sv-admin', Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ titleTh: `${label} live create`, campaignType: 'popular_vote', privacyMode: 'identified', resultVisibility: 'hidden_until_close', liveLeaderboardEnabled: true, liveLeaderboardTopN: 10, liveLeaderboardScoreMode: 'count_percentage', liveLeaderboardVisibility: 'always', liveLeaderboardRefreshSeconds: 20, liveLeaderboardPrivacyThreshold: 7 }) });
+    const createResponse = await fetch(`${base}/admin/campaigns`, { method: 'POST', headers: { Authorization: 'Bearer sv-admin', Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ titleTh: `${label} live create`, campaignType: 'popular_vote', privacyMode: 'identified', resultVisibility: 'hidden_until_close', liveLeaderboardEnabled: true, liveLeaderboardTopN: 37, liveLeaderboardScoreMode: 'count_percentage', liveLeaderboardVisibility: 'always', liveLeaderboardRefreshSeconds: 20, liveLeaderboardPrivacyThreshold: 7 }) });
     const createPayload = await createResponse.json();
     assert.strictEqual(createResponse.status, 201, JSON.stringify(createPayload));
     assert.strictEqual(Number(createPayload.data.LiveLeaderboardEnabled), 1);
-    assert.strictEqual(Number(createPayload.data.LiveLeaderboardTopN), 10);
+    assert.strictEqual(Number(createPayload.data.LiveLeaderboardTopN), 37);
+    for (const invalidTopN of [0, 2.5, 101]) {
+        const invalidResponse = await fetch(`${base}/admin/campaigns`, { method: 'POST', headers: { Authorization: 'Bearer sv-admin', Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ titleTh: `${label} invalid live ${invalidTopN}`, campaignType: 'popular_vote', privacyMode: 'identified', resultVisibility: 'hidden_until_close', liveLeaderboardEnabled: true, liveLeaderboardTopN: invalidTopN, liveLeaderboardScoreMode: 'count_percentage', liveLeaderboardVisibility: 'always', liveLeaderboardRefreshSeconds: 20, liveLeaderboardPrivacyThreshold: 7 }) });
+        assert.strictEqual(invalidResponse.status, 400, `invalid live Top N ${invalidTopN} must fail closed`);
+    }
     const adminResult = await call(base, `/admin/campaigns/${fixture.campaignId}/live-results`);
     assert.strictEqual(adminResult.status, 200, JSON.stringify(adminResult.data));
     assert.strictEqual(adminResult.data.data.totalAcceptedVotes, 21);

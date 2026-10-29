@@ -42,7 +42,7 @@ function safeTemplateConfig(raw = {}) {
             resultVisibility: clean(version.resultVisibility || 'hidden_until_close', 24), editPolicy: clean(version.editPolicy || 'none', 24),
             scoringMethod: clean(version.scoringMethod || 'raw_count', 40), privacyThreshold: Math.max(2, Math.min(100, Number(version.privacyThreshold) || 5)),
             maxParticipationAttempts: Math.max(1, Math.min(10, Number(version.maxParticipationAttempts) || 1)),
-            liveLeaderboardEnabled: version.liveLeaderboardEnabled === true || Number(version.liveLeaderboardEnabled) === 1, liveLeaderboardTopN: Number(version.liveLeaderboardTopN) === 10 ? 10 : 5,
+            liveLeaderboardEnabled: version.liveLeaderboardEnabled === true || Number(version.liveLeaderboardEnabled) === 1, liveLeaderboardTopN: Number.isInteger(Number(version.liveLeaderboardTopN)) && Number(version.liveLeaderboardTopN) >= 1 && Number(version.liveLeaderboardTopN) <= 100 ? Number(version.liveLeaderboardTopN) : 5,
             liveLeaderboardScoreMode: clean(version.liveLeaderboardScoreMode || 'count_percentage', 24), liveLeaderboardVisibility: clean(version.liveLeaderboardVisibility || 'after_submit', 24),
             liveLeaderboardRefreshSeconds: Math.max(10, Math.min(60, Number(version.liveLeaderboardRefreshSeconds) || 15)), liveLeaderboardPrivacyThreshold: Math.max(5, Math.min(100, Number(version.liveLeaderboardPrivacyThreshold) || Number(version.privacyThreshold) || 5)),
             allowAbstain: Boolean(version.allowAbstain), randomizeOptions: Boolean(version.randomizeOptions), discoveryMode: clean(version.discoveryMode || 'eligible_only', 24)

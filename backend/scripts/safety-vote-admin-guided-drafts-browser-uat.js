@@ -45,7 +45,7 @@ async function setup() {
     await db.query("UPDATE SafetyVote_Settings SET SettingValue='1' WHERE SettingKey IN ('module_enabled','engagement_enabled')");
     children.push(spawn(process.execPath, [path.join(__dirname, 'safety-vote-phase1-node-fixture-host.js')], { cwd: root, env: { ...process.env, DB_NAME: dbName, SAFETY_VOTE_FIXTURE_DB: dbName, SAFETY_VOTE_FIXTURE_PORT: String(port) }, stdio: 'ignore', windowsHide: true }));
     await waitReady();
-    const created = await call('/admin/campaigns', { method: 'POST', body: { titleTh: 'ร่างกิจกรรมความปลอดภัยประจำเดือน', summary: 'ร่างสำหรับทดสอบงานผู้ดูแล', description: 'ข้อมูลจำลองในฐานข้อมูลชั่วคราว', campaignType: 'popular_vote', privacyMode: 'identified', resultVisibility: 'live', maxParticipationAttempts: 3, liveLeaderboardEnabled: true, liveLeaderboardTopN: 10, liveLeaderboardScoreMode: 'count_percentage', liveLeaderboardVisibility: 'after_submit', liveLeaderboardRefreshSeconds: 20, liveLeaderboardPrivacyThreshold: 7 } });
+    const created = await call('/admin/campaigns', { method: 'POST', body: { titleTh: 'ร่างกิจกรรมความปลอดภัยประจำเดือน', summary: 'ร่างสำหรับทดสอบงานผู้ดูแล', description: 'ข้อมูลจำลองในฐานข้อมูลชั่วคราว', campaignType: 'popular_vote', privacyMode: 'identified', resultVisibility: 'live', maxParticipationAttempts: 3, liveLeaderboardEnabled: true, liveLeaderboardTopN: 37, liveLeaderboardScoreMode: 'count_percentage', liveLeaderboardVisibility: 'after_submit', liveLeaderboardRefreshSeconds: 20, liveLeaderboardPrivacyThreshold: 7 } });
     assert.strictEqual(created.status, 201, JSON.stringify(created.data));
     const id = Number(created.data.data.id);
     assert.strictEqual((await call(`/admin/campaigns/${id}/official-result-topn`, { method: 'PUT', body: { officialResultTopN: 37 } })).status, 200);
@@ -81,14 +81,14 @@ async function inspect(viewport) {
     await chooser.waitFor();
     assert.strictEqual(await chooser.locator('[data-sv-built-in-template]').count(), 6);
     assert.strictEqual(await chooser.locator('[data-sv-reusable-template]').count(), 1);
-    const adaptiveTemplate = [390, 768].includes(viewport.width) ? 'jury_scoring' : 'survey';
+    const adaptiveTemplate = viewport.width === 1366 ? 'popular_vote' : ([390, 768].includes(viewport.width) ? 'jury_scoring' : 'survey');
     await chooser.locator(`[data-sv-built-in-template="${adaptiveTemplate}"]`).click();
     await page.locator('[data-sv-wizard]').waitFor();
     assert.strictEqual(await page.locator('.svw-readiness-summary [role="progressbar"]').count(), 1);
     const adaptiveLabels = await page.locator('.svw-step-nav [data-svw-step]').allTextContents();
     const expectedLabels = adaptiveTemplate === 'jury_scoring'
         ? ['ผลงานที่เข้าประกวด', 'เกณฑ์ตัดสินและรายชื่อกรรมการ', 'ผู้ส่งผลงานและผู้เข้าร่วม']
-        : ['คำถามแบบสำรวจ', 'กติกาการตอบ', 'ผู้มีสิทธิ์ตอบ'];
+        : adaptiveTemplate === 'popular_vote' ? [] : ['คำถามแบบสำรวจ', 'กติกาการตอบ', 'ผู้มีสิทธิ์ตอบ'];
     for (const label of expectedLabels) assert(adaptiveLabels.some(value => value.includes(label)), `${adaptiveTemplate} adaptive label missing at ${viewport.width}: ${label}`);
     const resultsStep = page.locator('[data-svw-step="7"]');
     await resultsStep.evaluate(button => { button.disabled = false; });
@@ -103,6 +103,20 @@ async function inspect(viewport) {
     await officialCustom.fill('37');
     assert.strictEqual(await officialPreset.inputValue(), 'custom');
     assert.deepStrictEqual(await officialCustom.evaluate(input => ({ min:input.min, max:input.max, step:input.step })), { min:'1', max:'100', step:'1' });
+    if (adaptiveTemplate === 'popular_vote') {
+        const livePreset = page.locator('[data-svw-live-topn-preset]'), liveCustom = page.locator('[data-svw-field="liveLeaderboardTopN"]');
+        await livePreset.waitFor();
+        assert.strictEqual(await livePreset.locator('option').count(), 6);
+        await livePreset.selectOption('20');
+        assert.strictEqual(await liveCustom.inputValue(), '20');
+        await livePreset.selectOption('custom');
+        await liveCustom.fill('12');
+        assert.strictEqual(await livePreset.inputValue(), 'custom');
+        assert.deepStrictEqual(await liveCustom.evaluate(input => ({ min:input.min, max:input.max, step:input.step })), { min:'1', max:'100', step:'1' });
+        await page.locator('[data-svw-copy-official-topn]').click();
+        assert.strictEqual(await liveCustom.inputValue(), '37');
+        await page.screenshot({ path: path.join(evidence, `live-topn-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    }
     if ([390, 1920].includes(viewport.width)) await page.screenshot({ path: path.join(evidence, `official-topn-${viewport.width}x${viewport.height}.png`), fullPage: true });
     await page.getByRole('button', { name: 'กลับศูนย์จัดการ' }).click();
     await page.locator('[data-sv-dialog-confirm]').click();
@@ -126,7 +140,7 @@ async function inspect(viewport) {
     assert(duplicateId > 0, 'duplicate campaign ID is required');
     const [[copied]] = await db.query('SELECT v.TitleTh,v.OfficialResultTopN,v.ResultReleasePolicy,v.MaxParticipationAttempts,v.LiveLeaderboardEnabled,v.LiveLeaderboardTopN,v.LiveLeaderboardScoreMode,v.LiveLeaderboardVisibility,v.LiveLeaderboardRefreshSeconds,v.LiveLeaderboardPrivacyThreshold,(SELECT COUNT(*) FROM SafetyVote_Questions q WHERE q.CampaignVersionID=v.id) questions,(SELECT COUNT(*) FROM SafetyVote_Options o JOIN SafetyVote_Questions q ON q.id=o.QuestionID WHERE q.CampaignVersionID=v.id) options,(SELECT COUNT(*) FROM SafetyVote_Options o JOIN SafetyVote_Questions q ON q.id=o.QuestionID WHERE q.CampaignVersionID=v.id AND o.FileID IS NOT NULL) optionFiles,(SELECT COUNT(*) FROM SafetyVote_EligibilityRules r WHERE r.CampaignVersionID=v.id) rules FROM SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID WHERE c.id=?', [duplicateId]);
     assert(String(copied.TitleTh).includes('(สำเนา)'), 'duplicate title suffix is required');
-    assert.deepStrictEqual([Number(copied.OfficialResultTopN), copied.ResultReleasePolicy, Number(copied.MaxParticipationAttempts), Number(copied.LiveLeaderboardEnabled), Number(copied.LiveLeaderboardTopN), copied.LiveLeaderboardScoreMode, copied.LiveLeaderboardVisibility, Number(copied.LiveLeaderboardRefreshSeconds), Number(copied.LiveLeaderboardPrivacyThreshold), Number(copied.questions), Number(copied.options), Number(copied.optionFiles), Number(copied.rules)], [37, 'manual', 3, 1, 10, 'count_percentage', 'after_submit', 20, 7, 1, 2, 0, 1]);
+    assert.deepStrictEqual([Number(copied.OfficialResultTopN), copied.ResultReleasePolicy, Number(copied.MaxParticipationAttempts), Number(copied.LiveLeaderboardEnabled), Number(copied.LiveLeaderboardTopN), copied.LiveLeaderboardScoreMode, copied.LiveLeaderboardVisibility, Number(copied.LiveLeaderboardRefreshSeconds), Number(copied.LiveLeaderboardPrivacyThreshold), Number(copied.questions), Number(copied.options), Number(copied.optionFiles), Number(copied.rules)], [37, 'manual', 3, 1, 37, 'count_percentage', 'after_submit', 20, 7, 1, 2, 0, 1]);
     await page.locator(`[data-sv-select="${duplicateId}"]:visible`).first().waitFor();
     assert.strictEqual(await page.locator('[data-sv-wizard]').count(), 0);
     await page.getByRole('heading', { name: 'แคมเปญ', exact: true }).waitFor();
@@ -149,7 +163,7 @@ async function main() {
     for (const viewport of viewports) results.push(await inspect(viewport));
     const [[counts]] = await db.query('SELECT (SELECT COUNT(*) FROM SafetyVote_Ballots) ballots,(SELECT COUNT(*) FROM SafetyVote_BallotAnswers) answers,(SELECT COUNT(*) FROM SafetyVote_JuryScores) jury,(SELECT COUNT(*) FROM SafetyVote_Certifications) certifications,(SELECT COUNT(*) FROM SafetyVote_Campaigns) campaigns,(SELECT COUNT(*) FROM SafetyVote_CampaignTemplates) templates');
     assert.deepStrictEqual([Number(counts.ballots), Number(counts.answers), Number(counts.jury), Number(counts.certifications), Number(counts.campaigns), Number(counts.templates)], [0, 0, 0, 0, 6, 1]);
-    const result = { contract: '2026-10-28-safety-vote-official-topn-r1', viewports, results, authenticatedAdminCombinations: results.length, keyboardAndDialogSemantics: true, atomicDraftDuplicate: true, officialResultTopNCustom: 37, invalidOfficialTopNRejected: [0, 2.5, 101], officialResultPolicyPreservedOnDuplicate: true, participationAndLiveSettingsPreserved: true, protectedBusinessRows: { ballots: 0, answers: 0, jury: 0, certifications: 0 }, fixtureRows: { campaigns: 6, templates: 1 }, externalDelivery: false, productionConnected: false, deployed: false, committed: false, pushed: false, disposableDatabaseResidue: 0 };
+    const result = { contract: '2026-10-29-safety-vote-live-topn-r1', viewports, results, authenticatedAdminCombinations: results.length, keyboardAndDialogSemantics: true, atomicDraftDuplicate: true, officialResultTopNCustom: 37, liveLeaderboardTopNCustom: 37, liveLeaderboardPresets: [3,5,10,20,50], oneTimeOfficialCopy: true, invalidOfficialTopNRejected: [0, 2.5, 101], officialResultPolicyPreservedOnDuplicate: true, participationAndLiveSettingsPreserved: true, protectedBusinessRows: { ballots: 0, answers: 0, jury: 0, certifications: 0 }, fixtureRows: { campaigns: 6, templates: 1 }, externalDelivery: false, productionConnected: false, deployed: false, committed: false, pushed: false, disposableDatabaseResidue: 0 };
     result.resultSha256 = crypto.createHash('sha256').update(JSON.stringify(result)).digest('hex');
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     console.log(`Safety Vote Admin guided Drafts Browser UAT: PASS (5 authenticated Admin viewports, ${evidence})`);
