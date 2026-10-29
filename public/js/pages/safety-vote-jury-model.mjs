@@ -96,6 +96,36 @@ export function scoreProgress(detail = {}, scores = {}) {
     return { completed, total, percent: total ? Math.round(completed / total * 100) : 0 };
 }
 
+export function rankCandidateScores(detail = {}, scores = {}) {
+    const criteria = detail.criteria || [];
+    const rows = (detail.candidates || []).map((candidate, originalIndex) => {
+        let weighted = 0, weightTotal = 0, complete = criteria.length > 0;
+        const breakdown = criteria.map(criterion => {
+            const raw = scores[scoreKey(candidate.id, criterion.id)]?.score;
+            const score = Number(raw), min = Number(valueOf(criterion, 'MinScore', 'minScore'));
+            const max = Number(valueOf(criterion, 'MaxScore', 'maxScore'));
+            const weight = Number(valueOf(criterion, 'Weight', 'weight') || 0);
+            const valid = raw !== '' && raw !== undefined && raw !== null && Number.isFinite(score) && max > min && score >= min && score <= max;
+            if (!valid) complete = false;
+            const normalized = valid ? (score - min) / (max - min) : 0;
+            if (valid && weight > 0) { weighted += normalized * weight; weightTotal += weight; }
+            return { criterionId: Number(criterion.id), title: String(valueOf(criterion, 'Title', 'title')), score: valid ? score : null, min, max, weight, normalizedPercent: valid ? normalized * 100 : null };
+        });
+        return { candidate, originalIndex, complete, weightedPercent: complete && weightTotal > 0 ? weighted / weightTotal * 100 : null, breakdown };
+    }).sort((left, right) => {
+        if (left.complete !== right.complete) return left.complete ? -1 : 1;
+        const scoreDifference = Number(right.weightedPercent || 0) - Number(left.weightedPercent || 0);
+        return Math.abs(scoreDifference) > 1e-9 ? scoreDifference : Number(left.candidate.id) - Number(right.candidate.id) || left.originalIndex - right.originalIndex;
+    });
+    let rank = 0, previous = null;
+    return rows.map((row, index) => {
+        if (previous === null || row.weightedPercent === null || Math.abs(Number(row.weightedPercent) - Number(previous)) > 1e-9) rank = index + 1;
+        previous = row.weightedPercent;
+        const tied = row.weightedPercent !== null && rows.some((other, otherIndex) => otherIndex !== index && other.weightedPercent !== null && Math.abs(Number(other.weightedPercent) - Number(row.weightedPercent)) <= 1e-9);
+        return { ...row, rank, tied };
+    });
+}
+
 export function buildScorePayload(detail = {}, scores = {}) {
     return {
         scores: (detail.candidates || []).flatMap(candidate => (detail.criteria || []).flatMap(criterion => {

@@ -105,12 +105,23 @@ async function completeAndSubmit(viewport, ordinal, assignmentId) {
     await wait(`document.querySelector('[data-svj-save-status]')?.dataset.state==='saved'`, 'server autosave state');
     await click('[data-svj-action="review"]');
     await wait(`Boolean(document.querySelector('.svj-review'))`, 'review before submit');
+    const rankedReview = await ev(`(()=>{const cards=[...document.querySelectorAll('[data-svj-review-rank]')],percentages=cards.map(card=>Number((card.querySelector('.svj-review-card__body>header>strong')?.textContent||'').replace('%','').trim()));return{count:cards.length,ranks:cards.map(card=>Number(card.dataset.svjReviewRank)),percentages,hasMedia:cards.every(card=>card.querySelector('[data-sv-auth-file],.svj-review-card__placeholder')),hasEdit:cards.every(card=>card.querySelector('[data-svj-edit-work]')),privateDisclaimer:document.querySelector('.svj-review')?.textContent.includes('ไม่ใช่ผลรวมอย่างเป็นทางการ')}})()`);
+    assert.strictEqual(rankedReview.count, 2, `${viewport} ranked review candidate count`);
+    assert.deepStrictEqual(rankedReview.ranks, [1, 2], `${viewport} ranked review order labels`);
+    assert(rankedReview.percentages.every(Number.isFinite) && rankedReview.percentages[0] >= rankedReview.percentages[1], `${viewport} ranked percentages must be descending`);
+    assert(rankedReview.hasMedia, `${viewport} ranked review must show authenticated artwork or an explicit placeholder`);
+    assert(rankedReview.hasEdit && rankedReview.privateDisclaimer, `${viewport} ranked review edit affordance/private-result disclaimer missing`);
     assert(await ev(`document.querySelector('.svp-immutable-warning')?.textContent.includes('แก้ไขไม่ได้')`), 'immutable warning missing');
     const layout = await inspectPage(viewport, 'review');
     assert.strictEqual(layout.overflow, false, `${viewport} review overflow`);
     assert.deepStrictEqual(layout.badTouch, [], `${viewport} review touch targets ${JSON.stringify(layout.badTouch)}`);
     assert(layout.heading && layout.roleNav && layout.workspace, `${viewport} landmarks/navigation`);
     await shot(`juror-review-${viewport}.png`);
+    await click('[data-svj-edit-work]');
+    await wait(`Boolean(document.querySelector('[data-svj-form]'))`, 'return to scoring from ranked review');
+    assert(await ev(`document.activeElement?.matches('[data-svj-score]')`), `${viewport} ranked review edit action must focus the selected work`);
+    await click('[data-svj-action="review"]');
+    await wait(`Boolean(document.querySelector('.svj-review'))`, 'ranked review after score check');
     await click('[data-svj-action="confirm"]');
     await wait(`Boolean(document.querySelector('[role=alertdialog]'))`, 'immutable confirmation dialog');
     assert(await ev(`document.querySelector('[role=alertdialog]')?.getAttribute('aria-modal')==='true'&&document.activeElement?.hasAttribute('data-sv-dialog-confirm')`), 'immutable dialog semantics/focus are incomplete');
@@ -197,12 +208,11 @@ const viewports = [
     assert(!await ev(`document.body.textContent.includes('Candidate A01')||document.body.textContent.includes('ความปลอดภัย')`), 'unassigned direct link disclosed protected detail');
     await shot('unassigned-direct-link-denied-390x844.png');
 
-    expectHttpError = true;
     await cmd('Page.navigate', { url: `${origin}/__ux4-juror/7` });
-    await wait(`Boolean(document.querySelector('.svp-state--denied'))`, 'jury permission denial');
-    expectHttpError = false;
-    assert(await ev(`document.querySelector('.svp-state--denied')?.getAttribute('role')==='alert'`), 'permission denial must be announced');
-    await shot('permission-denied-390x844.png');
+    await wait(`Boolean(document.querySelector('.svp-empty'))`, 'non-juror empty queue');
+    assert.strictEqual(await ev(`document.querySelectorAll('[data-svj-open]').length`), 0, 'non-juror queue must not expose assignments');
+    assert(!await ev(`document.body.textContent.includes('Candidate A01')||document.body.textContent.includes('Candidate B01')`), 'non-juror empty queue disclosed protected candidate detail');
+    await shot('non-juror-empty-safe-390x844.png');
 
     expectHttpError = true;
     await ev(`fetch('/__fixture/module/0',{method:'POST',headers:{Authorization:'Bearer sv-admin'}}).then(response=>response.json())`);
@@ -219,9 +229,9 @@ const viewports = [
         decision: 'PASS', contract: '2026-10-08-safety-vote-ux4-r1', browser: path.basename(chromePath),
         viewports: viewports.map(item => item[0]), roles: ['juror'], matrix,
         blindPresentation: true, localDraftRecovery: true, serverAutosave: true,
-        validationSummary: true, reviewBeforeSubmit: true, immutableConfirmation: true,
+        validationSummary: true, reviewBeforeSubmit: true, rankedPrivateReview: true, artworkReview: true, directScoreEdit: true, immutableConfirmation: true,
         duplicateSubmitBlocked: true, recusalDialog: true, privacySafeReceipt: true,
-        unassignedDirectLinkDenied: true, permissionDenied: true, moduleDisabledFailClosed: true,
+        unassignedDirectLinkDenied: true, nonJurorEmptySafe: true, moduleDisabledFailClosed: true,
         browserDraftResidue: 0, expectedApiErrors, unexpectedApiErrors, consoleErrors
     };
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2));
@@ -229,7 +239,6 @@ const viewports = [
     fs.writeFileSync(path.join(evidence, 'result.sha256'), `${digest}  result.json\n`);
     assert(expectedApiErrors.some(item => item.startsWith('409 ')), 'duplicate-submit 409 evidence missing');
     assert(expectedApiErrors.some(item => item.startsWith('404 ')), 'unassigned direct-link 404 evidence missing');
-    assert(expectedApiErrors.some(item => item.startsWith('403 ')), 'permission-denied 403 evidence missing');
     assert(expectedApiErrors.some(item => item.startsWith('503 ')), 'module-disabled 503 evidence missing');
     assert.deepStrictEqual(consoleErrors, []);
     assert.deepStrictEqual(unexpectedApiErrors, []);

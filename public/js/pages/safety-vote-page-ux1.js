@@ -4,7 +4,7 @@ import { loadSafetyVotePage as loadLegacySafetyVotePage } from './safety-vote.js
 import { isSafetyVoteUxV1Enabled, isSafetyVoteEngagementV1Enabled, openSafetyVoteConfirmDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261027-safety-vote-jury-work-media-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
-import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261029-safety-vote-jury-revocation-r1';
+import { loadSafetyVoteJuryWorkspace } from './safety-vote-jury-workspace.js?v=20261029-safety-vote-jury-ranked-review-r1';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261020-safety-vote-duplicate-media-r3';
 import { bindSafetyVotePeoplePickers, safetyVotePeoplePickerMarkup } from './safety-vote-people-picker.js?v=20261024-safety-vote-people-picker-r1';

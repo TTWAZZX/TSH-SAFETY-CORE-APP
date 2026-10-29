@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
     buildScorePayload,
+    rankCandidateScores,
     validateDraftScoreSheet,
     validateScoreSheet
 } from '../../public/js/pages/safety-vote-jury-model.mjs';
@@ -12,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 const detail = {
     candidates: [{ id: 10, candidateNo: 'WORK-1', displayName: 'Candidate WORK-1' }, { id: 20, candidateNo: 'WORK-2', displayName: 'Candidate WORK-2' }],
-    criteria: [{ id: 1, Title: 'Safety', MinScore: 1, MaxScore: 10 }]
+    criteria: [{ id: 1, Title: 'Safety', MinScore: 1, MaxScore: 10, Weight: 100 }]
 };
 const partial = { '10:1': { score: '8', comment: 'draft' }, '20:1': { score: '', comment: '' } };
 
@@ -26,6 +27,11 @@ assert.deepEqual(
 );
 assert.deepEqual(buildScorePayload(detail, partial), { scores: [{ candidateId: 10, criterionId: 1, score: 8, comment: 'draft' }] });
 assert.equal(validateDraftScoreSheet(detail, { '10:1': { score: '99' } }).length, 1, 'Entered draft values must remain range-validated');
+const ranked = rankCandidateScores(detail, { '10:1': { score: 4 }, '20:1': { score: 9 } });
+assert.deepEqual(ranked.map(item => [item.candidate.id, item.rank]), [[20, 1], [10, 2]], 'Personal weighted review must rank highest score first');
+assert(Math.abs(ranked[0].weightedPercent - (8 / 9 * 100)) < 1e-9, 'Personal weighted review must use the authoritative normalized criterion formula');
+const tied = rankCandidateScores(detail, { '10:1': { score: 9 }, '20:1': { score: 9 } });
+assert(tied.every(item => item.rank === 1 && item.tied === true), 'Equal weighted scores must be disclosed as tied');
 
 const workspace = read('public/js/pages/safety-vote-jury-workspace.js');
 const css = read('public/style.css');
@@ -35,6 +41,8 @@ assert(workspace.includes('validateDraftScoreSheet') && workspace.includes('บ�
 assert(workspace.includes('data-svj-error-key') && workspace.includes('focusValidationTarget'), 'Validation alerts must link to and focus the exact score row');
 assert(workspace.includes('juryProgressNavigatorMarkup') && workspace.includes('data-svj-progress-work') && workspace.includes('data-svj-progress-score'), 'Jury workspace must expose work and criterion progress navigation');
 assert(workspace.includes('refreshJuryProgressNavigator') && css.includes('.svj-progress-criteria'), 'Jury progress status must update live with visible criterion states');
+assert(workspace.includes('rankCandidateScores') && workspace.includes('data-svj-review-rank') && workspace.includes('อันดับนี้เป็นของกรรมการคนนี้เท่านั้น'), 'Review must show private weighted ranking without implying an official result');
+assert(workspace.includes('svj-review-card__cover') && workspace.includes('data-svj-edit-work') && css.includes('.svj-review-card__cover'), 'Review must show authenticated work imagery and a direct edit action');
 assert(workspace.includes('startSessionKeepAlive') && workspace.includes('refreshSession({ preserveOnFailure: true })'));
 assert(workspace.includes('svj-candidate__workspace') && workspace.includes('svj-candidate__evidence'));
 assert(css.includes('.svj-candidate__criteria { max-height: calc(100dvh - 8rem); overflow-y: auto') && css.includes('grid-template-columns: minmax(330px, .72fr)'));

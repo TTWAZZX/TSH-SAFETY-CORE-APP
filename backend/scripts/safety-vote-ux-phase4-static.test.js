@@ -45,6 +45,8 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(workspace.includes('data-svj-score-range') && workspace.includes('data-svj-score-step') && workspace.includes('data-svj-score-quick'), 'accessible slider, stepper and quick-score controls are missing');
     check(workspace.includes('syncScoreUi') && workspace.includes("inputmode=\"decimal\""), 'score controls must stay synchronized with direct numeric entry');
     check(workspace.includes('ตรวจสอบก่อนส่ง') && workspace.includes('แก้ไขไม่ได้'), 'review/immutable wording is missing');
+    check(workspace.includes('rankCandidateScores') && workspace.includes('data-svj-review-rank') && workspace.includes('data-svj-edit-work'), 'ranked visual review with direct correction is missing');
+    check(workspace.includes('data-sv-auth-file') && workspace.includes('อันดับนี้เป็นของกรรมการคนนี้เท่านั้น ไม่ใช่ผลรวมอย่างเป็นทางการ'), 'private ranked review must retain authenticated imagery and official-result disclaimer');
     check(workspace.includes('safeJuryReceipt') && workspace.includes('ไม่แสดงคะแนนหรือรายละเอียดผู้สมัคร'), 'privacy-safe receipt is missing');
     check(workspace.includes('ASSIGNMENT_NOT_FOUND'), 'direct-link assignment denial is missing');
     check(workspace.includes('SAFETY_VOTE_MODULE_DISABLED'), 'module fail-closed state is missing');
@@ -58,7 +60,7 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
     check(campaignWizard.includes('data-svw-restore-juror') && campaignWizard.includes("response.data?.restored===true"), 'Admin history must expose a direct restore action and confirmation state');
     check(workspace.includes("assignmentState(item) !== 'revoked'"), 'jury workspace must defensively remove revoked assignments');
     check(page.includes("'submitted', 'recused', 'revoked'"), 'participant task strip must exclude revoked jury assignments');
-    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation|jury-restore)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation|jury-restore)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
+    check(/safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation|jury-restore|jury-ranked-review)-r1/.test(main) && /safety-vote-(?:ux(?:4|5|6|7|8)|preview-gallery|atomic-duplicate|final-phase7|jury-score-ux|jury-assignment-ux|jury-scoring|jury-revocation|jury-restore|jury-ranked-review)-r1/.test(html), 'Phase 4-or-later cache chain is incomplete');
     check(css.includes('Safety Vote UX/UI Phase 4'), 'Phase 4 scoped CSS marker is missing');
     check(css.includes('.svj-action-bar') && css.includes('env(safe-area-inset-bottom'), 'responsive sticky action bar is missing safe-area handling');
     check(css.includes('min-height: 44px'), '44 px touch targets are not enforced');

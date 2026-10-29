@@ -3,8 +3,8 @@ import { escHtml, showToast } from '../ui.js?v=20260602-mobile-nav-m53';
 import { isSafetyVoteUxV1Enabled, openSafetyVoteConfirmDialog, openSafetyVoteReasonDialog, safetyVoteJourneyNav, safetyVoteRoleNav } from './safety-vote-ux-components.js?v=20261009-safety-vote-ux8-r1';
 import {
     JURY_VIEW_LABELS, assignmentProgress, assignmentState, buildScorePayload, filterAssignments,
-    normalizeScores, safeJuryReceipt, scoreKey, scoreProgress, validateDraftScoreSheet, validateScoreSheet, valueOf
-} from './safety-vote-jury-model.mjs?v=20261029-safety-vote-jury-revocation-r1';
+    normalizeScores, rankCandidateScores, safeJuryReceipt, scoreKey, scoreProgress, validateDraftScoreSheet, validateScoreSheet, valueOf
+} from './safety-vote-jury-model.mjs?v=20261029-safety-vote-jury-ranked-review-r1';
 import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261024-safety-vote-gallery-r1';
 import { hydrateSafetyVoteImages, releaseSafetyVoteImages } from '../utils/safety-vote-auth-image.js?v=20261024-safety-vote-gallery-r1';
@@ -193,12 +193,20 @@ function editMarkup() {
             const raw = state.scores[scoreKey(candidate.id, criterion.id)]?.score;
             return raw !== '' && raw !== undefined && raw !== null && Number.isFinite(Number(raw));
         }).length;
-        return `<fieldset class="svj-candidate"><legend><span>${index + 1}</span>${escHtml(candidate.displayName)}</legend><div class="svj-candidate__workspace"><aside class="svj-candidate__evidence" aria-label="หลักฐานผลงาน ${escHtml(candidate.displayName)}"><div class="svj-candidate__meta"><div><span>รหัสผลงาน</span><strong>${escHtml(candidate.candidateNo)}</strong></div><span class="svj-candidate__progress" data-svj-candidate-progress="${Number(candidate.id)}">ให้คะแนนแล้ว ${candidateCompleted}/${criteria.length} เกณฑ์</span></div>${candidateGallery(candidate)}</aside><section class="svj-candidate__criteria" aria-label="แบบประเมิน ${escHtml(candidate.displayName)}"><header><div><span>แบบประเมินผลงาน</span><strong>${criteria.length} เกณฑ์ · น้ำหนักรวม ${Number(state.detail?.matrix?.weightTotal || 0)}%</strong></div><small>บันทึกร่างได้ทุกเมื่อ · ต้องครบทุกเกณฑ์ก่อนส่งผล</small></header>${criteria.map(criterion => scoreControl(candidate, criterion)).join('')}</section></div></fieldset>`;
+        return `<fieldset class="svj-candidate" id="svj-candidate-${Number(candidate.id)}"><legend><span>${index + 1}</span>${escHtml(candidate.displayName)}</legend><div class="svj-candidate__workspace"><aside class="svj-candidate__evidence" aria-label="หลักฐานผลงาน ${escHtml(candidate.displayName)}"><div class="svj-candidate__meta"><div><span>รหัสผลงาน</span><strong>${escHtml(candidate.candidateNo)}</strong></div><span class="svj-candidate__progress" data-svj-candidate-progress="${Number(candidate.id)}">ให้คะแนนแล้ว ${candidateCompleted}/${criteria.length} เกณฑ์</span></div>${candidateGallery(candidate)}</aside><section class="svj-candidate__criteria" aria-label="แบบประเมิน ${escHtml(candidate.displayName)}"><header><div><span>แบบประเมินผลงาน</span><strong>${criteria.length} เกณฑ์ · น้ำหนักรวม ${Number(state.detail?.matrix?.weightTotal || 0)}%</strong></div><small>บันทึกร่างได้ทุกเมื่อ · ต้องครบทุกเกณฑ์ก่อนส่งผล</small></header>${criteria.map(criterion => scoreControl(candidate, criterion)).join('')}</section></div></fieldset>`;
     }).join('')}</form>`;
 }
 
+function reviewCoverMarkup(candidate) {
+    const gallery = candidate.gallery || [], cover = gallery.find(item => item.isCover) || gallery[0];
+    if (!cover?.fileId) return `<div class="svj-review-card__placeholder" role="img" aria-label="ไม่มีภาพผลงาน"><span aria-hidden="true">ภาพ</span><small>ไม่มีภาพผลงาน</small></div>`;
+    const label = cover.altText || candidate.displayName || candidate.candidateNo || 'ภาพผลงาน';
+    return `<button type="button" class="svj-review-card__cover" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="jury-review-${Number(candidate.id)}" data-sv-gallery-label="${escHtml(label)}" aria-label="เปิดภาพผลงาน ${escHtml(candidate.displayName)}"><img data-sv-auth-file="${Number(cover.fileId)}" alt="${escHtml(label)}" decoding="async"></button>`;
+}
+
 function reviewMarkup() {
-    return `<section class="svj-review" aria-labelledby="svj-review-title"><p class="sv-eyebrow">ตรวจสอบก่อนส่ง</p><h2 id="svj-review-title">ตรวจคะแนนทุกเกณฑ์อีกครั้ง</h2><p>ระบบจะแสดงชื่อรายการตาม blind mode ที่เซิร์ฟเวอร์กำหนดเท่านั้น</p><div class="svj-review-grid">${(state.detail.candidates || []).map(candidate => `<article><h3>${escHtml(candidate.displayName)}</h3><dl>${(state.detail.criteria || []).map(criterion => { const row = state.scores[scoreKey(candidate.id, criterion.id)] || {}; return `<div><dt>${escHtml(criterionValue(criterion, 'Title'))}</dt><dd>${Number(row.score)}</dd></div>`; }).join('')}</dl></article>`).join('')}</div><div class="svp-immutable-warning" role="note"><strong>เมื่อยืนยันแล้ว คะแนนชุดนี้จะแก้ไขไม่ได้</strong><span>การเปิดรอบแก้ไขต้องดำเนินการโดยผู้ดูแลที่มีสิทธิ์ และระบบจะสร้างชุดประเมินรุ่นใหม่โดยเก็บชุดเดิมไว้</span></div>${state.submitError ? `<div class="svp-submit-error" role="alert"><strong>ยังยืนยันการส่งไม่ได้</strong><span>${escHtml(state.submitError)}</span><small>ระบบตรวจสถานะล่าสุดแล้วและไม่ส่งซ้ำอัตโนมัติ</small></div>` : ''}</section>`;
+    const ranked = rankCandidateScores(state.detail, state.scores), formatScore = value => Number(value).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `<section class="svj-review" aria-labelledby="svj-review-title"><p class="sv-eyebrow">ตรวจสอบก่อนส่ง</p><h2 id="svj-review-title">อันดับคะแนนส่วนตัวและภาพผลงาน</h2><p>เรียงจากคะแนนถ่วงน้ำหนักที่คุณให้มากไปน้อย เพื่อช่วยตรวจความสอดคล้องก่อนส่ง โดยอันดับนี้เป็นของกรรมการคนนี้เท่านั้น ไม่ใช่ผลรวมอย่างเป็นทางการ และยังคงใช้ชื่อผลงานตาม Blind mode</p><div class="svj-review-grid">${ranked.map(item => { const candidate = item.candidate; return `<article class="svj-review-card" data-svj-review-rank="${item.rank}">${reviewCoverMarkup(candidate)}<div class="svj-review-card__body"><header><span class="svj-review-card__rank">อันดับ ${item.rank}${item.tied ? ' · คะแนนเท่ากัน' : ''}</span><strong>${item.weightedPercent === null ? 'ยังคำนวณไม่ได้' : `${formatScore(item.weightedPercent)}%`}</strong></header><div><h3>${escHtml(candidate.displayName)}</h3><small>รหัสผลงาน ${escHtml(candidate.candidateNo || `WORK-${candidate.id}`)}</small></div><dl>${item.breakdown.map(row => `<div><dt>${escHtml(row.title)} <small>น้ำหนัก ${Number(row.weight)}%</small></dt><dd>${row.score === null ? '—' : `${formatScore(row.score)} / ${formatScore(row.max)}`}</dd></div>`).join('')}</dl><button type="button" class="sv-button sv-button--secondary" data-svj-edit-work="${Number(candidate.id)}">กลับไปตรวจและแก้คะแนนผลงานนี้</button></div></article>`; }).join('')}</div><div class="svp-immutable-warning" role="note"><strong>เมื่อยืนยันแล้ว คะแนนชุดนี้จะแก้ไขไม่ได้</strong><span>การเปิดรอบแก้ไขต้องดำเนินการโดยผู้ดูแลที่มีสิทธิ์ และระบบจะสร้างชุดประเมินรุ่นใหม่โดยเก็บชุดเดิมไว้</span></div>${state.submitError ? `<div class="svp-submit-error" role="alert"><strong>ยังยืนยันการส่งไม่ได้</strong><span>${escHtml(state.submitError)}</span><small>ระบบตรวจสถานะล่าสุดแล้วและไม่ส่งซ้ำอัตโนมัติ</small></div>` : ''}</section>`;
 }
 
 function receiptMarkup() {
@@ -418,6 +426,15 @@ function bindDetail() {
     state.page.querySelectorAll('[data-svj-error-key]').forEach(link => link.addEventListener('click', event => {
         event.preventDefault();
         focusValidationTarget(link.dataset.svjErrorKey);
+    }));
+    state.page.querySelectorAll('[data-svj-edit-work]').forEach(button => button.addEventListener('click', () => {
+        const candidateId = Number(button.dataset.svjEditWork);
+        state.mode = 'edit'; state.submitError = null; state.progressCandidateId = candidateId; renderDetail();
+        requestAnimationFrame(() => {
+            const target = state.page.querySelector(`#svj-candidate-${candidateId}`);
+            target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            target?.querySelector('[data-svj-score]')?.focus({ preventScroll: true });
+        });
     }));
     state.page.querySelectorAll('[data-svj-action]').forEach(button => button.addEventListener('click', () => {
         const action = button.dataset.svjAction;
