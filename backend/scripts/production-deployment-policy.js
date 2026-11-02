@@ -9,6 +9,7 @@ const activeProductionDeployScripts = Object.freeze([
     'login-safety-vote-mobile-production-deploy.js',
     'safety-vote-phase7-production-deploy.js',
     'safety-vote-mobile-density-production-deploy.js',
+    'safety-vote-mobile-promotion-production-deploy.js',
     'safety-vote-eligibility-freeze-race-production-deploy.js',
     'safety-vote-jury-assignment-access-production-deploy.js',
     'safety-vote-live-jury-assignment-production-deploy.js',
@@ -22,6 +23,7 @@ const activeProductionDeployScripts = Object.freeze([
     'safety-vote-phase96-guarded-feature-deploy.js',
     'safety-vote-wizard-layout-production-deploy.js',
     'safety-vote-workflow-observation-production-deploy.js',
+    'safety-vote-deadline-extension-production-deploy.js',
 ]);
 
 const archivedProductionDeployScripts = Object.freeze([

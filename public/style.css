@@ -1156,6 +1156,28 @@ body {
 .svo-schedule div { min-width: 0; border-radius: .7rem; padding: .7rem; background: #f8fafc; }
 .svo-schedule dt { color: #64748b; font-size: .75rem; }
 .svo-schedule dd { margin: .2rem 0 0; overflow-wrap: anywhere; font-weight: 800; }
+.svo-extension-launch { display: flex; align-items: center; gap: .65rem; margin: 0 0 1rem; }
+.svo-extension-launch small { color: #64748b; }
+.svo-extension { display: grid; gap: .85rem; margin: 0 0 1rem; border: 1px solid #86efac; border-radius: .9rem; padding: .9rem; background: #f0fdf4; }
+.svo-extension__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.svo-extension__heading > div { display: grid; gap: .2rem; }
+.svo-extension__heading span, .svo-extension label > span { color: #475569; font-size: .8rem; }
+.svo-extension__fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: .75rem; }
+.svo-extension label { display: grid; gap: .35rem; min-width: 0; font-weight: 700; }
+.svo-extension input[type="datetime-local"], .svo-extension input[name="confirmation"], .svo-extension textarea { width: 100%; min-height: 44px; border: 1px solid #cbd5e1; border-radius: .65rem; padding: .65rem .75rem; background: #fff; color: #0f172a; }
+.svo-extension textarea { resize: vertical; }
+.svo-extension__preview { border-radius: .75rem; padding: .75rem; background: #fff; }
+.svo-extension__preview p { margin: .3rem 0 0; color: #475569; font-size: .82rem; }
+.svo-extension__immutable { margin-top: .75rem; border: 1px solid #f59e0b; border-radius: .65rem; padding: .7rem; background: #fffbeb; color: #92400e; }
+.svo-extension__immutable p { color: #92400e; }
+.svo-extension__counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; margin-top: .6rem; }
+.svo-extension__counts span { border-radius: .55rem; padding: .5rem; background: #f8fafc; font-size: .78rem; font-weight: 800; }
+.svo-extension__promotions { display: grid; gap: .45rem; min-width: 0; border: 0; padding: 0; }
+.svo-extension__promotions legend { margin-bottom: .35rem; font-weight: 900; }
+.svo-extension__promotions label, .svo-extension__notify { display: flex; align-items: flex-start; gap: .55rem; border-radius: .65rem; padding: .6rem; background: #fff; }
+.svo-extension__promotions input, .svo-extension__notify input { width: 20px; height: 20px; flex: 0 0 auto; }
+.svo-extension__promotions label > span { display: grid; gap: .15rem; }
+.svo-extension__actions { display: flex; justify-content: flex-end; gap: .55rem; }
 .svo-timeline { display: grid; max-height: 320px; gap: 0; overflow: auto; margin: 0; padding: 0; list-style: none; }
 .svo-timeline li { display: grid; grid-template-columns: 1rem minmax(0, 1fr); gap: .65rem; min-width: 0; }
 .svo-timeline li > span { position: relative; width: .65rem; height: .65rem; margin-top: .35rem; border-radius: 50%; background: #2563eb; }
@@ -1222,6 +1244,10 @@ body {
 @media (max-width: 767px) { .svo-jury-readiness-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 430px) { .svo-jury-readiness-grid { grid-template-columns: 1fr; } }
 @media (max-width: 767px) {
+    .svo-extension-launch, .svo-extension__heading { align-items: stretch; flex-direction: column; }
+    .svo-extension__fields, .svo-extension__counts { grid-template-columns: 1fr; }
+    .svo-extension__actions { display: grid; grid-template-columns: 1fr; }
+    .svo-extension__actions .sv-button, .svo-extension-launch .sv-button { width: 100%; }
     .svp-eligibility-granted { grid-template-columns: auto minmax(0, 1fr); }
     .svp-eligibility-granted .sv-button { grid-column: 1 / -1; width: 100%; }
     .svo-admissions { grid-template-columns: 1fr; }

@@ -7,14 +7,15 @@ import {
 } from './safety-vote-operations-model.mjs?v=20261029-safety-vote-workflow-observation-r1';
 import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
-import { formatThaiDateTime } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
+import { bangkokInputToIso, formatThaiDateTime, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 
 const state = {
     container: null, campaign: null, onClose: null, onNavigate: null, operations: null, analytics: null, analyticsPrivacy: false,
     juryRows: [], juryReadiness: null, stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false,
     moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false,
     notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null,
-    livePaused: false, liveInFlight: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null
+    livePaused: false, liveInFlight: false, liveTimer: null, liveCountdownTimer: null, liveAbort: null, liveFailures: 0, liveVisibilityHandler: null,
+    extensionOpen: false, extensionDraft: null, extensionPreview: null, extensionPromotionIds: new Set()
 };
 
 const ACTION_LABELS = {
@@ -23,7 +24,8 @@ const ACTION_LABELS = {
     SAFETY_VOTE_NOTIFICATION_QUEUE: 'จัดคิวการแจ้งเตือน', SAFETY_VOTE_EXPORT_COMPLETE: 'สร้างรายงานรวม',
     SAFETY_VOTE_ELIGIBILITY_AUTO_ENROLLED: 'เพิ่มผู้มีสิทธิ์อัตโนมัติตามเงื่อนไข',
     SAFETY_VOTE_RESULT_CALCULATE: 'สร้าง Result Snapshot', SAFETY_VOTE_RESULT_FREEZE: 'ตรึง Result Snapshot',
-    SAFETY_VOTE_RESULT_CERTIFY: 'รับรองผล', SAFETY_VOTE_RESULT_PUBLISH: 'เผยแพร่ผล'
+    SAFETY_VOTE_RESULT_CERTIFY: 'รับรองผล', SAFETY_VOTE_RESULT_PUBLISH: 'เผยแพร่ผล',
+    SAFETY_VOTE_DEADLINE_EXTENDED: 'ขยายเวลาสิ้นสุดแคมเปญ'
 };
 
 const WARNING_LABELS = {
@@ -38,6 +40,32 @@ function warningLabel(code) {
 
 function dateTime(value) {
     return formatThaiDateTime(value);
+}
+
+function bangkokInput(value) {
+    if (!value) return '';
+    const text = String(value).trim().replace(' ', 'T');
+    return toBangkokInputValue(/[zZ]|[+-]\d{2}:\d{2}$/.test(text) ? text : `${text}+07:00`);
+}
+
+function extensionMarkup(status, campaign) {
+    if (!['Scheduled', 'Open', 'Closed', 'Certified', 'Published'].includes(status)) return '';
+    if (!state.extensionOpen) return `<div class="svo-extension-launch"><button type="button" class="sv-button sv-button--primary" data-svo-action="open-extension" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ขยายเวลาแคมเปญ</button><small>คงคะแนน คำตอบ ผลงาน สิทธิ์ และงานกรรมการเดิมทั้งหมด</small></div>`;
+    const draft = state.extensionDraft || {}, preview = state.extensionPreview, expected = `${preview?.reopenAllowed ? 'REOPEN' : 'EXTEND'} ${state.campaign.CampaignCode || state.campaign.campaignCode || ''}`;
+    const preserved = preview?.preserved || {};
+    return `<form class="svo-extension" data-svo-extension-form><div class="svo-extension__heading"><div><strong>ขยายเวลาสิ้นสุด</strong><span>แก้เฉพาะกำหนดการและป้ายที่เลือก ข้อมูลการเข้าร่วมทั้งหมดจะไม่ถูกลบหรือสร้างใหม่</span></div><button type="button" class="sv-button sv-button--secondary" data-svo-action="cancel-extension">ยกเลิก</button></div><div class="svo-extension__fields"><label><span>วันและเวลาปิดใหม่ (เวลาไทย)</span><input type="datetime-local" name="newCloseAt" required value="${escHtml(draft.newCloseAt || '')}"></label><label><span>เหตุผลอย่างน้อย 10 ตัวอักษร</span><textarea name="reason" rows="3" maxlength="1000" required>${escHtml(draft.reason || '')}</textarea></label></div>${preview ? `<div class="svo-extension__preview" role="status"><strong>ตรวจสอบผลกระทบแล้ว</strong><p>${dateTime(preview.currentCloseAt)} → ${dateTime(preview.newCloseAt)}</p><div class="svo-extension__counts"><span>การเข้าร่วม ${Number(preserved.participation || 0).toLocaleString('th-TH')}</span><span>บัตร/คำตอบ ${Number(preserved.ballots || 0).toLocaleString('th-TH')}</span><span>ผลงาน ${Number(preserved.submissions || 0).toLocaleString('th-TH')}</span><span>งานกรรมการ ${Number(preserved.juryAssignments || 0).toLocaleString('th-TH')}</span></div><p>รายการทั้งหมดข้างต้นจะคงอยู่เหมือนเดิม</p></div><fieldset class="svo-extension__promotions"><legend>ป้ายประชาสัมพันธ์ที่เชื่อมกับแคมเปญ</legend>${preview.promotions?.length ? preview.promotions.map(item => `<label><input type="checkbox" data-svo-extension-promotion value="${Number(item.id)}" ${state.extensionPromotionIds.has(Number(item.id)) ? 'checked' : ''}><span><strong>${escHtml(item.titleTh || `ป้าย #${item.id}`)}</strong><small>สิ้นสุดเดิม ${dateTime(item.endAt)}${item.recommended ? ' · แนะนำให้ขยาย' : ''}</small></span></label>`).join('') : '<p>ไม่มีป้ายที่ต้องขยายเวลา</p>'}</fieldset><label class="svo-extension__notify"><input type="checkbox" name="queueNotification" ${draft.queueNotification ? 'checked' : ''}><span>จัดคิวแจ้งผู้มีสิทธิ์ว่าแคมเปญขยายเวลา (ไม่ส่งออกภายนอกทันที)</span></label><label><span>พิมพ์ <code>${escHtml(expected)}</code> เพื่อยืนยัน</span><input name="confirmation" autocomplete="off" required value="${escHtml(draft.confirmation || '')}"></label>` : ''}<div class="svo-extension__actions">${preview ? '<button type="button" class="sv-button sv-button--secondary" data-svo-action="preview-extension">ตรวจสอบใหม่</button><button type="submit" class="sv-button sv-button--primary">ยืนยันขยายเวลา</button>' : '<button type="button" class="sv-button sv-button--primary" data-svo-action="preview-extension">ตรวจสอบผลกระทบ</button>'}</div></form>`;
+}
+
+function applyExtensionGovernanceUi() {
+    const preview = state.extensionPreview, form = state.container?.querySelector('[data-svo-extension-form]');
+    if (!preview?.nextCycleRequired || !form) return;
+    form.querySelector('.svo-extension__promotions')?.remove();
+    form.querySelector('.svo-extension__notify')?.remove();
+    form.querySelector('[name="confirmation"]')?.closest('label')?.remove();
+    const result = form.querySelector('.svo-extension__preview');
+    if (result) result.insertAdjacentHTML('beforeend', `<div class="svo-extension__immutable" role="alert"><strong>ผลทางการของรอบนี้ถูกล็อกแล้ว</strong><p>พบ Result Snapshot ${Number(preview.immutableEvidence?.resultSnapshots || 0).toLocaleString('th-TH')} รายการ จึงไม่ย้อนเปิดรอบเดิม ระบบจะรักษาผลเดิมและสร้างรอบใหม่แยกจากกัน</p></div>`);
+    const actions = form.querySelector('.svo-extension__actions');
+    if (actions) actions.innerHTML = '<button type="button" class="sv-button sv-button--secondary" data-svo-action="preview-extension">ตรวจสอบใหม่</button><button type="button" class="sv-button sv-button--primary" data-svo-action="open-versions">ไปสร้างรอบใหม่โดยรักษาผลเดิม</button>';
 }
 
 function loadingMarkup() {
@@ -256,10 +284,11 @@ function render() {
     const campaign = state.campaign || {}, operations = state.operations || {}, funnel = operations.funnel || {}, status = operations.campaign?.status || campaign.Status || 'Draft';
     const notificationCounts = statusCounts(operations.notifications || []), exportCounts = statusCounts(operations.exports || []);
     const observationPanel = observationMarkup(campaign);
-    state.container.innerHTML = `<div class="svo-shell" data-sv-operations="2026-10-29-jury-readiness-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svo-hero"><button type="button" class="sv-icon-button" data-svo-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ศูนย์ปฏิบัติการ Safety Vote</p><h1>${escHtml(campaign.TitleTh || campaign.titleTh || 'แคมเปญ Safety Vote')}</h1><p>${escHtml(campaign.CampaignCode || campaign.campaignCode || '')} · ข้อมูลรวมสำหรับติดตามความพร้อม ไม่ใช่หน้ารับรองหรือคำนวณผล</p></div>${safetyVoteStatusBadge(status)}</header>${warningMarkup()}${state.actionError ? `<div class="svo-action-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.actionNotice ? `<div class="svo-action-message is-success" role="status">${escHtml(state.actionNotice)}</div>` : ''}<section class="svo-kpi-grid" aria-label="Funnel การเข้าร่วมที่ผ่านเกณฑ์ความเป็นส่วนตัว">${metricCard('ผู้มีสิทธิ์', funnel.eligible)}${metricCard('เริ่มแล้ว', funnel.started)}${metricCard('ส่งแล้ว', funnel.submitted)}${metricCard('บัตรที่รับ', funnel.accepted)}</section>${eligibilityAdmissionsMarkup()}<div class="svo-privacy-banner" role="note"><strong>Privacy threshold ทำงานที่เซิร์ฟเวอร์</strong><span>ค่าที่ถูกปกปิดจะไม่ถูกคำนวณย้อนกลับ และหน้าจอนี้ไม่อ่านตัวเลือกลงคะแนน รายชื่อผู้ลงคะแนน หรือ blind identity</span></div>${observationPanel}<main class="svo-grid"><section class="svo-panel svo-panel--timeline" aria-labelledby="svo-timeline-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Lifecycle</p><h2 id="svo-timeline-title">กำหนดการและ Timeline</h2></div><span>${escHtml(operations.campaign?.timeZone || 'Asia/Bangkok')}</span></div><dl class="svo-schedule"><div><dt>เปิด</dt><dd>${dateTime(operations.campaign?.scheduledOpenAt)}</dd></div><div><dt>ปิด</dt><dd>${dateTime(operations.campaign?.scheduledCloseAt)}</dd></div></dl>${timelineMarkup()}</section><section class="svo-panel" aria-labelledby="svo-jury-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Stage health</p><h2 id="svo-jury-title">รอบและงานกรรมการ</h2></div></div>${stagesMarkup()}</section><section class="svo-panel" aria-labelledby="svo-analytics-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Privacy-safe analytics</p><h2 id="svo-analytics-title">การเข้าร่วมตามหน่วยงาน</h2></div></div>${analyticsMarkup()}</section><section class="svo-panel" aria-labelledby="svo-notification-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Delivery health</p><h2 id="svo-notification-title">สถานะการแจ้งเตือน</h2></div><span>${Number(notificationCounts.Failed || 0) ? 'ต้องตรวจสอบ' : 'ติดตามจากสถานะรวม'}</span></div>${notificationMarkup()}</section><section class="svo-panel svo-panel--results" aria-labelledby="svo-result-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Result readiness</p><h2 id="svo-result-title">Snapshot และรายงาน</h2></div><span>Export สำเร็จ ${Number(exportCounts.Completed || 0)}</span></div>${resultsMarkup()}</section></main><footer class="svo-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svo-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button>${status === 'Open' ? `<button type="button" class="sv-button sv-button--danger" data-svo-action="close-campaign" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ปิดรับคะแนน</button>` : ''}<button type="button" class="sv-button sv-button--primary" data-svo-action="process-schedule" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ประมวลผลกำหนดการ</button></div></footer></div>`;
+    state.container.innerHTML = `<div class="svo-shell" data-sv-operations="2026-11-02-deadline-extension-r1">${safetyVoteRoleNav({ active: 'admin', showAdmin: true })}<header class="svo-hero"><button type="button" class="sv-icon-button" data-svo-action="back" aria-label="กลับศูนย์จัดการ Safety Vote">←</button><div><p class="sv-eyebrow">ศูนย์ปฏิบัติการ Safety Vote</p><h1>${escHtml(campaign.TitleTh || campaign.titleTh || 'แคมเปญ Safety Vote')}</h1><p>${escHtml(campaign.CampaignCode || campaign.campaignCode || '')} · ข้อมูลรวมสำหรับติดตามความพร้อม ไม่ใช่หน้ารับรองหรือคำนวณผล</p></div>${safetyVoteStatusBadge(status)}</header>${warningMarkup()}${state.actionError ? `<div class="svo-action-message is-error" role="alert">${escHtml(state.actionError)}</div>` : ''}${state.actionNotice ? `<div class="svo-action-message is-success" role="status">${escHtml(state.actionNotice)}</div>` : ''}<section class="svo-kpi-grid" aria-label="Funnel การเข้าร่วมที่ผ่านเกณฑ์ความเป็นส่วนตัว">${metricCard('ผู้มีสิทธิ์', funnel.eligible)}${metricCard('เริ่มแล้ว', funnel.started)}${metricCard('ส่งแล้ว', funnel.submitted)}${metricCard('บัตรที่รับ', funnel.accepted)}</section>${eligibilityAdmissionsMarkup()}<div class="svo-privacy-banner" role="note"><strong>Privacy threshold ทำงานที่เซิร์ฟเวอร์</strong><span>ค่าที่ถูกปกปิดจะไม่ถูกคำนวณย้อนกลับ และหน้าจอนี้ไม่อ่านตัวเลือกลงคะแนน รายชื่อผู้ลงคะแนน หรือ blind identity</span></div>${observationPanel}<main class="svo-grid"><section class="svo-panel svo-panel--timeline" aria-labelledby="svo-timeline-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Lifecycle</p><h2 id="svo-timeline-title">กำหนดการและ Timeline</h2></div><span>${escHtml(operations.campaign?.timeZone || 'Asia/Bangkok')}</span></div><dl class="svo-schedule"><div><dt>เปิด</dt><dd>${dateTime(operations.campaign?.scheduledOpenAt)}</dd></div><div><dt>ปิด</dt><dd>${dateTime(operations.campaign?.scheduledCloseAt)}</dd></div></dl>${extensionMarkup(status, operations.campaign || {})}${timelineMarkup()}</section><section class="svo-panel" aria-labelledby="svo-jury-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Stage health</p><h2 id="svo-jury-title">รอบและงานกรรมการ</h2></div></div>${stagesMarkup()}</section><section class="svo-panel" aria-labelledby="svo-analytics-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Privacy-safe analytics</p><h2 id="svo-analytics-title">การเข้าร่วมตามหน่วยงาน</h2></div></div>${analyticsMarkup()}</section><section class="svo-panel" aria-labelledby="svo-notification-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Delivery health</p><h2 id="svo-notification-title">สถานะการแจ้งเตือน</h2></div><span>${Number(notificationCounts.Failed || 0) ? 'ต้องตรวจสอบ' : 'ติดตามจากสถานะรวม'}</span></div>${notificationMarkup()}</section><section class="svo-panel svo-panel--results" aria-labelledby="svo-result-title"><div class="svo-panel__heading"><div><p class="sv-eyebrow">Result readiness</p><h2 id="svo-result-title">Snapshot และรายงาน</h2></div><span>Export สำเร็จ ${Number(exportCounts.Completed || 0)}</span></div>${resultsMarkup()}</section></main><footer class="svo-action-bar"><button type="button" class="sv-button sv-button--secondary" data-svo-action="back">กลับศูนย์จัดการ</button><div><button type="button" class="sv-button sv-button--secondary" data-svo-action="refresh" ${state.busy ? 'disabled' : ''}>รีเฟรช</button>${status === 'Open' ? `<button type="button" class="sv-button sv-button--danger" data-svo-action="close-campaign" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ปิดรับคะแนน</button>` : ''}<button type="button" class="sv-button sv-button--primary" data-svo-action="process-schedule" ${state.manageUnavailable || state.busy ? 'disabled' : ''}>ประมวลผลกำหนดการ</button></div></footer></div>`;
     state.container.querySelector('.sv-role-nav')?.insertAdjacentHTML('afterend', safetyVoteJourneyNav({ role: 'admin', current: 'operations', campaign, onPage: typeof state.onNavigate !== 'function' }));
     const stageTitle = state.container.querySelector('#svo-jury-title');
     if (stageTitle && !isJuryCampaign()) stageTitle.textContent = 'รอบและสถานะแคมเปญ';
+    applyExtensionGovernanceUi();
     bind(); bindSafetyVoteImageGallery(state.container); hydrateLiveResultImages(state.container);
 }
 
@@ -293,6 +322,12 @@ async function loadData() {
         state.error = state.denied || state.moduleDisabled ? null : error;
     } else {
         state.operations = operations.value.data;
+        const operationalCampaign = state.operations?.campaign || {};
+        state.campaign.Status = operationalCampaign.status || state.campaign.Status;
+        state.campaign.RowVersion = Number(operationalCampaign.campaignRowVersion || state.campaign.RowVersion || 0);
+        state.campaign.VersionRowVersion = Number(operationalCampaign.versionRowVersion || state.campaign.VersionRowVersion || 0);
+        state.campaign.ScheduledCloseAt = operationalCampaign.scheduledCloseAt || state.campaign.ScheduledCloseAt;
+        state.campaign.CloseAt = operationalCampaign.scheduledCloseAt || state.campaign.CloseAt;
         state.analyticsPrivacy = analytics.status === 'rejected' && analytics.reason?.code === 'SECRET_DIMENSION_FORBIDDEN';
         state.analytics = analytics.status === 'fulfilled' ? analytics.value.data : null;
         state.juryRows = jury.status === 'fulfilled' ? jury.value.data?.rows || [] : [];
@@ -345,6 +380,60 @@ async function closeCampaign() {
     }, 'ปิดรับคะแนนแล้ว พร้อมสร้าง Result Snapshot');
 }
 
+function captureExtensionDraft(form) {
+    if (!form?.reportValidity()) return null;
+    const values = new FormData(form), draft = {
+        newCloseAt: String(values.get('newCloseAt') || ''), reason: String(values.get('reason') || '').trim(),
+        confirmation: String(values.get('confirmation') || ''), queueNotification: values.get('queueNotification') === 'on'
+    };
+    state.extensionDraft = draft;
+    return draft;
+}
+
+function extensionPayload(draft, includePromotions = false) {
+    const campaign = state.operations?.campaign || {};
+    return {
+        newCloseAt: bangkokInputToIso(draft.newCloseAt), reason: draft.reason,
+        campaignRowVersion: Number(campaign.campaignRowVersion || state.campaign.RowVersion || state.campaign.rowVersion),
+        versionRowVersion: Number(campaign.versionRowVersion || state.campaign.VersionRowVersion || state.campaign.versionRowVersion),
+        promotionIds: includePromotions ? [...state.extensionPromotionIds] : []
+    };
+}
+
+async function previewDeadlineExtension(form) {
+    const draft = captureExtensionDraft(form);
+    if (!draft) return;
+    if (draft.reason.length < 10) { state.actionError = 'กรุณาระบุเหตุผลอย่างน้อย 10 ตัวอักษร'; render(); return; }
+    await runAction(async () => {
+        const response = await API.post(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/deadline-extension/preview`, extensionPayload(draft));
+        state.extensionPreview = response.data;
+        state.extensionPromotionIds = new Set((response.data?.promotions || []).filter(item => item.recommended).map(item => Number(item.id)));
+    }, 'ตรวจสอบผลกระทบการขยายเวลาแล้ว');
+}
+
+async function applyDeadlineExtension(form) {
+    const draft = captureExtensionDraft(form);
+    if (!draft || !state.extensionPreview) return;
+    await runAction(async () => {
+        const response = await API.post(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/deadline-extension`, { ...extensionPayload(draft, true), confirmation: draft.confirmation });
+        state.campaign.RowVersion = Number(response.data?.campaignRowVersion || state.campaign.RowVersion);
+        state.campaign.VersionRowVersion = Number(response.data?.versionRowVersion || state.campaign.VersionRowVersion);
+        if (draft.queueNotification) {
+            try {
+                const notification = await API.post(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/notifications/queue`, {
+                    audience: 'eligible', eventType: response.data?.reopened ? 'campaign_reopened' : 'deadline_extended', templateKey: response.data?.reopened ? 'campaign_reopened_with_extension' : 'campaign_deadline_extended', channel: 'in_app',
+                    windowKey: String(response.data?.newCloseAt || '').slice(0, 10), metadata: { route: '#safety-vote', newCloseAt: response.data?.newCloseAt || '' }
+                });
+                showToast(`จัดคิวแจ้งเตือน ${Number(notification.data?.queued || 0).toLocaleString('th-TH')} รายการ`, 'success');
+            } catch (error) {
+                showToast('ขยายเวลาสำเร็จ แต่จัดคิวแจ้งเตือนไม่สำเร็จ สามารถจัดคิวภายหลังได้', 'warning');
+            }
+        }
+        state.extensionOpen = false; state.extensionDraft = null; state.extensionPreview = null; state.extensionPromotionIds.clear();
+        await loadData();
+    }, 'ขยายเวลาแคมเปญแล้ว และคงข้อมูลเดิมทั้งหมด');
+}
+
 async function previewNotifications() {
     await runAction(async () => {
         const response = await API.get(`/safety-vote/admin/campaigns/${Number(state.campaign.id)}/notifications/preview?audience=nonparticipants`);
@@ -391,17 +480,23 @@ function bind() {
         const action = button.dataset.svoAction;
         if (action === 'back') { stopLivePolling(); state.onClose?.(); }
         else if (action === 'retry' || action === 'refresh') loadData();
+        else if (action === 'open-extension') { const current = state.operations?.campaign?.scheduledCloseAt, nextDay = Date.now() + 86400000, currentNextDay = current ? new Date(`${String(current).replace(' ', 'T')}+07:00`).getTime() + 86400000 : nextDay; state.extensionOpen = true; state.extensionDraft = { newCloseAt: bangkokInput(Math.max(nextDay, currentNextDay)), reason: '', confirmation: '', queueNotification: false }; state.extensionPreview = null; state.extensionPromotionIds.clear(); render(); requestAnimationFrame(() => state.container?.querySelector('[name="newCloseAt"]')?.focus()); }
+        else if (action === 'cancel-extension') { state.extensionOpen = false; state.extensionDraft = null; state.extensionPreview = null; state.extensionPromotionIds.clear(); render(); }
+        else if (action === 'preview-extension') previewDeadlineExtension(state.container?.querySelector('[data-svo-extension-form]'));
+        else if (action === 'open-versions') state.onNavigate?.('versions');
         else if (action === 'live-refresh') loadLiveResults(true);
         else if (action === 'live-toggle') { state.livePaused = !state.livePaused; render(); if (!state.livePaused) loadLiveResults(true); else scheduleLivePolling(); }
         else if (action === 'preview-notifications') previewNotifications();
         else confirmAction(action);
     }));
+    state.container?.querySelectorAll('[data-svo-extension-promotion]').forEach(input => input.addEventListener('change', () => { const id = Number(input.value); if (input.checked) state.extensionPromotionIds.add(id); else state.extensionPromotionIds.delete(id); }));
+    state.container?.querySelector('[data-svo-extension-form]')?.addEventListener('submit', event => { event.preventDefault(); applyDeadlineExtension(event.currentTarget); });
 }
 
 export async function renderSafetyVoteOperationsWorkspace(container, { campaign = null, onClose = null, onNavigate = null } = {}) {
     if (!isSafetyVoteUxV1Enabled() || !container || !campaign?.id) return false;
     stopLivePolling();
-    Object.assign(state, { container, campaign, onClose, onNavigate, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], juryReadiness: null, stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null, livePaused: false, liveInFlight: false, liveFailures: 0 });
+    Object.assign(state, { container, campaign, onClose, onNavigate, operations: null, analytics: null, analyticsPrivacy: false, juryRows: [], juryReadiness: null, stages: [], snapshots: [], partialIssues: [], loading: true, error: null, denied: false, moduleDisabled: false, busy: false, manageUnavailable: false, exportUnavailable: false, notificationPreview: null, latestReport: null, actionError: '', actionNotice: '', liveResults: null, liveError: null, livePaused: false, liveInFlight: false, liveFailures: 0, extensionOpen: false, extensionDraft: null, extensionPreview: null, extensionPromotionIds: new Set() });
     await loadData();
     if (isPopularVote() && Number(campaign.LiveLeaderboardEnabled) && String(campaign.Status) === 'Open') {
         startLiveVisibilityPolling();

@@ -6,13 +6,16 @@ let checks = 0; const ok = (value, message) => { assert(value, message); checks+
 
 const sample = { campaignId: 7, titleTh: 'กิจกรรมเด่น', subtitleTh: 'ร่วมกิจกรรมภายในสัปดาห์นี้', ctaLabel: 'เข้าร่วม', priority: 80, startAt: '2026-10-10T01:00:00.000Z', endAt: '2026-10-17T01:00:00.000Z', status: 'Published', altText: 'ภาพประชาสัมพันธ์กิจกรรม' };
 const normalized = rules.normalizePromotion(sample); ok(normalized.ok, 'valid promotion'); ok(normalized.value.priority === 80, 'bounded priority');
+ok(normalized.value.startAt === '2026-10-10 08:00:00' && normalized.value.endAt === '2026-10-17 08:00:00', 'promotion ISO instants are stored as Bangkok wall-clock time');
+ok(rules.bangkokDateTime(normalized.value.startAt) === '2026-10-10T08:00:00+07:00', 'stored promotion time is returned with an explicit Bangkok offset');
+ok(rules.bangkokDateTime(new Date(2026, 9, 10, 8, 0, 0)) === '2026-10-10T08:00:00+07:00', 'mysql Date values preserve their stored wall-clock fields regardless of the Node process timezone');
 ok(!rules.normalizePromotion({ ...sample, endAt: sample.startAt }).ok, 'end must follow start');
 ok(!rules.normalizePromotion({ ...sample, desktopFileId: 1, altText: '' }).ok, 'image requires alt text');
 
 const php = `require '${path.join(root, 'api', 'lib', 'safety_vote_phase1.php').replace(/\\/g, '/')}'; require '${path.join(root, 'api', 'lib', 'safety_vote_engagement.php').replace(/\\/g, '/')}'; echo json_encode(sveng_promotion(json_decode($argv[1],true)));`;
 const run = spawnSync(process.env.PHP_BIN || 'C:\\xampp\\php\\php.exe', ['-r', php, JSON.stringify(sample)], { encoding: 'utf8', windowsHide: true });
 if (run.error?.code === 'EPERM') { const phpLib = read('api/lib/safety_vote_engagement.php'); ok(phpLib.includes("['Draft','Published','Archived']"), 'PHP status parity contract'); ok(phpLib.includes("max(0,min(100"), 'PHP priority parity contract'); }
-else { assert.strictEqual(run.status, 0, run.error?.message || run.stderr); const phpNormalized = JSON.parse(run.stdout); ok(phpNormalized.ok, 'PHP promotion valid'); ok(phpNormalized.value.titleTh === normalized.value.titleTh && phpNormalized.value.priority === normalized.value.priority, 'Node/PHP normalization parity'); }
+else { assert.strictEqual(run.status, 0, run.error?.message || run.stderr); const phpNormalized = JSON.parse(run.stdout); ok(phpNormalized.ok, 'PHP promotion valid'); ok(phpNormalized.value.titleTh === normalized.value.titleTh && phpNormalized.value.priority === normalized.value.priority && phpNormalized.value.startAt === normalized.value.startAt && phpNormalized.value.endAt === normalized.value.endAt, 'Node/PHP normalization and Bangkok time parity'); }
 
 const migration = read('backend/migrations/20261010_safety_vote_ux_phase9a_engagement.sql'), rollback = read('backend/migrations/20261010_safety_vote_ux_phase9a_engagement.rollback.sql');
 ok(migration.includes('SafetyVote_Promotions') && migration.includes('SafetyVote_NotificationReads'), 'additive engagement tables');
@@ -25,6 +28,7 @@ for (const text of [nodeRoute, phpRoute]) { ok(text.includes('SAFETY_VOTE_MANAGE
 for (const text of [nodeRoute, phpRoute]) { ok(text.includes('c.IsHidden=0') && text.includes('c.IsTest=0') && !text.includes('ev.EmployeeID=?'), 'published promotions are visible company-wide while hidden and test campaigns stay excluded'); }
 for (const text of [nodeRoute, phpRoute]) { ok(text.includes('MAX(Priority)') && text.includes('automaticPriority'), 'promotion order is allocated automatically'); ok(text.includes('EndAt<=NOW()') && text.includes('history'), 'expired published promotions remain available as history'); }
 for (const text of [nodeRoute, phpRoute]) { ok(text.includes('adminPreview') && text.includes('ADMIN'), 'Admin can preview active promotions without joining voter eligibility'); }
+ok(phpRoute.includes("+07:00"), 'PHP promotion API returns an explicit Bangkok offset');
 const nodeCoreRoute = read('backend/routes/safety-vote.js'), phpCoreRoute = read('api/handlers/safety_vote.php');
 for (const text of [nodeCoreRoute, phpCoreRoute]) { ok(text.includes('promotion_desktop') && text.includes('promotion_mobile') && text.includes('promotion_library') && text.includes("c.Status<>'Voided'") && text.includes('c.IsHidden=0') && text.includes('c.IsTest=0'), 'authenticated module users can read visible campaign promotion media'); }
 const nodePhase2 = read('backend/routes/safety-vote-phase2.js'), phpPhase2 = read('api/handlers/safety_vote_phase2.php');

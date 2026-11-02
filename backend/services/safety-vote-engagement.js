@@ -13,7 +13,20 @@ function positiveInt(value) {
 function sqlDate(value) {
     const date = new Date(value);
     if (!value || Number.isNaN(date.getTime())) return null;
-    return date.toISOString().slice(0, 19).replace('T', ' ');
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Bangkok',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(date).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function bangkokDateTime(value) {
+    if (!value) return null;
+    const text = value instanceof Date
+        ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}T${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}:${String(value.getSeconds()).padStart(2, '0')}`
+        : String(value).trim().replace(' ', 'T').slice(0, 19);
+    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(text) ? `${text}+07:00` : null;
 }
 function normalizePromotion(input = {}) {
     const value = {
@@ -42,4 +55,4 @@ function normalizePromotion(input = {}) {
     return { ok: errors.length === 0, errors, value };
 }
 
-module.exports = { CONTRACT_VERSION, normalizePromotion, positiveInt, clean };
+module.exports = { CONTRACT_VERSION, normalizePromotion, positiveInt, clean, bangkokDateTime };
