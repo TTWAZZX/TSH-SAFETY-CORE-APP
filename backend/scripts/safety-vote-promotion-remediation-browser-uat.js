@@ -198,14 +198,29 @@ async function eligibleUserPreOpen() {
     await page.close();
 }
 
-async function userHistory(promotionId) {
+async function userHistory(promotionId, campaignId) {
+    const refreshed = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await refreshed.goto(`http://127.0.0.1:${port}/__ux1-user`, { waitUntil: 'networkidle' });
+    await refreshed.locator('[data-svp-promotion-carousel]').waitFor();
     await db.query('UPDATE SafetyVote_Promotions SET StartAt=DATE_SUB(NOW(),INTERVAL 2 DAY),EndAt=DATE_SUB(NOW(),INTERVAL 1 DAY) WHERE id=?', [promotionId]);
+    await refreshed.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await refreshed.getByRole('heading', { name: 'ป้ายกิจกรรมที่ผ่านมา' }).waitFor();
+    await db.query('UPDATE SafetyVote_Promotions SET EndAt=DATE_ADD(NOW(),INTERVAL 1 DAY) WHERE id=?', [promotionId]);
+    await refreshed.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await refreshed.locator('[data-svp-promotion-carousel]').waitFor();
+    assert.strictEqual(await refreshed.getByRole('heading', { name: 'ป้ายกิจกรรมที่ผ่านมา' }).count(), 0, 'Extended promotion must leave history after focus refresh.');
+    await refreshed.close();
+    await db.query('UPDATE SafetyVote_Promotions SET EndAt=DATE_SUB(NOW(),INTERVAL 1 DAY) WHERE id=?', [promotionId]);
     for (const viewport of [{ width: 390, height: 844 }, { width: 1366, height: 768 }]) {
         const page = await browser.newPage({ viewport });
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(`http://127.0.0.1:${port}/__ux1-user`, { waitUntil: 'networkidle' });
         await page.getByRole('heading', { name: 'ป้ายกิจกรรมที่ผ่านมา' }).waitFor();
+        const campaignImages = page.locator(`[data-svp-campaign="${campaignId}"] img[data-svp-promotion-file]`);
+        await campaignImages.first().waitFor();
+        assert.strictEqual(await campaignImages.count(), 2, 'Active campaign card and expired-history card must both retain the promotion image.');
+        await page.waitForFunction(id => [...document.querySelectorAll(`[data-svp-campaign="${id}"] img[data-svp-promotion-file]`)].every(image => image.complete && image.naturalWidth > 0), campaignId);
         await page.getByRole('button', { name: /Production-ready banner workflow/ }).click();
         await page.getByRole('heading', { name: 'กิจกรรมประวัติสำหรับผู้ใช้' }).waitFor();
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
@@ -244,7 +259,7 @@ async function cleanup() {
     await db.query("UPDATE SafetyVote_Campaigns c JOIN SafetyVote_CampaignVersions v ON v.id=c.CurrentVersionID SET v.OpenAt=DATE_ADD(NOW(),INTERVAL 1 DAY),v.CloseAt=DATE_ADD(NOW(),INTERVAL 2 DAY),c.ScheduledOpenAt=v.OpenAt,c.ScheduledCloseAt=v.CloseAt WHERE c.id=?", [campaignId]);
     await adminUserPreview();
     await eligibleUserPreOpen();
-    await userHistory(promotionId);
+    await userHistory(promotionId, campaignId);
     fs.writeFileSync(path.join(evidence, 'result.json'), `${JSON.stringify({ decision: 'PASS_LOCAL_PROMOTION_REMEDIATION_BROWSER_UAT', campaignId, promotionId, publishConfirmation: true, savedImageRestored: true, automaticOrder: true, independentPromotionSchedule: true, independentCampaignLifecycle: true, draftCampaignHiddenWhileBannerVisible: true, scheduledCampaignVisible: true, preOpenVotingBlocked: true, adminPreviewWithoutEligibility: true, adminPreviewCannotSubmit: true, expiredHistoryVisible: true, productionConnected: false, disposableDatabaseResidue: 0 }, null, 2)}\n`);
     console.log(`Safety Vote promotion remediation Browser UAT: PASS (${evidence})`);
 })().catch(error => { console.error(error.stack || error); process.exitCode = 1; }).finally(async () => {

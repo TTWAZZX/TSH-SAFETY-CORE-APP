@@ -37,8 +37,11 @@ ok(/safetyVoteEngagementV1:\s*(true|false)/.test(index), 'explicit client featur
 ok(admin.includes('งานของฉันวันนี้') && admin.includes('data-sv-promotion-form'), 'admin productivity and dedicated promotion manager');
 ok(admin.includes('const form = event.currentTarget') && admin.includes('savePromotion(form, intent)'), 'publish confirmation retains a stable form reference');
 ok(admin.includes('state.promotionAssetUrls.get(existingFileId)'), 'saved promotion images are restored in the editor preview');
+ok(admin.includes('promotionRuntimeStatus') && admin.includes("label: 'สิ้นสุดเวลา'") && admin.includes("label: 'กำลังแสดง'"), 'promotion manager distinguishes stored publication state from the live display window');
 ok(user.includes('สิ่งที่คุณต้องทำ') && user.includes('data-svp-promotion-next') && user.includes('การแจ้งเตือน Safety Vote'), 'user discovery and notification center');
 ok(user.includes('promotionHistoryMarkup') && user.includes('promotions.data?.history'), 'expired promotion history is rendered for eligible users');
+ok(user.includes('|| state.promotionHistory.find(item => Number(item.campaignId) === Number(campaignId))'), 'campaign cards retain the latest expired promotion cover for company-wide viewers');
+ok(/refreshDiscoveryFromLatestSnapshot[\s\S]*?API\.get\('\/safety-vote\/me\/promotions'/.test(user), 'returning to Safety Vote refreshes promotion schedules as well as campaign discovery');
 ok(user.includes('กำลังดูในฐานะผู้ดูแลระบบ') && user.includes('previewOnly'), 'Admin preview is visibly read-only');
 ok(!user.includes('setInterval(') && user.includes('schedulePromotionCarousel(delay = 6000)'), 'carousel uses one restartable auto-rotation timer');
 ok(user.includes('data-svp-promotion-carousel') && user.includes('visibilitychange') && user.includes('promotionPointerStartX'), 'carousel supports visibility pause, controls and swipe');

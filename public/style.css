@@ -5721,7 +5721,7 @@ body[data-active-page="safety-vote"],
 @media (max-width: 600px) {
     .svp-shell[data-sv-participation] {
         padding: var(--svp-mobile-shell-gutter);
-        padding-bottom: calc(var(--svp-mobile-action-bar-height) + var(--svp-mobile-space-2));
+        padding-bottom: calc(var(--mobile-bottom-nav-height) + var(--svp-mobile-action-bar-height) + var(--svp-mobile-space-2));
     }
 
     .svp-shell[data-sv-participation] .sv-role-nav {

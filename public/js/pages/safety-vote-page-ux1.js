@@ -57,7 +57,9 @@ function bindRoleNavigation() {
 }
 
 function promotionForCampaign(campaignId) {
-    return state.promotions.find(item => Number(item.campaignId) === Number(campaignId)) || null;
+    return state.promotions.find(item => Number(item.campaignId) === Number(campaignId))
+        || state.promotionHistory.find(item => Number(item.campaignId) === Number(campaignId))
+        || null;
 }
 
 function eligibilityBadgeMarkup(source, { eligible = false, discoveryOnly = false } = {}) {
@@ -694,9 +696,20 @@ async function refreshDiscoveryFromLatestSnapshot() {
     if (state.discoveryRefreshing || state.loading || state.screen !== 'list' || document.hidden || document.getElementById('safety-vote-page') !== state.page) return;
     state.discoveryRefreshing = true;
     try {
-        const response = await API.get('/safety-vote/me/campaigns', { suppressErrorLog: true });
+        const [response, promotions] = await Promise.all([
+            API.get('/safety-vote/me/campaigns', { suppressErrorLog: true }),
+            isSafetyVoteEngagementV1Enabled()
+                ? API.get('/safety-vote/me/promotions', { suppressErrorLog: true }).catch(() => null)
+                : Promise.resolve(null)
+        ]);
         state.campaigns = response.data.rows || [];
         state.catalogueMode = response.data.catalogueMode || 'legacy_discovery';
+        if (promotions) {
+            state.promotions = promotions.data?.rows || [];
+            state.promotionHistory = promotions.data?.history || [];
+            state.promotionAdminPreview = promotions.data?.adminPreview === true;
+            state.promotionIndex = Math.min(state.promotionIndex, Math.max(0, state.promotions.length - 1));
+        }
         if (state.screen === 'list') renderList();
     } catch (_) {
         // Preserve the last successful discovery view; the normal page load still surfaces hard failures.

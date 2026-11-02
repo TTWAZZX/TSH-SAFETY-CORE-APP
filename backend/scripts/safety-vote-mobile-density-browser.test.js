@@ -30,7 +30,7 @@ const markup = `<!doctype html>
       <li><button type="button"><span>3</span><strong>เสร็จสิ้น</strong></button></li>
     </ol></nav>
   </div>
-  <section style="min-height:900px"><h1>กิจกรรมทดสอบ</h1><p>พื้นที่เนื้อหา</p></section>
+  <section data-uat-last-content style="min-height:900px"><h1>กิจกรรมทดสอบ</h1><p>พื้นที่เนื้อหา</p></section>
   <footer class="svp-action-bar">
     <button type="button" class="sv-button sv-button--secondary">กลับกิจกรรมของฉัน</button>
     <button type="button" class="sv-button sv-button--primary">ตรวจคำตอบ</button>
@@ -46,6 +46,7 @@ const markup = `<!doctype html>
         for (const viewport of viewports) {
             const page = await browser.newPage({ viewport });
             await page.setContent(markup, { waitUntil: 'load' });
+            await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
             const result = await page.evaluate(() => {
                 const rect = selector => document.querySelector(selector).getBoundingClientRect();
                 const roleNav = rect('.sv-role-nav');
@@ -56,6 +57,7 @@ const markup = `<!doctype html>
                 const actionButtons = [...document.querySelectorAll('.svp-action-bar .sv-button')].map(item => item.getBoundingClientRect());
                 const launcher = rect('.johnny-global-launcher');
                 const bottomNav = rect('#bottom-tab-bar');
+                const lastContent = rect('[data-uat-last-content]');
                 const shellStyle = getComputedStyle(document.querySelector('.svp-shell'));
                 return {
                     overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
@@ -70,6 +72,7 @@ const markup = `<!doctype html>
                     actionRowDelta: Math.max(...actionButtons.map(item => item.top)) - Math.min(...actionButtons.map(item => item.top)),
                     launcherGap: actionBar.top - launcher.bottom,
                     actionAboveBottomNav: actionBar.bottom <= bottomNav.top + 1,
+                    lastContentAboveAction: lastContent.bottom <= actionBar.top + 1,
                     shellPaddingLeft: parseFloat(shellStyle.paddingLeft),
                     shellPaddingBottom: parseFloat(shellStyle.paddingBottom)
                 };
@@ -86,8 +89,9 @@ const markup = `<!doctype html>
             assert(result.actionBarHeight <= 58, `${viewport.name}: action bar too tall ${result.actionBarHeight}px`);
             assert(result.launcherGap >= 7, `${viewport.name}: Johnny overlaps action bar (${result.launcherGap}px)`);
             assert.strictEqual(result.actionAboveBottomNav, true, `${viewport.name}: mobile navigation covers the participant action bar`);
+            assert.strictEqual(result.lastContentAboveAction, true, `${viewport.name}: participant action bar covers the final content`);
             assert.strictEqual(result.shellPaddingLeft, 8, `${viewport.name}: shell gutter is not tokenized to 8px`);
-            assert(result.shellPaddingBottom >= 64, `${viewport.name}: shell does not reserve action-bar space`);
+            assert(result.shellPaddingBottom >= 124, `${viewport.name}: shell does not reserve action-bar and mobile-navigation space`);
             results.push({ viewport: viewport.name, ...result });
             await page.close();
         }
