@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Mobile Clearance & Promotion Cover Production Deployment (PASS, 2026-11-02)
+
+- Immutable commit `312480862baf796f4ddcb4e53cb0b3aed42068f7` was deployed to the PHP shared-hosting Production target from baseline `8a8e24ab799b4ea3c7745f336a933e7a7083252c` through a guarded six-file frontend allowlist.
+- Mobile participation pages now reserve the combined fixed-action and bottom-navigation height, so the final candidate/work/review content scrolls fully above the `กลับกิจกรรมของฉัน` / `ตรวจคำตอบ` action bar at 320, 390 and 430 px widths.
+- Campaign cards retain the latest promotion image after its display window expires, including company-wide authenticated viewers. Returning to the Safety Vote tab refreshes both campaign discovery and promotion schedules, so extending an expired promotion moves it back from history without a hard reload. Admin promotion badges now distinguish `กำลังแสดง`, `รอแสดง`, `สิ้นสุดเวลา`, Draft and Archived states from the stored publication state.
+- Static/Node/PHP parity, Phase 7 Final Acceptance, three-viewport mobile Browser regression and 390/1366 promotion image Browser regression passed. Remote pre-deploy double-download drift checks passed; deployed download-back SHA-256 matched `6/6`, public HTTPS SHA-256 matched `6/6`, and public health returned `200` before and after deployment.
+- Rollback evidence: `backups/production/safety-vote-mobile-promotion-r1-deploy-20261102112235/`; rollback manifest SHA-256 `3f9e90d9c15359227851b73dcd3125a2c29ff81f06cae51e67cdd3ec6a947ae8`, result SHA-256 `4ae48c9f4c29edd3c5db15907a4c6e707f49ffa14553a30fd00cfc500222f0af`. No schema, database, business-data or notification mutation occurred; no Production login was attempted and rollback was not required. Decision: `PASS_SAFETY_VOTE_MOBILE_PROMOTION_R1_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Patrol Top & Management Extra Advance Production Deployment (PASS, 2026-11-02)
 
 - Immutable commit `6eaaa0cff031a8e016eb73f31a724ea7c8151bdd` was deployed to the PHP shared-hosting Production target from baseline `b5540ada7c1ab49d8b16cca87d55a7ee5249f3a7` through the guarded workflow.
