@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Governed Deadline Extension Production Deployment (PASS, 2026-11-02)
+
+- Immutable commit `16b0806324f3483a2af8711642bce1c7918fa647` was deployed to the PHP shared-hosting Production target from runtime baseline `cc370b49d3a7c0d240af9be125cacdf3faaf7f4a` through the guarded workflow.
+- Admin can extend an active campaign without losing ballots, submissions, Jury work or linked published promotions. A Closed campaign with zero result snapshots can be explicitly reopened with `REOPEN <CampaignCode>`; Certified, Published or snapshot-bearing campaigns remain fail-closed behind the existing non-destructive next-cycle workflow.
+- Campaign and active-version close times update transactionally with row-version guards, locked immutable-result checks and an audit trail. Promotion schedules remain independently selectable, and Bangkok timestamp normalization is consistent across Node, PHP and promotion rendering.
+- Remote double-download drift checks passed; deployed download-back SHA-256 matched `11/11` and public HTTPS SHA-256 matched `6/6`. Authenticated post-deploy health remained ready at schema `2026-10-25-jury-work-items-atomic-media-r1`, all 8 campaigns remained present, and read-only deadline-extension preview passed for both Open campaigns with `extend_active` and zero mutations.
+- Rollback evidence: `backups/production/safety-vote-deadline-extension-r1-deploy-20261102115750/`; rollback manifest SHA-256 `ae471526da1e0daf03c15726d9a1b4bc0c7f161f8b354a4d77081b29f75f3aa3`, result SHA-256 `2b01a4038c6dad06d9205a43ea0438eb95c8658bedd02865add2ff3200b948d3`. No schema migration, business-data mutation, notification delivery or external-delivery change occurred, and rollback was not required. Decision: `PASS_SAFETY_VOTE_DEADLINE_EXTENSION_R1_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Mobile Clearance & Promotion Cover Production Deployment (PASS, 2026-11-02)
 
 - Immutable commit `312480862baf796f4ddcb4e53cb0b3aed42068f7` was deployed to the PHP shared-hosting Production target from baseline `8a8e24ab799b4ea3c7745f336a933e7a7083252c` through a guarded six-file frontend allowlist.
