@@ -1,5 +1,12 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Patrol Top & Management Extra Advance Production Deployment (PASS, 2026-11-02)
+
+- Immutable commit `6eaaa0cff031a8e016eb73f31a724ea7c8151bdd` was deployed to the PHP shared-hosting Production target from baseline `b5540ada7c1ab49d8b16cca87d55a7ee5249f3a7` through the guarded workflow.
+- Production uploaded exactly `api/handlers/patrol.php`, `public/js/pages/patrol.js`, `public/js/main.js` and `index.html`. Remote double-download drift checks passed, deployed download-back SHA-256 matched `4/4`, and public HTTPS SHA-256 matched `3/3` frontend files.
+- The additive runtime initializer made nullable `Patrol_Attendance.CheckinMode` ready while preserving historical attendance. Authenticated disabled-state smoke passed before the audited `patrol_extra_advance_enabled` activation; enabled-state Admin feature and eligible-session endpoints both returned `200` with the feature enabled.
+- No Production Attendance row was created, no notification was sent, no external-delivery setting changed and rollback was not required. Rollback evidence: `backups/production/patrol-extra-advance-r1-deploy-20261102100238/`; manifest SHA-256 `7866f03f49f1a1c6c77ffc8babe70d81e859201415acc191a5522cc65fc8281c`, result SHA-256 `4a5ba126402f33ffb53dd206e843f19d6ea17a7d9ae356667f55ac1bfe24bd17`. Decision: `PASS_PATROL_EXTRA_ADVANCE_R1_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Patrol Top & Management Extra Advance Coverage (PASS, Local only, 2026-11-02)
 
 - Top & Management retains Scheduled, Makeup and Extra. With `patrol_extra_advance_enabled=1`, Extra requires an exact future `Patrol_Sessions` round in the current or next month and resolves the employee's effective target-month Team/Member Rotation, including December to January.

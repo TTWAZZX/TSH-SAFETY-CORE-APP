@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-11-02 - Safety Patrol Extra Advance Production deployment
+
+- Deployed immutable commit `6eaaa0cff031a8e016eb73f31a724ea7c8151bdd` with the exact four-file PHP/frontend runtime allowlist after remote drift verification and rollback-package creation.
+- Download-back SHA-256 matched 4/4 files and public HTTPS SHA-256 matched all three frontend files. Schema readiness and disabled-state smoke passed before audited activation of `patrol_extra_advance_enabled`; enabled-state endpoints returned `200`.
+- No Production Attendance, notification or external-delivery mutation occurred. Rollback was not required. Decision: `PASS_PATROL_EXTRA_ADVANCE_R1_PRODUCTION_DEPLOYMENT`.
+
 ## 2026-11-02 - Safety Patrol Top & Management Extra Advance Coverage (Local only)
 
 - Added default-OFF linked Extra coverage for Top & Management. A user can walk today and select an exact future round in the current or next month, including year rollover, using the target month's effective Team/Member Rotation.
