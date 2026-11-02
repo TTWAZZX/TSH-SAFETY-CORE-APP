@@ -44,6 +44,7 @@ const {
         'ALTER TABLE Patrol_Attendance ADD COLUMN Area VARCHAR(200) DEFAULT NULL',
         'ALTER TABLE Master_Positions ADD COLUMN PatrolPassPct INT DEFAULT 80',
         'ALTER TABLE Patrol_Attendance ADD COLUMN PatrolType VARCHAR(20) DEFAULT NULL',
+        'ALTER TABLE Patrol_Attendance ADD COLUMN CheckinMode VARCHAR(20) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN RecordedBy VARCHAR(50) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN ScheduledSessionID VARCHAR(50) DEFAULT NULL',
         'ALTER TABLE Patrol_Attendance ADD COLUMN CheckinAt DATETIME DEFAULT NULL',
@@ -81,6 +82,7 @@ const {
     ]) { try { await db.query(sql); } catch (_) {} }
     try {
         await db.query("INSERT INTO App_Settings (key_name,value) VALUES ('patrol_checkin_v2_enabled','0') ON DUPLICATE KEY UPDATE value=value");
+        await db.query("INSERT INTO App_Settings (key_name,value) VALUES ('patrol_extra_advance_enabled','0') ON DUPLICATE KEY UPDATE value=value");
     } catch (_) {}
 
     // Note: imported MySQL-compatible schemas may not allow changing this AUTO_INCREMENT safely.
@@ -507,6 +509,28 @@ async function patrolCheckinV2Enabled() {
     }
 }
 
+async function patrolExtraAdvanceEnabled() {
+    try {
+        const [[row]] = await db.query(
+            "SELECT value FROM App_Settings WHERE key_name='patrol_extra_advance_enabled' LIMIT 1"
+        );
+        return String(row?.value || '0') === '1' && await patrolExtraAdvanceSchemaReady();
+    } catch {
+        return false;
+    }
+}
+
+async function patrolExtraAdvanceSchemaReady() {
+    try {
+        const [[row]] = await db.query(
+            "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema=DATABASE() AND LOWER(table_name)='patrol_attendance' AND column_name='CheckinMode'"
+        );
+        return Number(row?.count || 0) === 1;
+    } catch {
+        return false;
+    }
+}
+
 function patrolIdempotencyKey(value) {
     const key = String(value || '').trim();
     return /^[A-Za-z0-9][A-Za-z0-9:_-]{15,79}$/.test(key) ? key : null;
@@ -534,6 +558,19 @@ function patrolActualActivity(records = [], sessionMap = new Map()) {
     const scheduledDates = new Set([...sessionMap.values()].map(session => dateOnly(session.PatrolDate)));
     for (const record of records) {
         summary.total++;
+        const explicitMode = String(record.CheckinMode || '').trim().toLowerCase();
+        if (explicitMode === 'extra') {
+            summary.extra++;
+            continue;
+        }
+        if (explicitMode === 'makeup') {
+            summary.makeup++;
+            continue;
+        }
+        if (explicitMode === 'scheduled') {
+            summary.scheduledNormal++;
+            continue;
+        }
         const sid = String(record.ScheduledSessionID || '').trim();
         if (!sid) {
             if (record.IsV2Request || !scheduledDates.has(dateOnly(record.PatrolDate))) summary.extra++;
@@ -581,6 +618,7 @@ router.get('/my-monthly-plan', async (req, res) => {
 
         const personalSchedule = await buildPersonalMonthlySchedule(employeeId, ym.year, ym.month);
         const checkinV2Enabled = await patrolCheckinV2Enabled();
+        const extraAdvanceEnabled = checkinV2Enabled && await patrolExtraAdvanceEnabled();
         const sessions = personalSchedule.items;
         const required = personalSchedule.items;
         const attendance = personalSchedule.attendance;
@@ -613,7 +651,7 @@ router.get('/my-monthly-plan', async (req, res) => {
                 attended: personalSchedule.completed,
                 attendanceDates,
                 actualActivity: personalSchedule.actualActivity,
-                features: { checkinV2Enabled },
+                features: { checkinV2Enabled, extraAdvanceEnabled },
                 roster,
                 compliance: {
                     required: personalSchedule.required,
@@ -700,9 +738,11 @@ router.get('/my-yearly-stats', async (req, res) => {
         const [monthlyAtt] = await db.query(
             `SELECT MONTH(PatrolDate) AS month,
                     COUNT(*) AS cnt,
-                    SUM(CASE WHEN LOWER(COALESCE(PatrolType, 'normal')) = 'compensation' THEN 1 ELSE 0 END) AS makeup,
-                    SUM(CASE WHEN LOWER(COALESCE(PatrolType, 'normal')) = 'extra'
-                              OR (ScheduledSessionID IS NULL AND IdempotencyKey IS NOT NULL)
+                    SUM(CASE WHEN LOWER(COALESCE(CheckinMode, '')) = 'makeup'
+                                  OR (CheckinMode IS NULL AND LOWER(COALESCE(PatrolType, 'normal')) = 'compensation') THEN 1 ELSE 0 END) AS makeup,
+                    SUM(CASE WHEN LOWER(COALESCE(CheckinMode, '')) = 'extra'
+                                  OR (CheckinMode IS NULL AND (LOWER(COALESCE(PatrolType, 'normal')) = 'extra'
+                                  OR (ScheduledSessionID IS NULL AND IdempotencyKey IS NOT NULL)))
                              THEN 1 ELSE 0 END) AS extra
              FROM Patrol_Attendance
              WHERE UserID = ? AND YEAR(PatrolDate) = ?
@@ -967,6 +1007,7 @@ router.post('/checkin', async (req, res) => {
         const Notes     = req.body.Notes?.trim() || null;
         let Area      = req.body.Area?.trim()  || null;
         const checkinV2Enabled = await patrolCheckinV2Enabled();
+        const extraAdvanceEnabled = checkinV2Enabled && await patrolExtraAdvanceEnabled();
         const ALLOWED_PATROL_TYPES = ['normal', 'compensation'];
         let PatrolType = ALLOWED_PATROL_TYPES.includes(req.body.PatrolType || 'normal') ? (req.body.PatrolType || 'normal') : null;
         if (!PatrolType) {
@@ -983,7 +1024,10 @@ router.post('/checkin', async (req, res) => {
         if (mode === 'makeup' && !String(req.body.ScheduledSessionID || '').trim()) {
             return res.status(400).json({ success: false, message: 'ScheduledSessionID is required for makeup patrol.' });
         }
-        if (checkinV2Enabled && mode === 'extra' && String(req.body.ScheduledSessionID || '').trim()) {
+        if (extraAdvanceEnabled && mode === 'extra' && !String(req.body.ScheduledSessionID || '').trim()) {
+            return res.status(400).json({ success: false, code: 'PATROL_EXTRA_ADVANCE_SESSION_REQUIRED', message: 'ScheduledSessionID is required for Extra advance patrol.' });
+        }
+        if (checkinV2Enabled && !extraAdvanceEnabled && mode === 'extra' && String(req.body.ScheduledSessionID || '').trim()) {
             return res.status(400).json({ success: false, message: 'Extra patrol must not be linked to a scheduled round.' });
         }
         // PatrolDate: user may supply an explicit date for compensation patrol (same year only)
@@ -1035,9 +1079,9 @@ router.post('/checkin', async (req, res) => {
         }
 
         const currentWeek = getWeekNumber(new Date(`${effectiveDate}T12:00:00`));
-        const { session } = mode === 'extra'
+        const { session } = mode === 'extra' && !extraAdvanceEnabled
             ? { session: null }
-            : await resolveTopScheduledSession(UserID, effectiveDate, req.body.ScheduledSessionID, { checkinV2Enabled, mode });
+            : await resolveTopScheduledSession(UserID, effectiveDate, req.body.ScheduledSessionID, { checkinV2Enabled, extraAdvanceEnabled, mode });
         if (checkinV2Enabled && mode === 'scheduled' && !session) {
             return res.status(409).json({ success: false, code: 'PATROL_SCHEDULE_NOT_FOUND', message: 'No scheduled Patrol round is assigned to this user today.' });
         }
@@ -1045,12 +1089,44 @@ router.post('/checkin', async (req, res) => {
         const TeamName = effectiveTeam?.TeamName || req.user.team || '';
         if (!Area && session) Area = session.AreaName || session.AreaCode || null;
         let insert;
+        let advanceConnection = null;
         try {
-            [insert] = await db.query(
-                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, PatrolDate, CheckinAt, RecordedBy, ScheduledSessionID, IdempotencyKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, effectiveDate, checkinAt, UserID, session?.id || null, idempotencyKey]
+            const queryable = extraAdvanceEnabled && mode === 'extra' ? await db.getConnection() : db;
+            if (queryable !== db) {
+                advanceConnection = queryable;
+                await advanceConnection.beginTransaction();
+                const [[lockedSession]] = await advanceConnection.query(
+                    'SELECT SessionID,PatrolDate,Status FROM Patrol_Sessions WHERE SessionID=? FOR UPDATE',
+                    [session.id]
+                );
+                if (!lockedSession || String(lockedSession.Status || '').toLowerCase() === 'cancelled' || dateOnly(lockedSession.PatrolDate) !== dateOnly(session.PatrolDate)) {
+                    const err = new Error('Selected schedule changed and is no longer available.');
+                    err.statusCode = 409;
+                    err.code = 'PATROL_EXTRA_ADVANCE_SESSION_CHANGED';
+                    throw err;
+                }
+                const [[lockedAttendance]] = await advanceConnection.query(
+                    'SELECT id FROM Patrol_Attendance WHERE UserID=? AND ScheduledSessionID=? LIMIT 1 FOR UPDATE',
+                    [UserID, session.id]
+                );
+                const [[lockedLeave]] = await advanceConnection.query(
+                    "SELECT id FROM Patrol_Leave_Requests WHERE EmployeeID=? AND RosterGroup='top_management' AND ScheduledSessionID=? AND Status IN ('Pending','Approved') LIMIT 1 FOR UPDATE",
+                    [UserID, session.id]
+                );
+                if (lockedAttendance || lockedLeave) {
+                    const err = new Error(lockedAttendance ? 'Selected schedule is already completed.' : 'Selected schedule already has a pending/approved leave request.');
+                    err.statusCode = 409;
+                    err.code = lockedAttendance ? 'PATROL_SESSION_ALREADY_COMPLETED' : 'PATROL_SESSION_LEAVE_BLOCKED';
+                    throw err;
+                }
+            }
+            [insert] = await queryable.query(
+                'INSERT INTO Patrol_Attendance (UserID, UserName, TeamName, WeekNumber, Notes, Area, PatrolType, CheckinMode, PatrolDate, CheckinAt, RecordedBy, ScheduledSessionID, IdempotencyKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [UserID, UserName, TeamName, currentWeek, Notes, Area, PatrolType, checkinV2Enabled ? mode : null, effectiveDate, checkinAt, UserID, session?.id || null, idempotencyKey]
             );
+            if (advanceConnection) await advanceConnection.commit();
         } catch (err) {
+            if (advanceConnection) await advanceConnection.rollback().catch(() => {});
             if (checkinV2Enabled && idempotencyKey && err.code === 'ER_DUP_ENTRY') {
                 const [[replayed]] = await db.query(
                     `SELECT id,UserName,TeamName,PatrolDate,CheckinAt,PatrolType,Area,ScheduledSessionID
@@ -1088,6 +1164,8 @@ router.post('/checkin', async (req, res) => {
                 }
             }
             throw err;
+        } finally {
+            if (advanceConnection) advanceConnection.release();
         }
         const attendanceId = insert.insertId;
         const attendance = { id: attendanceId, UserID, UserName, TeamName, PatrolDate: effectiveDate, PatrolType, Area, Notes, ScheduledSessionID: session?.id || null };
@@ -1124,7 +1202,8 @@ router.post('/checkin', async (req, res) => {
                     actualDate: effectiveDate,
                     checkinAt: stats[0].LastCheckinAt || checkinAt,
                     scheduledDate: session ? dateOnly(session.PatrolDate) : effectiveDate,
-                    isMakeup: Boolean(session) && dateOnly(session.PatrolDate) !== effectiveDate,
+                    isMakeup: mode === 'makeup',
+                    isExtraAdvance: mode === 'extra' && Boolean(session),
                     scheduledSessionId: session?.id || null,
                     round: session?.PatrolRound || null,
                     area: Area,
@@ -2379,6 +2458,10 @@ router.put('/sessions/:id', isAdmin, async (req, res) => {
         let targetDate = dateOnly(session.PatrolDate);
         const targetTeam = session.TeamID;
         const targetRound = session.PatrolRound;
+        const [[linkedAttendance]] = await db.query('SELECT id FROM Patrol_Attendance WHERE ScheduledSessionID=? LIMIT 1', [req.params.id]);
+        if (linkedAttendance && (Object.prototype.hasOwnProperty.call(req.body, 'PatrolDate') || String(Status || '').toLowerCase() === 'cancelled')) {
+            return res.status(409).json({ success: false, code: 'PATROL_SESSION_HAS_ATTENDANCE', message: 'A session with attendance cannot be moved or cancelled.' });
+        }
 
         if (PatrolDate) {
             const parsedDate = parseDateInput(PatrolDate);
@@ -2419,6 +2502,10 @@ router.patch('/sessions/:id/toggle-cancel', isAdmin, async (req, res) => {
         const [[sess]] = await db.query('SELECT Status FROM Patrol_Sessions WHERE SessionID = ?', [req.params.id]);
         if (!sess) return res.status(404).json({ success: false, message: 'ไม่พบ session' });
         const newStatus = sess.Status === 'Cancelled' ? 'Pending' : 'Cancelled';
+        if (newStatus === 'Cancelled') {
+            const [[attendance]] = await db.query('SELECT id FROM Patrol_Attendance WHERE ScheduledSessionID=? LIMIT 1', [req.params.id]);
+            if (attendance) return res.status(409).json({ success: false, code: 'PATROL_SESSION_HAS_ATTENDANCE', message: 'A session with attendance cannot be cancelled.' });
+        }
         await db.query('UPDATE Patrol_Sessions SET Status = ? WHERE SessionID = ?', [newStatus, req.params.id]);
         res.json({ success: true, status: newStatus });
     } catch (err) {
@@ -2429,6 +2516,8 @@ router.patch('/sessions/:id/toggle-cancel', isAdmin, async (req, res) => {
 // DELETE /api/patrol/sessions/:id — ลบ session (Admin)
 router.delete('/sessions/:id', isAdmin, async (req, res) => {
     try {
+        const [[attendance]] = await db.query('SELECT id FROM Patrol_Attendance WHERE ScheduledSessionID=? LIMIT 1', [req.params.id]);
+        if (attendance) return res.status(409).json({ success: false, code: 'PATROL_SESSION_HAS_ATTENDANCE', message: 'A session with attendance cannot be deleted.' });
         const [result] = await db.query('DELETE FROM Patrol_Sessions WHERE SessionID = ?', [req.params.id]);
         if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'ไม่พบ session' });
         res.json({ success: true, message: 'ลบ session เรียบร้อย' });
@@ -2780,6 +2869,45 @@ async function topManagementSessionsForEmployee(employeeId, year) {
     }).map(s => ({ ...s, PatrolDate: dateOnly(s.PatrolDate) }));
 }
 
+function patrolNextYearMonth(year, month) {
+    return month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
+}
+
+async function patrolExtraAdvanceSessions(employeeId, today = patrolTodayBangkok()) {
+    const current = { year: Number(today.slice(0, 4)), month: Number(today.slice(5, 7)) };
+    const next = patrolNextYearMonth(current.year, current.month);
+    const targetMonths = new Set([
+        `${current.year}-${String(current.month).padStart(2, '0')}`,
+        `${next.year}-${String(next.month).padStart(2, '0')}`,
+    ]);
+    const sessions = [];
+    for (const year of [...new Set([current.year, next.year])]) sessions.push(...await topManagementSessionsForEmployee(employeeId, year));
+    const [completedRows] = await db.query(
+        `SELECT DISTINCT ScheduledSessionID FROM Patrol_Attendance
+          WHERE UserID=? AND ScheduledSessionID IS NOT NULL AND ScheduledSessionID<>''`,
+        [employeeId]
+    );
+    const completed = new Set(completedRows.map(row => String(row.ScheduledSessionID)));
+    const leaveRows = [];
+    for (const year of [...new Set([current.year, next.year])]) leaveRows.push(...await patrolLeaveRows(employeeId, 'top_management', year));
+    const blockedSession = new Set(leaveRows.filter(isPatrolLeaveBlocking).map(row => String(row.ScheduledSessionID || '')).filter(Boolean));
+    const blockedDate = new Set(leaveRows.filter(row => isPatrolLeaveBlocking(row) && !String(row.ScheduledSessionID || '').trim()).map(row => dateOnly(row.ScheduledDate)).filter(Boolean));
+    return sessions.filter(session => {
+        const scheduledDate = dateOnly(session.PatrolDate);
+        return scheduledDate > today
+            && targetMonths.has(scheduledDate.slice(0, 7))
+            && !completed.has(String(session.id))
+            && !blockedSession.has(String(session.id))
+            && !blockedDate.has(scheduledDate);
+    }).map(session => ({
+        ...session,
+        SessionID: session.id,
+        ScheduledSessionID: session.id,
+        ScheduledDate: dateOnly(session.PatrolDate),
+        PatrolDate: dateOnly(session.PatrolDate),
+    }));
+}
+
 async function patrolBaseMembership(employeeId) {
     const [rows] = await db.query(
         `SELECT tm.TeamID,tm.PatrolType,t.Name AS TeamName,t.PatrolGroup,t.Color
@@ -2820,7 +2948,7 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
     const leaveRows = (await patrolLeaveRows(employeeId, 'top_management', year))
         .filter(row => Number(dateOnly(row.ScheduledDate).slice(5, 7)) === Number(month));
     const [attendance] = await db.query(
-        `SELECT id,PatrolDate,CheckinAt,PatrolType,Area,Notes,RecordedBy,ScheduledSessionID,(IdempotencyKey IS NOT NULL) AS IsV2Request
+        `SELECT id,PatrolDate,CheckinAt,PatrolType,CheckinMode,Area,Notes,RecordedBy,ScheduledSessionID,(IdempotencyKey IS NOT NULL) AS IsV2Request
            FROM Patrol_Attendance
          WHERE UserID=? AND YEAR(PatrolDate)=? AND MONTH(PatrolDate)=?
          ORDER BY PatrolDate,id`,
@@ -2830,7 +2958,7 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
     const sessionIds = sessions.map(session => String(session.id));
     if (sessionIds.length) {
         [linkedAttendance] = await db.query(
-            `SELECT id,PatrolDate,CheckinAt,PatrolType,Area,Notes,RecordedBy,ScheduledSessionID,(IdempotencyKey IS NOT NULL) AS IsV2Request
+            `SELECT id,PatrolDate,CheckinAt,PatrolType,CheckinMode,Area,Notes,RecordedBy,ScheduledSessionID,(IdempotencyKey IS NOT NULL) AS IsV2Request
                FROM Patrol_Attendance
               WHERE UserID=? AND ScheduledSessionID IN (${sessionIds.map(() => '?').join(',')})
               ORDER BY PatrolDate,id`,
@@ -2865,7 +2993,9 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
             ...r,
             scheduledDate,
             actualDate: dateOnly(r.PatrolDate),
-            isMakeup: Boolean(r.ScheduledSessionID) && dateOnly(r.PatrolDate) !== scheduledDate,
+            isMakeup: String(r.CheckinMode || '').toLowerCase() === 'makeup'
+                || (!r.CheckinMode && Boolean(r.ScheduledSessionID) && dateOnly(r.PatrolDate) !== scheduledDate),
+            isExtraAdvance: String(r.CheckinMode || '').toLowerCase() === 'extra' && Boolean(r.ScheduledSessionID),
         }));
         const isCompleted = records.length > 0;
         if (isCompleted) completed++;
@@ -2881,6 +3011,7 @@ async function buildPersonalMonthlySchedule(employeeId, year, month) {
             isCompleted,
             actualDate: records[0]?.actualDate || null,
             isMakeup: Boolean(records[0]?.isMakeup),
+            isExtraAdvance: Boolean(records[0]?.isExtraAdvance),
             records,
         };
     });
@@ -3541,6 +3672,20 @@ async function resolveTopScheduledSession(employeeId, date, requestedSessionId, 
             err.code = 'PATROL_FUTURE_MAKEUP_NOT_ALLOWED';
             throw err;
         }
+        if (options.extraAdvanceEnabled && options.mode === 'extra') {
+            const actual = { year: Number(date.slice(0, 4)), month: Number(date.slice(5, 7)) };
+            const next = patrolNextYearMonth(actual.year, actual.month);
+            const allowedMonths = new Set([
+                `${actual.year}-${String(actual.month).padStart(2, '0')}`,
+                `${next.year}-${String(next.month).padStart(2, '0')}`,
+            ]);
+            if (scheduledDate <= date || !allowedMonths.has(scheduledDate.slice(0, 7))) {
+                const err = new Error('Extra advance patrol must select a future round in the current or next month.');
+                err.statusCode = 400;
+                err.code = 'PATROL_EXTRA_ADVANCE_DATE_NOT_ALLOWED';
+                throw err;
+            }
+        }
     } else {
         const matches = sessions.filter(s => dateOnly(s.PatrolDate) === date);
         if (matches.length === 1) session = matches[0];
@@ -3607,7 +3752,7 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     const sessions = await topManagementSessionsForEmployee(employeeId, year);
     const leaveRows = await patrolLeaveRows(employeeId, 'top_management', year);
     const [attendance] = await db.query(
-        `SELECT pa.id,pa.PatrolDate,pa.CheckinAt,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
+        `SELECT pa.id,pa.PatrolDate,pa.CheckinAt,pa.PatrolType,pa.CheckinMode,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
          FROM Patrol_Attendance pa
          LEFT JOIN Employees e ON e.EmployeeID=pa.RecordedBy
          WHERE pa.UserID=? AND YEAR(pa.PatrolDate)=?
@@ -3623,7 +3768,7 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     const sessionIds = sessions.map(session => String(session.id));
     if (sessionIds.length) {
         [linkedAttendance] = await db.query(
-            `SELECT pa.id,pa.PatrolDate,pa.CheckinAt,pa.PatrolType,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
+            `SELECT pa.id,pa.PatrolDate,pa.CheckinAt,pa.PatrolType,pa.CheckinMode,pa.Area,pa.Notes,pa.RecordedBy,pa.ScheduledSessionID,(pa.IdempotencyKey IS NOT NULL) AS IsV2Request,e.EmployeeName AS RecordedByName
                FROM Patrol_Attendance pa
                LEFT JOIN Employees e ON e.EmployeeID=pa.RecordedBy
               WHERE pa.UserID=? AND pa.ScheduledSessionID IN (${sessionIds.map(() => '?').join(',')})
@@ -3665,7 +3810,9 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
             ...r,
             scheduledDate: date,
             actualDate: dateOnly(r.PatrolDate),
-            isMakeup: Boolean(r.ScheduledSessionID) && dateOnly(r.PatrolDate) !== date,
+            isMakeup: String(r.CheckinMode || '').toLowerCase() === 'makeup'
+                || (!r.CheckinMode && Boolean(r.ScheduledSessionID) && dateOnly(r.PatrolDate) !== date),
+            isExtraAdvance: String(r.CheckinMode || '').toLowerCase() === 'extra' && Boolean(r.ScheduledSessionID),
         }));
         const done = Boolean(itemRecords.length);
         const due = date <= cutoff;
@@ -3693,7 +3840,8 @@ async function buildTopManagementAttendanceDetail(employeeId, year) {
     });
     const scheduleWithLeave = attachLeaveToScheduledItems(schedule, leaveRows);
     const scheduledDates = new Set(schedule.map(s => s.date));
-    const extraRecords = records.filter(r => !r.ScheduledSessionID && (r.IsV2Request || !scheduledDates.has(r.PatrolDate)));
+    const extraRecords = records.filter(r => String(r.CheckinMode || '').toLowerCase() === 'extra'
+        || (!r.ScheduledSessionID && (r.IsV2Request || !scheduledDates.has(r.PatrolDate))));
     const actualActivity = patrolActualActivity(records, new Map(sessions.map(session => [String(session.id), session])));
     const yearlyTarget = Number(roster.TargetPerYear || 0);
     const leaveStats = patrolLeaveStats({
@@ -4858,6 +5006,30 @@ router.get('/my-missed-sessions', async (req, res) => {
     } catch (err) {
         sendPatrolError(res, err);
     }
+});
+
+router.get('/my-extra-advance-sessions', async (req, res) => {
+    try {
+        const enabled = await patrolCheckinV2Enabled() && await patrolExtraAdvanceEnabled();
+        if (!enabled) return res.json({ success: true, data: [], meta: { enabled: false } });
+        const rows = await patrolExtraAdvanceSessions(req.user.id);
+        res.json({ success: true, data: rows, meta: { enabled: true, window: 'current_and_next_month' } });
+    } catch (err) {
+        sendPatrolError(res, err);
+    }
+});
+
+router.get('/admin/extra-advance-feature', isAdmin, async (req, res) => {
+    res.json({ success: true, data: { enabled: await patrolExtraAdvanceEnabled(), schemaReady: await patrolExtraAdvanceSchemaReady() } });
+});
+
+router.put('/admin/extra-advance-feature', isAdmin, async (req, res) => {
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== 'boolean') return res.status(400).json({ success: false, message: 'enabled must be boolean.' });
+    if (enabled && !await patrolExtraAdvanceSchemaReady()) return res.status(409).json({ success: false, code:'PATROL_EXTRA_ADVANCE_SCHEMA_NOT_READY', message:'CheckinMode schema is not ready.' });
+    await db.query("INSERT INTO App_Settings(key_name,value) VALUES('patrol_extra_advance_enabled',?) ON DUPLICATE KEY UPDATE value=VALUES(value)", [enabled ? '1' : '0']);
+    await logAudit(req, { module:'patrol', action:'SET_PATROL_EXTRA_ADVANCE_FEATURE', targetType:'App_Settings', targetId:'patrol_extra_advance_enabled', detail:`enabled=${enabled}` });
+    res.json({ success: true, data: { enabled } });
 });
 // GET /api/patrol/supervisor-checkins?employeeId=X&year=Y — รายการ Self-Patrol รายบุคคล (admin/modal view)
 router.get('/supervisor-checkins', async (req, res) => {

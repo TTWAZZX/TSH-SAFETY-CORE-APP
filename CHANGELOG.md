@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-11-02 - Safety Patrol Top & Management Extra Advance Coverage (Local only)
+
+- Added default-OFF linked Extra coverage for Top & Management. A user can walk today and select an exact future round in the current or next month, including year rollover, using the target month's effective Team/Member Rotation.
+- Scheduled Compliance closes in the target session month while Actual/Extra activity remains on the actual walk date. Nullable `CheckinMode` distinguishes linked Extra from Makeup without rewriting legacy attendance.
+- Added transactional session/attendance/leave locks, idempotent concurrency handling, leave/completed/cancelled/wrong-team rejection, and guards preventing a covered session from being moved, cancelled, or deleted.
+- Added Node/PHP parity, audited Admin flag control, five-viewport UI, additive/idempotent migration with flag-only rollback, guarded PHP shared-hosting deploy workflow, focused/static regressions, Node/PHP lifecycle UAT, Browser UAT, and zero fixture residue.
+- Production remains unchanged. Deployment and feature activation require a separate explicit approval.
+
 ## 2026-10-15 - Safety Vote promotion remediation and current Local data mirror
 
 - Fixed the silent Publish confirmation path, restored saved banner previews, moved ordering to automatic server allocation with Node/PHP parity, and retained expired eligible banners in a user-visible activity history linked back to campaigns.

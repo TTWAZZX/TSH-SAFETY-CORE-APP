@@ -99,6 +99,7 @@
     "test:dashboard-module-health-php": "npm --prefix backend run test:dashboard-module-health-php",
     "test:accident-recordable": "npm --prefix backend run test:accident-recordable",
     "audit:accident-recordable": "npm --prefix backend run audit:accident-recordable --",
+    "test:patrol-extra-advance": "npm --prefix backend run test:patrol-extra-advance",
     "test:personal-target-eligibility": "npm --prefix backend run test:personal-target-eligibility",
     "test:personal-target-runtime": "npm --prefix backend run test:personal-target-runtime",
     "test:personal-target-variants": "npm --prefix backend run test:personal-target-variants",

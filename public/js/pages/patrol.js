@@ -529,6 +529,11 @@ function patrolSessionMakeup(item = {}) {
     return patrolSessionRecords(item).some(r => r?.isMakeup === true || r?.PatrolType === 'compensation');
 }
 
+function patrolSessionExtraAdvance(item = {}) {
+    if (item.isExtraAdvance === true) return true;
+    return patrolSessionRecords(item).some(r => r?.isExtraAdvance === true || (String(r?.CheckinMode || '').toLowerCase() === 'extra' && r?.ScheduledSessionID));
+}
+
 function patrolSessionActualDate(item = {}) {
     return item.actualDate || patrolSessionRecords(item)[0]?.actualDate || '';
 }
@@ -1901,6 +1906,7 @@ function renderDashboard(container, data) {
                 const didAttend = patrolSessionCompleted(s) || attendedDates.has(dateKey);
                 const actualDate = patrolSessionActualDate(s);
                 const isMakeup = patrolSessionMakeup(s);
+                const isExtraAdvance = patrolSessionExtraAdvance(s);
 
                 let iconHtml, badgeHtml, rowCls;
                 if (isToday) {
@@ -1915,7 +1921,9 @@ function renderDashboard(container, data) {
                     iconHtml  = `<div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-100">
                       <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                     </div>`;
-                    badgeHtml = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">เข้าร่วมแล้ว</span>`;
+                    badgeHtml = isExtraAdvance
+                        ? `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">ทำล่วงหน้าด้วยการเดินเพิ่ม</span>`
+                        : `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">เข้าร่วมแล้ว</span>`;
                     rowCls    = '';
                 } else if (isPast) {
                     iconHtml  = `<div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-red-50">
@@ -1937,7 +1945,7 @@ function renderDashboard(container, data) {
                   <div class="flex-1 min-w-0">
                     <p class="text-xs font-semibold text-slate-700 truncate">${dStr}</p>
                     <p class="text-[10px] text-slate-400 truncate">${area}${s.PatrolRound ? ' · รอบ ' + s.PatrolRound : ''}${!isReq ? ' · <span class="text-slate-300">ไม่บังคับ</span>' : ''}</p>
-                    ${didAttend && isMakeup && actualDate ? `<p class="text-[9px] text-violet-500 mt-0.5">Actual: ${escHtml(actualDate)}</p>` : ''}
+                    ${didAttend && (isMakeup || isExtraAdvance) && actualDate ? `<p class="text-[9px] text-violet-500 mt-0.5">วันที่เดินจริง: ${escHtml(actualDate)}</p>` : ''}
                   </div>
                   ${badgeHtml}
                 </div>`;
@@ -4782,6 +4790,7 @@ function openCheckInModal() {
     const today    = new Date();
     const displayUser = patrolDisplayUser();
     const checkinV2Enabled = Boolean(_myPlan?.features?.checkinV2Enabled);
+    const extraAdvanceEnabled = checkinV2Enabled && Boolean(_myPlan?.features?.extraAdvanceEnabled);
 
     // ── ป้องกันเช็คอินซ้ำวันเดียวกัน ──────────────────────────────────────────
     const statsArr  = normalizeApiArray(window._lastStatsData || []);
@@ -4876,7 +4885,7 @@ function openCheckInModal() {
           <span>วันนี้ไม่ใช่วันเดินตรวจตามตาราง สามารถ Check-in ได้แต่จะนับเป็นการเดินนอกตาราง</span>
         </div>` : ''}
 
-        <p class="rounded-lg bg-violet-50 px-3 py-2 text-[10px] leading-relaxed text-violet-700">เดินเพิ่มนับเป็นกิจกรรมจริง แต่จะไม่เพิ่มความครบถ้วนของรอบบังคับ</p>
+        <p class="rounded-lg bg-violet-50 px-3 py-2 text-[10px] leading-relaxed text-violet-700">${extraAdvanceEnabled ? 'เดินเพิ่มต้องเลือกรอบอนาคตในเดือนนี้หรือเดือนถัดไป ระบบจะปิดรอบนั้นทันที และเก็บวันที่เดินจริงเป็นวันนี้' : 'เดินเพิ่มนับเป็นกิจกรรมจริง แต่จะไม่เพิ่มความครบถ้วนของรอบบังคับ'}</p>
 
         ${checkinV2Enabled ? `
         <input type="hidden" name="PatrolType" value="${initialMode === 'makeup' ? 'compensation' : 'normal'}">
@@ -4895,9 +4904,14 @@ function openCheckInModal() {
         </div>
         <div id="checkin-today-row" class="${initialMode === 'scheduled' ? '' : 'hidden'}">
           <label class="block text-xs font-semibold text-slate-500 mb-1.5">รอบตามตารางวันนี้ <span class="text-emerald-500">*</span></label>
-          <select name="TodayScheduledSessionID" id="checkin-today-select" onchange="window._onCheckinTodaySessionChange()" class="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+          <select name="TodayScheduledSessionID" id="checkin-today-select" onchange="window._onCheckinTodaySessionChange()" class="min-h-[44px] w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400">
             ${todaySessions.map(s => `<option value="${escHtml(patrolSessionId(s))}" data-area="${escHtml(s.AreaName || s.AreaCode || '')}" data-area-code="${escHtml(s.AreaCode || '')}">${escHtml(`${patrolDateOnly(s.PatrolDate)} · รอบ ${s.PatrolRound || '-'}${s.AreaName || s.AreaCode ? ' · ' + (s.AreaName || s.AreaCode) : ''}`)}</option>`).join('')}
           </select>
+        </div>
+        <div id="checkin-extra-row" class="hidden">
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">รอบอนาคตที่จะเดินเพิ่มแทน <span class="text-violet-500">*</span></label>
+          <div id="checkin-extra-wrap" class="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-400">เลือกรูปแบบ “เดินเพิ่ม” เพื่อโหลดรอบที่ใช้ได้</div>
+          <select name="ExtraScheduledSessionID" id="checkin-extra-select" onchange="window._onCheckinExtraSessionChange()" class="hidden min-h-[44px] w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-400"></select>
         </div>` : `
         <div class="grid grid-cols-2 gap-2">
           <label class="cursor-pointer"><input type="radio" name="PatrolType" value="normal" class="peer sr-only" checked onchange="window._onCheckinTypeChange(this.value)"><div class="p-3 rounded-xl border-2 border-slate-100 bg-white text-center peer-checked:border-emerald-500 peer-checked:bg-emerald-50"><p class="text-[11px] font-bold text-slate-700">ปกติ</p><p class="text-[9px] text-slate-400">Routine</p></div></label>
@@ -4915,7 +4929,7 @@ function openCheckInModal() {
               กำลังโหลดรอบที่ขาด...
             </div>
           </div>
-          <select name="ScheduledSessionID" id="checkin-missed-select" onchange="window._onCheckinSessionChange()" class="hidden w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-400 transition-all">
+          <select name="ScheduledSessionID" id="checkin-missed-select" onchange="window._onCheckinSessionChange()" class="hidden min-h-[44px] w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-400 transition-all">
             <option value="">— เลือกรอบที่ต้องการชดเชย —</option>
           </select>
         </div>
@@ -4923,7 +4937,7 @@ function openCheckInModal() {
         <!-- Area confirmation (Phase 2.2) -->
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1.5">พื้นที่ที่เดินตรวจ</label>
-          <select name="Area" id="checkin-area-select" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all">
+          <select name="Area" id="checkin-area-select" class="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 transition-all">
             <option value="">— ไม่ระบุ —</option>
             ${(_patrolAreas.length
               ? _patrolAreas
@@ -4947,6 +4961,7 @@ function openCheckInModal() {
           ยืนยันเช็คอิน
         </button>
       </form>`, 'max-w-md');
+    if (checkinV2Enabled) setTimeout(() => window._onCheckinTypeChange?.(initialMode), 0);
 }
 
 async function handleCheckInSubmit(e) {
@@ -4976,6 +4991,10 @@ async function handleCheckInSubmit(e) {
         const scheduledSessionId = fd.get('TodayScheduledSessionID') || e.target?.dataset?.todaySessionId || '';
         if (!scheduledSessionId) { showToast('กรุณาเลือกรอบตามตารางวันนี้', 'error'); return; }
         body.ScheduledSessionID = scheduledSessionId;
+    } else if (mode === 'extra' && _myPlan?.features?.extraAdvanceEnabled) {
+        const scheduledSessionId = fd.get('ExtraScheduledSessionID');
+        if (!scheduledSessionId) { showToast('กรุณาเลือกรอบอนาคตที่จะเดินเพิ่มแทน', 'error'); return; }
+        body.ScheduledSessionID = scheduledSessionId;
     } else {
         const todaySessionId = e.target?.dataset?.todaySessionId || '';
         if (!checkinV2Enabled && todaySessionId) body.ScheduledSessionID = todaySessionId;
@@ -5000,12 +5019,45 @@ window._onCheckinTypeChange = async function(val) {
     const wrap = document.getElementById('checkin-missed-wrap');
     const sel  = document.getElementById('checkin-missed-select');
     const todayRow = document.getElementById('checkin-today-row');
+    const extraRow = document.getElementById('checkin-extra-row');
+    const extraWrap = document.getElementById('checkin-extra-wrap');
+    const extraSelect = document.getElementById('checkin-extra-select');
     const hiddenType = document.querySelector('#checkin-form input[type="hidden"][name="PatrolType"]');
     if (!row) return;
 
     const isMakeup = val === 'compensation' || val === 'makeup';
     if (hiddenType) hiddenType.value = isMakeup ? 'compensation' : 'normal';
     if (todayRow) todayRow.classList.toggle('hidden', val !== 'scheduled');
+    if (extraRow) extraRow.classList.toggle('hidden', !(val === 'extra' && _myPlan?.features?.extraAdvanceEnabled));
+
+    if (val === 'extra' && _myPlan?.features?.extraAdvanceEnabled) {
+        row.classList.add('hidden');
+        if (sel) { sel.required = false; sel.value = ''; sel.classList.add('hidden'); }
+        if (extraSelect) { extraSelect.required = false; extraSelect.classList.add('hidden'); }
+        if (extraWrap) extraWrap.innerHTML = '<span class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-400 border-t-transparent"></span> กำลังโหลดรอบอนาคต...';
+        try {
+            const response = await API.get('/patrol/my-extra-advance-sessions');
+            const sessions = response?.data || [];
+            if (!sessions.length) {
+                if (extraWrap) extraWrap.textContent = 'ไม่มีรอบอนาคตที่สามารถใช้เดินเพิ่มได้ในเดือนนี้หรือเดือนถัดไป';
+                return;
+            }
+            if (extraSelect) {
+                extraSelect.innerHTML = '<option value="">— เลือกรอบอนาคต —</option>' + sessions.map(s => {
+                    const area = s.AreaName || s.AreaCode || '';
+                    return `<option value="${escHtml(s.id || s.ScheduledSessionID || '')}" data-area="${escHtml(area)}" data-area-code="${escHtml(s.AreaCode || '')}">${escHtml(`${patrolDateOnly(s.PatrolDate)} · รอบ ${s.PatrolRound || '-'}${area ? ' · ' + area : ''}`)}</option>`;
+                }).join('');
+                extraSelect.classList.remove('hidden');
+                extraSelect.required = true;
+            }
+            extraWrap?.classList.add('hidden');
+        } catch (error) {
+            if (extraWrap) extraWrap.textContent = 'โหลดรอบอนาคตไม่สำเร็จ กรุณาลองใหม่';
+        }
+        return;
+    }
+    if (extraSelect) { extraSelect.required = false; extraSelect.value = ''; extraSelect.classList.add('hidden'); }
+    extraWrap?.classList.remove('hidden');
 
     if (!isMakeup) {
         row.classList.add('hidden');
@@ -5083,6 +5135,14 @@ window._onCheckinSessionChange = function() {
     if (area && areaSel) patrolSetAreaSelectValue(areaSel, area, areaCode);
 };
 
+window._onCheckinExtraSessionChange = function() {
+    const sel = document.getElementById('checkin-extra-select');
+    const areaSel = document.getElementById('checkin-area-select');
+    const area = sel?.selectedOptions?.[0]?.dataset?.area || '';
+    const areaCode = sel?.selectedOptions?.[0]?.dataset?.areaCode || '';
+    if (area && areaSel) patrolSetAreaSelectValue(areaSel, area, areaCode);
+};
+
 function showCheckinSuccessScreen(patrolType, result = {}) {
     const checkin     = result.checkin || {};
     const now         = new Date();
@@ -5091,7 +5151,8 @@ function showCheckinSuccessScreen(patrolType, result = {}) {
     const email       = result.email || {};
     const displayUser = patrolDisplayUser();
     const areaName    = checkin.area || null;
-    const countsTowardCompliance = checkin.mode !== 'extra';
+    const sameDisplayedMonth = String(checkin.scheduledDate || '').slice(0, 7) === String(_myPlan?.sessions?.[0]?.PatrolDate || checkin.actualDate || '').slice(0, 7);
+    const countsTowardCompliance = checkin.mode !== 'extra' || (checkin.isExtraAdvance && sameDisplayedMonth);
     const newAttended = (compliance?.attended || 0) + (countsTowardCompliance ? 1 : 0);
     const required    = compliance?.required || 0;
     const nowDone     = newAttended >= required && required > 0;

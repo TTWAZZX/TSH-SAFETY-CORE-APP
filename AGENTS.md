@@ -1,5 +1,14 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Patrol Top & Management Extra Advance Coverage (PASS, Local only, 2026-11-02)
+
+- Top & Management retains Scheduled, Makeup and Extra. With `patrol_extra_advance_enabled=1`, Extra requires an exact future `Patrol_Sessions` round in the current or next month and resolves the employee's effective target-month Team/Member Rotation, including December to January.
+- Linked Extra keeps `PatrolDate`/`CheckinAt` on the actual Bangkok walk date, completes Scheduled Compliance in the target session month, and counts Actual/Extra activity only in the actual month. The calendar shows `ทำล่วงหน้าด้วยการเดินเพิ่ม` plus the actual date.
+- Nullable `Patrol_Attendance.CheckinMode` is authoritative for new Scheduled/Makeup/Extra records; `NULL` rows retain the legacy projection. Unlinked legacy Extra is unchanged while the default-OFF flag is disabled. `Patrol_Self_Checkin` is unchanged.
+- Target session, attendance and leave validation are transactionally locked; idempotency and unique user/session constraints remain authoritative. Sessions with attendance cannot be moved, cancelled or deleted.
+- Static/Node/PHP parity, PHP lint, additive/idempotent migration plus flag-only rollback, Node/PHP flag lifecycle and rejection/concurrency UAT, legacy Check-in v2 and Supervisor regressions, and Browser UAT at 390/430/768/1366/1920 pass with zero fixture residue.
+- Guarded PHP shared-hosting deployment is prepared with an exact four-file runtime allowlist, remote drift/download-back/HTTPS verification, rollback package and post-smoke audited activation. No Production connection, migration, deployment, flag activation, attendance mutation or notification delivery occurred.
+
 ## Safety Vote Jury Scoring UX and Promotion Media Production Deployment (PASS, 2026-10-28)
 
 - Immutable commit `4886262892fd1fdb6d57d32cbc355a36c795b832` was deployed to the PHP shared-hosting Production target from runtime baseline `5058212e9f78ed7e3235a6d5efd46cb55fee2b14`. The guarded release uploaded 8 allowlisted frontend/PHP runtime files after remote double-download drift checks, verified deployed SHA-256 `8/8`, matched public HTTPS SHA-256 `6/6` and created a verified rollback package.
@@ -1084,10 +1093,10 @@ Local-only CCCF delegation and BBS designer foundation migrations were applied a
 
 ## Safety Patrol Check-in v2 Constraints
 
-- Scheduled check-in must link one authorized Admin-created Patrol session. Makeup may complete an earlier missed session across month/year; Extra remains unlinked, counts only in Actual Walk Activity for the actual walk month, and never closes Scheduled Compliance.
+- Scheduled check-in must link one authorized Admin-created Patrol session. Makeup may complete an earlier missed session across month/year. Extra remains unlinked while `patrol_extra_advance_enabled=0`; when that flag is enabled, Top & Management Extra must link an eligible future session in the current/next month, closes that exact Scheduled Compliance round, and still counts Actual/Extra activity only in the actual walk month.
 - Team/Member Rotation and Patrol Sessions in System Control are the calendar authority. Preserve multiple same-day rounds, one base team per employee and historical Attendance without automatic repair.
 - Retry safety uses nullable `Patrol_Attendance.IdempotencyKey`, unique `(UserID,IdempotencyKey)` and unique `(UserID,ScheduledSessionID)`. A new idempotency key intentionally permits another Extra walk.
-- `patrol_checkin_v2_enabled` is the operational rollback flag. Disable it before runtime rollback; do not drop the additive column/indexes or delete Attendance history.
+- `patrol_checkin_v2_enabled` remains the broad Check-in v2 rollback flag. Disable `patrol_extra_advance_enabled` first for this feature before runtime rollback; do not drop additive columns/indexes or delete Attendance history.
 
 ## CCCF Form A Permanent Submit-on-behalf Constraints
 

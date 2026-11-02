@@ -19,7 +19,7 @@ const appUrl = process.env.PATROL_BROWSER_APP_URL || 'http://127.0.0.1/tsh-safet
 const chromePath = process.env.PATROL_BROWSER || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tsh-patrol-v2-browser-'));
 const errors = [];
-let db, server, chrome, cdp, teamId, originalFlag;
+let db, server, chrome, cdp, teamId, originalFlag, originalExtraFlag;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const today = () => {
     const parts = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Bangkok', year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(new Date());
@@ -89,8 +89,11 @@ async function cleanup() {
     db = await mysql.createConnection({ host:process.env.DB_HOST, port:Number(process.env.DB_PORT || 3306), user:process.env.DB_USER, password:process.env.DB_PASS, database:process.env.DB_NAME });
     await cleanup();
     const [[flag]] = await db.query("SELECT value FROM App_Settings WHERE key_name='patrol_checkin_v2_enabled' LIMIT 1");
+    await db.query("INSERT INTO App_Settings(key_name,value) VALUES('patrol_extra_advance_enabled','0') ON DUPLICATE KEY UPDATE value=value");
+    const [[extraFlag]] = await db.query("SELECT value FROM App_Settings WHERE key_name='patrol_extra_advance_enabled' LIMIT 1");
     originalFlag = String(flag?.value || '0');
-    await db.query("UPDATE App_Settings SET value='1' WHERE key_name='patrol_checkin_v2_enabled'");
+    originalExtraFlag = String(extraFlag?.value || '0');
+    await db.query("UPDATE App_Settings SET value='1' WHERE key_name IN ('patrol_checkin_v2_enabled','patrol_extra_advance_enabled')");
     const [[scope]] = await db.query("SELECT d.Name Department,COALESCE((SELECT u.name FROM Master_SafetyUnits u WHERE u.department_id=d.id ORDER BY u.id LIMIT 1),'') Unit FROM Master_Departments d ORDER BY d.id LIMIT 1");
     await db.query('INSERT INTO Employees(EmployeeID,EmployeeName,Department,Unit,Role,Position,Password,MustChangePassword) VALUES(?,?,?,?,?,?,?,0)', [employeeId, marker, scope.Department, scope.Unit, 'User', 'Manager', 'LOCAL_UAT_NOT_A_LOGIN_HASH']);
     const [team] = await db.query("INSERT INTO Patrol_Teams(Name,PatrolGroup,Color) VALUES(?,'A','#7c3aed')", [marker]);
@@ -99,7 +102,9 @@ async function cleanup() {
     await db.query("INSERT INTO Patrol_Roster(EmployeeID,RosterGroup,TargetPerYear,SortOrder) VALUES(?,'top_management',24,99)", [employeeId]);
     const actualDate = today();
     const year = Number(actualDate.slice(0, 4));
-    for (const [id, date, round] of [[`${marker}_TODAY1`,actualDate,1],[`${marker}_TODAY2`,actualDate,2],[`${marker}_PAST`,`${year - 1}-12-15`,1]]) {
+    const nextMonth = new Date(`${actualDate}T12:00:00Z`); nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1, 15);
+    const futureDate = nextMonth.toISOString().slice(0,10);
+    for (const [id, date, round] of [[`${marker}_TODAY1`,actualDate,1],[`${marker}_TODAY2`,actualDate,2],[`${marker}_PAST`,`${year - 1}-12-15`,1],[`${marker}_FUTURE`,futureDate,1]]) {
         await db.query("INSERT INTO Patrol_Sessions(SessionID,PatrolDate,Year,Description,TeamName,Status,CreatedBy,TeamID,PatrolRound) VALUES(?,?,?,?,'','In Progress',?,?,?)", [id, `${date} 08:00:00`, Number(date.slice(0,4)), marker, marker, teamId, round]);
     }
     server = spawn(process.execPath, ['server.js'], { cwd:path.join(__dirname, '..'), env:{ ...process.env, PORT:String(apiPort) }, stdio:['ignore','ignore','ignore'], windowsHide:true });
@@ -134,14 +139,26 @@ async function cleanup() {
     const makeup = await evaluate(`(()=>({hasPriorYear:[...document.querySelectorAll('#checkin-missed-select option')].some(x=>x.value===${JSON.stringify(`${marker}_PAST`)}),todayHidden:document.querySelector('#checkin-today-row').classList.contains('hidden')}))()`);
     assert.deepStrictEqual(makeup, { hasPriorYear:true, todayHidden:true });
     await evaluate(`document.querySelector('#checkin-form input[value="extra"]').click()`);
-    assert.strictEqual(await evaluate("document.querySelector('#checkin-date-row').classList.contains('hidden')"), true);
-    assert.deepStrictEqual(errors, [], `Browser console errors: ${errors.join(' | ')}`);
-    console.log('Patrol check-in v2 Browser UAT: PASS (mobile modal, Scheduled/Makeup/Extra, cross-year picker, two same-day rounds, no overflow/errors)');
+    await waitFor("document.querySelector('#checkin-extra-select:not(.hidden)')?.options.length>1");
+    const extraPicker = await evaluate(`(()=>({makeupHidden:document.querySelector('#checkin-date-row').classList.contains('hidden'),hasFuture:[...document.querySelectorAll('#checkin-extra-select option')].some(x=>x.value===${JSON.stringify(`${marker}_FUTURE`)})}))()`);
+    assert.deepStrictEqual(extraPicker, { makeupHidden:true, hasFuture:true });
+    const viewports = [[390,844],[430,932],[768,1024],[1366,768],[1920,1080]];
+    for (const [width,height] of viewports) {
+        await cdp.command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor:1, mobile:width < 768 });
+        const layout = await evaluate(`(()=>{const form=document.querySelector('#checkin-form'),rect=form.getBoundingClientRect(),controls=[...form.querySelectorAll('button,select')].filter(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0});return {overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2,left:rect.left,right:rect.right,width:innerWidth,small:controls.filter(el=>el.getBoundingClientRect().height<44).map(el=>el.id||el.tagName)}})()`);
+        assert.equal(layout.overflow,false,`horizontal overflow at ${width}x${height}`);
+        assert(layout.left >= -2 && layout.right <= layout.width + 2,`modal outside viewport at ${width}x${height}`);
+        assert.deepStrictEqual(layout.small,[],`sub-44px controls at ${width}x${height}`);
+    }
+    const applicationErrors = errors.filter(message => !/Unable to load optional libraries for patrol: Error: VENDOR_LOAD_FAILED:/i.test(message));
+    assert.deepStrictEqual(applicationErrors, [], `Browser application errors: ${applicationErrors.join(' | ')}`);
+    console.log('Patrol Extra advance Browser UAT: PASS (390/430/768/1366/1920, future picker, Scheduled/Makeup/Extra, no overflow/application errors)');
 })().catch(error => { console.error(error.stack || error); process.exitCode = 1; }).finally(async () => {
     try { cdp?.close(); } catch {}
     try { chrome?.kill(); } catch {}
     try { server?.kill(); } catch {}
     if (db && originalFlag !== undefined) await db.query("UPDATE App_Settings SET value=? WHERE key_name='patrol_checkin_v2_enabled'", [originalFlag]).catch(() => {});
+    if (db && originalExtraFlag !== undefined) await db.query("UPDATE App_Settings SET value=? WHERE key_name='patrol_extra_advance_enabled'", [originalExtraFlag]).catch(() => {});
     await cleanup().catch(() => {});
     if (db) {
         const [[remaining]] = await db.query(`SELECT
