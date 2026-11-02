@@ -37,7 +37,7 @@ const markup = `<!doctype html>
   </footer>
 </div>
 <button type="button" class="johnny-global-launcher"><span class="johnny-global-launcher-label">Johnny</span></button>
-</main></body></html>`;
+</main><nav id="bottom-tab-bar"><button class="btab">ภาพรวม</button><button class="btab">Patrol</button><button class="btab">เมนู</button></nav></body></html>`;
 
 (async () => {
     const browser = await chromium.launch({ headless: true });
@@ -55,6 +55,7 @@ const markup = `<!doctype html>
                 const actionBar = rect('.svp-action-bar');
                 const actionButtons = [...document.querySelectorAll('.svp-action-bar .sv-button')].map(item => item.getBoundingClientRect());
                 const launcher = rect('.johnny-global-launcher');
+                const bottomNav = rect('#bottom-tab-bar');
                 const shellStyle = getComputedStyle(document.querySelector('.svp-shell'));
                 return {
                     overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
@@ -68,6 +69,7 @@ const markup = `<!doctype html>
                     actionButtonMin: Math.min(...actionButtons.map(item => Math.min(item.width, item.height))),
                     actionRowDelta: Math.max(...actionButtons.map(item => item.top)) - Math.min(...actionButtons.map(item => item.top)),
                     launcherGap: actionBar.top - launcher.bottom,
+                    actionAboveBottomNav: actionBar.bottom <= bottomNav.top + 1,
                     shellPaddingLeft: parseFloat(shellStyle.paddingLeft),
                     shellPaddingBottom: parseFloat(shellStyle.paddingBottom)
                 };
@@ -83,6 +85,7 @@ const markup = `<!doctype html>
             assert(result.actionRowDelta <= 1, `${viewport.name}: action buttons wrap to multiple rows`);
             assert(result.actionBarHeight <= 58, `${viewport.name}: action bar too tall ${result.actionBarHeight}px`);
             assert(result.launcherGap >= 7, `${viewport.name}: Johnny overlaps action bar (${result.launcherGap}px)`);
+            assert.strictEqual(result.actionAboveBottomNav, true, `${viewport.name}: mobile navigation covers the participant action bar`);
             assert.strictEqual(result.shellPaddingLeft, 8, `${viewport.name}: shell gutter is not tokenized to 8px`);
             assert(result.shellPaddingBottom >= 64, `${viewport.name}: shell does not reserve action-bar space`);
             results.push({ viewport: viewport.name, ...result });

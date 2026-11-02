@@ -13,7 +13,7 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || (fs.existsSync(
 (async () => {
     const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
     try {
-        for (const viewport of [{ width: 390, height: 844 }, { width: 1366, height: 768 }]) {
+        for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 1366, height: 768 }]) {
             const page = await browser.newPage({ viewport });
             const errors = [];
             page.on('pageerror', error => errors.push(error.message));
@@ -75,8 +75,10 @@ const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || (fs.existsSync(
             await page.locator('[data-sv-gallery-select]').click();
             assert.strictEqual(await page.locator('input[name="svp-q-1"][value="3"]').isChecked(), true);
             assert.strictEqual(await page.locator('[data-sv-gallery-confirm]').isEnabled(), true);
+            assert.strictEqual(await page.locator('[data-sv-gallery-confirm]').textContent(), 'กลับไปตรวจคำตอบ');
             await page.locator('[data-sv-gallery-confirm]').click();
             assert.strictEqual(await page.locator('[data-sv-image-gallery-dialog]').count(), 0);
+            assert.strictEqual(await page.locator('input[name="svp-q-1"][value="3"]').isChecked(), true);
             assert.strictEqual(await second.evaluate(element => document.activeElement === element), true);
 
             const single = page.locator('[data-sv-gallery-group="q2"]');

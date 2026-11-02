@@ -115,9 +115,10 @@ function auth_client_ip(): string
 function auth_check_login_limit(string $employeeId): void
 {
     ensure_auth_security_schema();
-    $row = db_row("SELECT COUNT(*) failures FROM auth_login_attempts WHERE Successful=0 AND AttemptedAt>=DATE_SUB(NOW(),INTERVAL 15 MINUTE) AND IPAddress=?", [auth_client_ip()]);
+    $normalizedEmployeeId = mb_substr(trim($employeeId), 0, 80);
+    $row = db_row("SELECT COUNT(*) failures FROM auth_login_attempts WHERE Successful=0 AND AttemptedAt>=DATE_SUB(NOW(),INTERVAL 15 MINUTE) AND EmployeeID=?", [$normalizedEmployeeId]);
     if ((int)($row['failures'] ?? 0) >= 10) {
-        auth_audit_log('LOGIN_RATE_LIMITED', $employeeId, 429, ['windowMinutes' => 15]);
+        auth_audit_log('LOGIN_RATE_LIMITED', $normalizedEmployeeId, 429, ['windowMinutes' => 15, 'scope' => 'employee']);
         json_response(['success'=>false,'message'=>'ลองใหม่อีกครั้งหลังจาก 15 นาที (Too many login attempts)'], 429);
     }
 }
@@ -125,8 +126,9 @@ function auth_check_login_limit(string $employeeId): void
 function auth_record_login(string $employeeId, bool $successful): void
 {
     ensure_auth_security_schema();
-    db_execute('INSERT INTO auth_login_attempts(IPAddress,EmployeeID,Successful) VALUES(?,?,?)', [auth_client_ip(), mb_substr($employeeId,0,80), $successful ? 1 : 0]);
-    if ($successful) db_execute("DELETE FROM auth_login_attempts WHERE AttemptedAt<DATE_SUB(NOW(),INTERVAL 7 DAY) OR (Successful=0 AND IPAddress=?)", [auth_client_ip()]);
+    $normalizedEmployeeId = mb_substr(trim($employeeId), 0, 80);
+    db_execute('INSERT INTO auth_login_attempts(IPAddress,EmployeeID,Successful) VALUES(?,?,?)', [auth_client_ip(), $normalizedEmployeeId, $successful ? 1 : 0]);
+    if ($successful) db_execute("DELETE FROM auth_login_attempts WHERE AttemptedAt<DATE_SUB(NOW(),INTERVAL 7 DAY) OR (Successful=0 AND EmployeeID=?)", [$normalizedEmployeeId]);
 }
 
 function auth_audit_log(string $action, string $employeeId, int $statusCode, array $metadata = [], ?array $user = null): void

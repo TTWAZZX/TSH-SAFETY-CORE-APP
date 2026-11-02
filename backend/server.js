@@ -512,12 +512,13 @@ function authClientIp(req) {
 
 async function authCheckLoginLimit(req, employeeId) {
     await ensureAuthSecuritySchema();
+    const normalizedEmployeeId = String(employeeId || '').trim().slice(0, 80);
     const [[row]] = await pool.query(
-        'SELECT COUNT(*) failures FROM auth_login_attempts WHERE Successful=0 AND AttemptedAt>=DATE_SUB(NOW(),INTERVAL 15 MINUTE) AND IPAddress=?',
-        [authClientIp(req)]
+        'SELECT COUNT(*) failures FROM auth_login_attempts WHERE Successful=0 AND AttemptedAt>=DATE_SUB(NOW(),INTERVAL 15 MINUTE) AND EmployeeID=?',
+        [normalizedEmployeeId]
     );
     if (Number(row?.failures || 0) >= 10) {
-        await logAuthAudit(req, 'LOGIN_RATE_LIMITED', employeeId, 429, { windowMinutes: 15 });
+        await logAuthAudit(req, 'LOGIN_RATE_LIMITED', normalizedEmployeeId, 429, { windowMinutes: 15, scope: 'employee' });
         return false;
     }
     return true;
@@ -526,14 +527,15 @@ async function authCheckLoginLimit(req, employeeId) {
 async function authRecordLogin(req, employeeId, successful) {
     await ensureAuthSecuritySchema();
     const ip = authClientIp(req);
+    const normalizedEmployeeId = String(employeeId || '').trim().slice(0, 80);
     await pool.query(
         'INSERT INTO auth_login_attempts(IPAddress,EmployeeID,Successful) VALUES(?,?,?)',
-        [ip, String(employeeId || '').slice(0, 80), successful ? 1 : 0]
+        [ip, normalizedEmployeeId, successful ? 1 : 0]
     );
     if (successful) {
         await pool.query(
-            'DELETE FROM auth_login_attempts WHERE AttemptedAt<DATE_SUB(NOW(),INTERVAL 7 DAY) OR (Successful=0 AND IPAddress=?)',
-            [ip]
+            'DELETE FROM auth_login_attempts WHERE AttemptedAt<DATE_SUB(NOW(),INTERVAL 7 DAY) OR (Successful=0 AND EmployeeID=?)',
+            [normalizedEmployeeId]
         );
     }
 }

@@ -912,6 +912,7 @@ body {
     .sv-live-preview__footer { align-items: stretch; flex-direction: column; }
     .svp-review li, .svp-receipt dl { grid-template-columns: 1fr; }
     .svp-action-bar { left: 0; align-items: stretch; flex-direction: column-reverse; }
+    .svp-shell[data-sv-participation] .svp-action-bar { bottom: var(--mobile-bottom-nav-height); }
     .svp-action-bar .sv-button { width: 100%; }
     .svp-action-bar .svp-note { margin: 0; text-align: center; }
     .svp-aux article { align-items: stretch; flex-direction: column; }
@@ -5823,7 +5824,7 @@ body[data-active-page="safety-vote"],
     }
 
     body[data-active-page="safety-vote"] .johnny-global-launcher:not(.is-positioned) {
-        bottom: calc(var(--svp-mobile-action-bar-height) + var(--svp-mobile-space-2));
+        bottom: calc(var(--mobile-bottom-nav-height) + var(--svp-mobile-action-bar-height) + var(--svp-mobile-space-2));
     }
 }
 

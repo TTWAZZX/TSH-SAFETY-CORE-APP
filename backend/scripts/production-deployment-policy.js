@@ -6,6 +6,7 @@ const activeProductionDeployScripts = Object.freeze([
     'bbs-access-discovery-production-deploy.js',
     'patrol-self-checkin-mode-production-deploy.js',
     'patrol-extra-advance-production-deploy.js',
+    'login-safety-vote-mobile-production-deploy.js',
     'safety-vote-phase7-production-deploy.js',
     'safety-vote-mobile-density-production-deploy.js',
     'safety-vote-eligibility-freeze-race-production-deploy.js',

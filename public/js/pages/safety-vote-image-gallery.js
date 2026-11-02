@@ -24,7 +24,7 @@ export function openSafetyVoteImageGallery(root, initialTrigger) {
     const host = document.createElement('div');
     host.className = 'svp-gallery';
     host.dataset.svImageGalleryDialog = '';
-    host.innerHTML = `<div class="svp-gallery__backdrop" data-sv-gallery-close></div><section role="dialog" aria-modal="true" aria-labelledby="sv-gallery-title" aria-describedby="sv-gallery-position"><header class="svp-gallery__header"><div><h2 id="sv-gallery-title"></h2><p id="sv-gallery-position" aria-live="polite"></p></div><button type="button" class="sv-icon-button" data-sv-gallery-close aria-label="ปิดรูปภาพ">×</button></header><div class="svp-gallery__stage" data-sv-gallery-stage><button type="button" class="svp-gallery__nav svp-gallery__nav--previous" data-sv-gallery-previous aria-label="ดูรูปก่อนหน้า">←</button><img alt=""><button type="button" class="svp-gallery__nav svp-gallery__nav--next" data-sv-gallery-next aria-label="ดูรูปถัดไป">→</button></div><footer class="svp-gallery__actions" data-sv-gallery-actions hidden><div><strong data-sv-gallery-choice-label></strong><span data-sv-gallery-choice-status aria-live="polite"></span></div><button type="button" class="sv-button sv-button--secondary" data-sv-gallery-select>เลือกผลงานนี้</button><button type="button" class="sv-button sv-button--primary" data-sv-gallery-confirm disabled>ยืนยันการเลือก</button></footer></section>`;
+    host.innerHTML = `<div class="svp-gallery__backdrop" data-sv-gallery-close></div><section role="dialog" aria-modal="true" aria-labelledby="sv-gallery-title" aria-describedby="sv-gallery-position"><header class="svp-gallery__header"><div><h2 id="sv-gallery-title"></h2><p id="sv-gallery-position" aria-live="polite"></p></div><button type="button" class="sv-icon-button" data-sv-gallery-close aria-label="ปิดรูปภาพ">×</button></header><div class="svp-gallery__stage" data-sv-gallery-stage><button type="button" class="svp-gallery__nav svp-gallery__nav--previous" data-sv-gallery-previous aria-label="ดูรูปก่อนหน้า">←</button><img alt=""><button type="button" class="svp-gallery__nav svp-gallery__nav--next" data-sv-gallery-next aria-label="ดูรูปถัดไป">→</button></div><footer class="svp-gallery__actions" data-sv-gallery-actions hidden><div><strong data-sv-gallery-choice-label></strong><span data-sv-gallery-choice-status aria-live="polite"></span></div><button type="button" class="sv-button sv-button--secondary" data-sv-gallery-select>เลือกผลงานนี้</button><button type="button" class="sv-button sv-button--primary" data-sv-gallery-confirm disabled>กลับไปตรวจคำตอบ</button></footer></section>`;
 
     const dialog = host.querySelector('section');
     const image = host.querySelector('.svp-gallery__stage img');
@@ -62,7 +62,7 @@ export function openSafetyVoteImageGallery(root, initialTrigger) {
         if (input) {
             const selected = input.checked;
             choiceLabel.textContent = trigger.dataset.svGalleryChoiceLabel || label;
-            choiceStatus.textContent = selected ? 'เลือกผลงานนี้แล้ว' : 'ยังไม่ได้เลือกผลงานนี้';
+            choiceStatus.textContent = selected ? 'บันทึกตัวเลือกนี้ไว้แล้ว' : 'ยังไม่ได้เลือกผลงานนี้';
             selectChoice.textContent = selected ? 'เลือกแล้ว' : 'เลือกผลงานนี้';
             selectChoice.disabled = selected;
             confirmChoice.disabled = !selected;
