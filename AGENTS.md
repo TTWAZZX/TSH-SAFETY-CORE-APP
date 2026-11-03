@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Safety Vote Live Reconciliation & Jury Catalogue Production Deployment (PASS, 2026-11-03)
+
+- Immutable commit `80f40b438cde63f998a7d75c5096c9693eaf8034` was deployed to the PHP shared-hosting Production target from runtime baseline `c21e00dc437fa2da34b9c0ed49fced3acdf82f14` through a guarded ten-file allowlist.
+- Live Top N results now reconcile displayed and outside-Top-N votes against each question's valid answer count, explain tie-expanded rankings and distinguish accepted ballots from valid option answers. Jury catalogue cards distinguish view-only `admin_curated`/`imported` campaigns (`อยู่ระหว่างการตัดสิน`, `เปิดให้ชมผลงาน`) from `employee_submission` campaigns (`เปิดรับผลงาน`) without changing Jury assignments, permissions or campaign lifecycle state.
+- Local static/security parity passed 55 Live Results assertions; disposable Node/PHP API and authenticated Browser UAT passed at 390/768/1366 px with zero Ballot/Jury Score mutation. Remote pre-deploy double-download drift checks passed, deployed download-back SHA-256 matched `10/10`, and public HTTPS SHA-256 matched `8/8` frontend files.
+- Authenticated Production post-smoke remained ready at schema `2026-10-25-jury-work-items-atomic-media-r1` with all 8 campaigns preserved. Live campaign `8` returned `available` with Accepted `190` and valid reconciliation; Jury campaign `7` returned `WorkSource=admin_curated`. Two earlier workflow attempts stopped before upload on exact-SHA and assertion-marker validation, with zero Production mutation.
+- Rollback evidence: `backups/production/safety-vote-live-reconciliation-jury-catalogue-r1-deploy-20261103014219/`; rollback manifest SHA-256 `a4332b45b2a9c20badfc846eb8d992dd65c7a85f2d79a03d10f67efcd50251a7`, result SHA-256 `cfadc4ea640c4f71f3e1f82ed43a2d5d380b97c142fedc79504fb7481b1c0140`. No schema migration, business-data mutation, notification delivery, external-delivery change or rollback occurred. Decision: `PASS_SAFETY_VOTE_LIVE_RECONCILIATION_JURY_CATALOGUE_R1_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Governed Deadline Extension Production Deployment (PASS, 2026-11-02)
 
 - Immutable commit `16b0806324f3483a2af8711642bce1c7918fa647` was deployed to the PHP shared-hosting Production target from runtime baseline `cc370b49d3a7c0d240af9be125cacdf3faaf7f4a` through the guarded workflow.
