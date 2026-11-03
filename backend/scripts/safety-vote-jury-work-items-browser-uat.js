@@ -102,6 +102,9 @@ async function inspect(campaignId, viewport) {
     await page.goto(`${base}/__ux1-user`, { waitUntil: 'networkidle' });
     const card = page.locator(`[data-svp-campaign="${campaignId}"]`).first();
     await card.waitFor();
+    assert.strictEqual(await card.getByText('อยู่ระหว่างการตัดสิน', { exact: true }).count(), 1, 'Jury catalogue status must describe judging, not participation');
+    assert.strictEqual(await card.getByText('เปิดให้ชมผลงาน', { exact: false }).count(), 1, 'Jury catalogue access must describe the public gallery');
+    assert.strictEqual(await card.getByText('เปิดรับการเข้าร่วม', { exact: true }).count(), 0, 'View-only Jury campaign must not claim open participation');
     await card.click();
     const gallery = page.locator('[data-svp-public-work-gallery]');
     await gallery.waitFor();
@@ -128,7 +131,7 @@ async function inspect(campaignId, viewport) {
     assert.deepStrictEqual(unexpectedFailures, [], `Unexpected Safety Vote responses at ${viewport.width}`);
     if (viewport.width === 390 || viewport.width === 1366) await page.screenshot({ path: path.join(evidence, `user-${viewport.width}x${viewport.height}.png`), fullPage: true });
     await page.close();
-    return { viewport, companyCatalogue: true, readOnlyGallery: true, workItems: 2, authenticatedPrivateImage: true, viewerKeyboardClose: true, scoreSheetSuppressed: true, overflow: false, smallTargets: 0, safetyVote5xx: 0 };
+    return { viewport, companyCatalogue: true, juryCatalogueStatus: 'อยู่ระหว่างการตัดสิน', juryCatalogueAccess: 'เปิดให้ชมผลงาน', readOnlyGallery: true, workItems: 2, authenticatedPrivateImage: true, viewerKeyboardClose: true, scoreSheetSuppressed: true, overflow: false, smallTargets: 0, safetyVote5xx: 0 };
 }
 
 async function main() {

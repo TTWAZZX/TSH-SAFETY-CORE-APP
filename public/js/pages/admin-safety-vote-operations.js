@@ -5,7 +5,7 @@ import {
     juryProgress, metricView, notificationSummary, operationalWarnings, preferredSnapshot,
     safeTimeline, snapshotReadiness, stageRows, statusCounts, valueOf
 } from './safety-vote-operations-model.mjs?v=20261029-safety-vote-workflow-observation-r1';
-import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261020-safety-vote-duplicate-media-r3';
+import { clearLiveResultImages, hydrateLiveResultImages, liveResultsMarkup } from './safety-vote-live-results.js?v=20261103-safety-vote-live-reconciliation-r1';
 import { bindSafetyVoteImageGallery } from './safety-vote-image-gallery.js?v=20261015-safety-vote-preview-gallery-r1';
 import { bangkokInputToIso, formatThaiDateTime, toBangkokInputValue } from './safety-vote-time.mjs?v=20261015-safety-vote-thai-time-r1';
 

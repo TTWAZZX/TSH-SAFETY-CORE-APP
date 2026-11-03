@@ -26,6 +26,14 @@ export function campaignType(campaign = {}) {
     return String(valueOf(campaign, 'CampaignType', 'campaignType') || 'survey');
 }
 
+export function workSource(campaign = {}) {
+    return String(valueOf(campaign, 'WorkSource', 'workSource') || '').trim().toLowerCase();
+}
+
+export function isViewOnlyJuryCampaign(campaign = {}) {
+    return campaignType(campaign) === 'jury_scoring' && workSource(campaign) !== 'employee_submission';
+}
+
 export function privacyMode(campaign = {}) {
     return String(valueOf(campaign, 'PrivacyMode', 'privacyMode') || 'identified');
 }
@@ -243,11 +251,12 @@ export function campaignMatchesView(campaign = {}, view = 'all') {
     const discoveryOnly = Number(valueOf(campaign, 'DiscoveryOnly', 'discoveryOnly') || 0) === 1;
     const votingWindow = valueOf(campaign, 'VotingWindowOpen', 'votingWindowOpen');
     const votingWindowOpen = votingWindow === '' || Number(votingWindow) === 1;
+    const viewOnlyJury = isViewOnlyJuryCampaign(campaign);
     if (view === 'all') return true;
-    if (view === 'open') return status === 'Open' && votingWindowOpen && !discoveryOnly;
+    if (view === 'open') return status === 'Open' && votingWindowOpen && !discoveryOnly && !viewOnlyJury;
     if (view === 'upcoming') return status === 'Scheduled' || (status === 'Open' && !votingWindowOpen);
     if (view === 'submitted') return participation === 'submitted';
-    if (view === 'read_only') return discoveryOnly;
+    if (view === 'read_only') return discoveryOnly || viewOnlyJury;
     if (view === 'results') return ['Closed', 'Certified', 'Published'].includes(status);
     if (view === 'closed') return ['Closed', 'Certified', 'Published'].includes(status);
     return participationState(campaign) === view;

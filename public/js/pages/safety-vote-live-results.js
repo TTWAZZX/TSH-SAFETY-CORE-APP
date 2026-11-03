@@ -17,6 +17,32 @@ function liveMetaMarkup(data) {
     return `<div class="sv-live-board__meta"><span>${accepted}</span><span>อัปเดต ${formatThaiTime(data.lastCalculatedAt, 'ไม่ระบุเวลา', true)}</span><span>ครั้งถัดไป <strong data-sv-live-countdown>${Number(data.config?.refreshSeconds || 15)}</strong> วินาที</span></div>`;
 }
 
+function liveCoverageMarkup(question, data, admin) {
+    if (data.status !== 'available' || !question.summaryStats) return '';
+    const stats = question.summaryStats;
+    const accepted = Number(data.totalAcceptedVotes || 0);
+    const valid = Number(question.validAnswerCount || 0);
+    const balanced = accepted === valid;
+    const topN = Number(stats.topN || data.config?.topN || 0);
+    const shownWorks = Number(stats.displayedOptionCount || 0);
+    const shownVotes = Number(stats.displayedVoteCount || 0);
+    const hiddenWorks = Number(stats.hiddenOptionCount || 0);
+    const hiddenVotes = Number(stats.hiddenVoteCount || 0);
+    const shownPct = Number(stats.displayedPercentage || 0).toLocaleString('th-TH');
+    const hiddenPct = Number(stats.hiddenPercentage || 0).toLocaleString('th-TH');
+    const tieNote = stats.tieExpanded ? ` แสดง ${shownWorks.toLocaleString('th-TH')} ผลงานเนื่องจากมีคะแนนอันดับร่วม` : ` แสดง ${shownWorks.toLocaleString('th-TH')} ผลงาน`;
+    const coverage = admin
+        ? `หน้า Admin แสดงคะแนนครบทุกผลงาน · Top ${topN.toLocaleString('th-TH')} อันดับ${tieNote}`
+        : `Top ${topN.toLocaleString('th-TH')} อันดับ${tieNote} · รวม ${shownVotes.toLocaleString('th-TH')} จาก ${valid.toLocaleString('th-TH')} โหวต (${shownPct}%)`;
+    const hidden = hiddenVotes > 0
+        ? `ผลงานนอก Top ${topN.toLocaleString('th-TH')} อีก ${hiddenWorks.toLocaleString('th-TH')} ผลงาน รวม ${hiddenVotes.toLocaleString('th-TH')} โหวต (${hiddenPct}%)`
+        : `ไม่มีคะแนนอยู่นอก Top ${topN.toLocaleString('th-TH')}`;
+    const reconciliation = balanced
+        ? `กระทบยอดครบ ${valid.toLocaleString('th-TH')}/${accepted.toLocaleString('th-TH')} บัตร`
+        : `ต้องตรวจสอบการกระทบยอด: นับคำตอบได้ ${valid.toLocaleString('th-TH')} จากบัตร Accepted ${accepted.toLocaleString('th-TH')} ใบ`;
+    return `<div class="sv-live-status${balanced ? '' : ' is-private'}" role="status"><strong>${escHtml(coverage)}</strong><span>${escHtml(hidden)}</span><span>${escHtml(reconciliation)}</span></div>`;
+}
+
 function liveQuestionMarkup(question, data, admin) {
     const pending = data.status !== 'available';
     const scoreMode = data.config?.scoreMode || 'count_percentage';
@@ -36,7 +62,7 @@ function liveQuestionMarkup(question, data, admin) {
         const rank = pending ? '—' : Number(option.rank);
         const progressLabel = pending ? `${option.label} ยังไม่เปิดเผยคะแนน` : `${option.label} ${percentage} เปอร์เซ็นต์`;
         return `<article class="sv-live-row${pending ? ' is-pending' : ''}"><strong class="sv-live-rank">#${rank}</strong>${option.fileId ? `<button type="button" class="sv-live-image" data-sv-auth-media data-svp-media-state="loading" aria-busy="true" data-sv-image-gallery data-sv-gallery-group="live-${Number(question.questionId)}" data-sv-gallery-label="${escHtml(option.label)}" aria-label="ขยายภาพ ${escHtml(option.label)}"><img data-sv-live-file="${Number(option.fileId)}" data-sv-auth-file="${Number(option.fileId)}" alt="${escHtml(option.label)}" decoding="async"></button>` : ''}<div><strong>${escHtml(option.label)}</strong>${option.description ? `<small>${escHtml(option.description)}</small>` : ''}${option.tied && !pending ? '<span class="sv-live-tie">อันดับร่วม</span>' : ''}<div class="sv-live-progress" role="progressbar" aria-label="${escHtml(progressLabel)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><span style="width:${percentage}%"></span></div></div><span class="sv-live-score">${escHtml(score(option))}</span></article>`;
-    }).join('')}</div><small>${escHtml(note)}</small></section>`;
+    }).join('')}</div>${liveCoverageMarkup(question, data, admin)}<small>${escHtml(note)}</small></section>`;
 }
 
 export function liveResultsMarkup(data, { admin = false, error = null, loading = false, paused = false } = {}) {

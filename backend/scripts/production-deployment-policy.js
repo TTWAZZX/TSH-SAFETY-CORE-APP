@@ -24,6 +24,7 @@ const activeProductionDeployScripts = Object.freeze([
     'safety-vote-wizard-layout-production-deploy.js',
     'safety-vote-workflow-observation-production-deploy.js',
     'safety-vote-deadline-extension-production-deploy.js',
+    'safety-vote-live-reconciliation-jury-catalogue-production-deploy.js',
 ]);
 
 const archivedProductionDeployScripts = Object.freeze([

@@ -97,6 +97,9 @@ async function browserUat(base, campaignId) {
             await page.locator('[data-svp-action="live"]').click();
             await page.locator('[data-svp-live-panel] .sv-live-board').waitFor();
             assert.strictEqual(await page.locator('[data-svp-live-panel] .sv-live-row').count(), 5);
+            const userCoverage = await page.locator('[data-svp-live-panel] .sv-live-status').innerText();
+            assert.match(userCoverage, /ผลงานนอก Top/);
+            assert.match(userCoverage, /กระทบยอดครบ 21\/21 บัตร/);
             assert.strictEqual(await page.locator('[data-svp-live-panel]').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true, `user overflow at ${viewport.width}`);
             await page.locator('[data-svp-action="live-toggle"]').click();
             assert.match(await page.locator('[data-svp-action="live-toggle"]').textContent(), /Resume/);
@@ -111,6 +114,9 @@ async function browserUat(base, campaignId) {
         await page.goto(`${base}/__ux5-admin/admin?campaign=${campaignId}&type=popular_vote&live=1`, { waitUntil: 'domcontentloaded' });
         await page.locator('[data-svo-live-results] .sv-live-board').waitFor();
         assert.strictEqual(await page.locator('[data-svo-live-results] .sv-live-row').count(), 6);
+        const adminCoverage = await page.locator('[data-svo-live-results] .sv-live-status').innerText();
+        assert.match(adminCoverage, /หน้า Admin แสดงคะแนนครบทุกผลงาน/);
+        assert.match(adminCoverage, /กระทบยอดครบ 21\/21 บัตร/);
         assert.strictEqual(await page.locator('.svo-shell').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true, 'admin mobile overflow');
         await page.locator('[data-svo-action="live-refresh"]').click();
         assert.deepStrictEqual(errors, [], 'admin console errors');
@@ -136,10 +142,14 @@ async function lifecycle(label, base, name, fixture) {
     assert.strictEqual(adminResult.data.data.questions[0].summary.length, 5, 'summary is limited to Top N');
     assert.deepStrictEqual(adminResult.data.data.questions[0].options.map(row => row.rank), [1, 2, 3, 4, 5, 6]);
     assert.strictEqual(adminResult.data.data.questions[0].options[0].percentage, 28.57);
+    const adminStats = adminResult.data.data.questions[0].summaryStats;
+    assert.strictEqual(Number(adminStats.displayedVoteCount) + Number(adminStats.hiddenVoteCount), 21, 'Top N summary must reconcile to every valid vote');
+    assert.strictEqual(Number(adminStats.displayedOptionCount) + Number(adminStats.hiddenOptionCount), 6, 'Top N summary must reconcile to every option');
 
     const userResult = await call(base, `/campaigns/${fixture.campaignId}/live-results`, 'sv-user');
     assert.strictEqual(userResult.status, 200, JSON.stringify(userResult.data));
     assert.strictEqual(userResult.data.data.questions[0].options.length, 5, 'user receives Top N only');
+    assert.deepStrictEqual(userResult.data.data.questions[0].summaryStats, adminStats, 'participant and Admin use the same identity-free reconciliation totals');
     const beforeSubmit = await call(base, `/campaigns/${fixture.campaignId}/live-results`, 'sv-user2');
     assert.strictEqual(beforeSubmit.status, 403);
     assert.strictEqual(beforeSubmit.data.code, 'LIVE_RESULTS_SUBMISSION_REQUIRED');

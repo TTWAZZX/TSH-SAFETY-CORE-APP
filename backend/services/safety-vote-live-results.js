@@ -57,7 +57,21 @@ function aggregate(questions = [], answerRows = [], topN = 5) {
         let previous = null;
         ranked.forEach((option, index) => { option.rank = previous !== null && option.voteCount === previous ? ranked[index - 1].rank : index + 1; previous = option.voteCount; option.percentage = validAnswerCount ? Math.round(option.voteCount / validAnswerCount * 10000) / 100 : 0; option.tied = ranked.some(other => other.optionId !== option.optionId && other.voteCount === option.voteCount); });
         const summary = ranked.filter(option => option.rank <= topN);
-        return { questionId, questionCode: question.questionCode ?? question.QuestionCode, title: question.title ?? question.Title, validAnswerCount, denominatorPolicy: 'valid_option_answers_including_abstain', options: ranked, summary };
+        const displayedVoteCount = summary.reduce((sum, option) => sum + option.voteCount, 0);
+        const hiddenVoteCount = Math.max(0, validAnswerCount - displayedVoteCount);
+        const pct = value => validAnswerCount ? Math.round(value / validAnswerCount * 10000) / 100 : 0;
+        const summaryStats = {
+            topN,
+            totalOptionCount: ranked.length,
+            displayedOptionCount: summary.length,
+            hiddenOptionCount: Math.max(0, ranked.length - summary.length),
+            displayedVoteCount,
+            hiddenVoteCount,
+            displayedPercentage: pct(displayedVoteCount),
+            hiddenPercentage: pct(hiddenVoteCount),
+            tieExpanded: summary.length > Math.min(topN, ranked.length)
+        };
+        return { questionId, questionCode: question.questionCode ?? question.QuestionCode, title: question.title ?? question.Title, validAnswerCount, denominatorPolicy: 'valid_option_answers_including_abstain', options: ranked, summary, summaryStats };
     });
 }
 
