@@ -8,6 +8,7 @@ const { spawnSync } = require('node:child_process');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 
 const root = path.resolve(__dirname, '..', '..');
+const baseline = 'c21e00dc437fa2da34b9c0ed49fced3acdf82f14';
 const confirmation = 'DEPLOY_SAFETY_VOTE_LIVE_RECONCILIATION_JURY_CATALOGUE_R1';
 const expectedCommit = String(process.argv[4] || '').trim();
 const base = String(process.env.PROD_UAT_URL || 'https://dev.tshpcl.com/safety/tsh-safety-core').replace(/\/+$/, '');
@@ -89,13 +90,13 @@ async function smoke(token, verifyRelease) {
     return { health: 200, schemaVersion: health.body?.data?.schemaVersion, campaignTotal: adminRows.length, catalogueTotal: catalogueRows.length, juryCampaigns: juryRows.map(row => ({ id: Number(row.id), workSource: verifyRelease ? String(row.WorkSource) : null })), liveChecks, responseBodiesRecorded: false, businessMutation: false };
 }
 
-function prepare(commit, parent) {
+function prepare(commit) {
     fs.mkdirSync(candidateRoot, { recursive: true }); fs.mkdirSync(rollbackRoot, { recursive: true });
     const candidates = [], restore = [], remoteBefore = [];
     for (const relative of runtime) {
-        const bytes = blob(commit, relative), prior = blob(parent, relative), before = doubleDownload(relative, 'remote-before'), remote = fs.readFileSync(before.source);
-        assert.notEqual(normalizedSha(bytes), normalizedSha(prior), `Release file is unchanged from immutable parent: ${relative}`);
-        assert.equal(normalizedSha(remote), normalizedSha(prior), `Production drift outside immutable parent: ${relative}`);
+        const bytes = blob(commit, relative), prior = blob(baseline, relative), before = doubleDownload(relative, 'remote-before'), remote = fs.readFileSync(before.source);
+        assert.notEqual(normalizedSha(bytes), normalizedSha(prior), `Release file is unchanged from immutable baseline: ${relative}`);
+        assert.equal(normalizedSha(remote), normalizedSha(prior), `Production drift outside immutable baseline: ${relative}`);
         const target = under(candidateRoot, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes);
         if (relative.endsWith('.php')) assert.equal(run(php, ['-l', target]).status, 0, `PHP lint failed: ${relative}`);
         const rollback = under(rollbackRoot, relative); fs.mkdirSync(path.dirname(rollback), { recursive: true }); fs.copyFileSync(before.source, rollback);
@@ -114,7 +115,7 @@ function prepare(commit, parent) {
     for (const value of ['อยู่ระหว่างการตัดสิน', 'เปิดให้ชมผลงาน', 'เปิดรับผลงาน']) assert(page.includes(value), `Missing Jury catalogue label ${value}`);
     assert(model.includes('isViewOnlyJuryCampaign') && model.includes("view === 'read_only'"));
     assert(index.includes(marker));
-    return { candidates, restore, remoteBefore, manifestSha256: writeJson('rollback-manifest.json', { contract: marker, commit, parent, runtime: candidates.map(({ target, ...item }) => item), restore: restore.map(({ rollback, ...item }) => item), remoteBefore, schemaChanged: false, businessDataChanged: false, notificationDeliveryChanged: false, externalDeliveryChanged: false }) };
+    return { candidates, restore, remoteBefore, manifestSha256: writeJson('rollback-manifest.json', { contract: marker, commit, baseline, runtime: candidates.map(({ target, ...item }) => item), restore: restore.map(({ rollback, ...item }) => item), remoteBefore, schemaChanged: false, businessDataChanged: false, notificationDeliveryChanged: false, externalDeliveryChanged: false }) };
 }
 async function verifyHttps(commit) {
     const verified = [];
@@ -139,14 +140,14 @@ function rollback() {
 
 (async () => {
     assert.equal(process.argv[2], '--execute'); assert.equal(process.argv[3], confirmation); assert.match(expectedCommit, /^[a-f0-9]{40}$/);
-    const commit = String(git(['rev-parse', 'HEAD'])).trim(), parent = String(git(['rev-parse', 'HEAD^'])).trim();
+    const commit = String(git(['rev-parse', 'HEAD'])).trim();
     assert.equal(String(git(['branch', '--show-current'])).trim(), 'main'); assert.equal(commit, expectedCommit); assert.equal(commit, String(git(['rev-parse', 'origin/main'])).trim()); assert.equal(String(git(['status', '--porcelain'])).trim(), '');
-    const token = await login(), before = await smoke(token, false); prepared = prepare(commit, parent);
+    const token = await login(), before = await smoke(token, false); prepared = prepare(commit);
     for (const file of prepared.candidates) { mutationStarted = true; const upload = ftps('upload', file.path, file.target); assert(upload.ok, `Upload failed: ${file.path}: ${upload.error}`); }
     const deployed = prepared.candidates.map(file => { const remote = doubleDownload(file.path, 'deployed'); assert.equal(remote.sha256, file.sha256, `Deployed checksum mismatch: ${file.path}`); return { path: file.path, sha256: remote.sha256 }; });
     const https = await verifyHttps(commit), after = await smoke(token, true);
     assert.equal(after.schemaVersion, before.schemaVersion); assert.equal(after.campaignTotal, before.campaignTotal); assert.equal(after.catalogueTotal, before.catalogueTotal);
-    const result = { decision: 'PASS_SAFETY_VOTE_LIVE_RECONCILIATION_JURY_CATALOGUE_R1_PRODUCTION_DEPLOYMENT', generatedAt: new Date().toISOString(), commit, parent, deployed, https, before, after, rollbackPackage: { manifestSha256: prepared.manifestSha256, restoreFiles: prepared.restore.length }, schemaChanged: false, migrationPerformed: false, businessDataChanged: false, notificationsSent: false, externalDeliveryChanged: false, rollback: { attempted: false } };
+    const result = { decision: 'PASS_SAFETY_VOTE_LIVE_RECONCILIATION_JURY_CATALOGUE_R1_PRODUCTION_DEPLOYMENT', generatedAt: new Date().toISOString(), commit, baseline, deployed, https, before, after, rollbackPackage: { manifestSha256: prepared.manifestSha256, restoreFiles: prepared.restore.length }, schemaChanged: false, migrationPerformed: false, businessDataChanged: false, notificationsSent: false, externalDeliveryChanged: false, rollback: { attempted: false } };
     const resultSha256 = writeJson('result.json', result);
     process.stdout.write(`${JSON.stringify({ evidence: path.relative(root, evidence).replace(/\\/g, '/'), decision: result.decision, commit, deployed: deployed.length, httpsVerified: https.length, liveChecks: after.liveChecks, juryCampaigns: after.juryCampaigns, rollbackPackage: result.rollbackPackage, resultSha256 }, null, 2)}\n`);
 })().catch(error => {
