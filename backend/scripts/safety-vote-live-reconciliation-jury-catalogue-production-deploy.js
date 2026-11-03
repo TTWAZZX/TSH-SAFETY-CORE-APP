@@ -81,7 +81,7 @@ async function smoke(token, verifyRelease) {
             for (const question of data.questions || []) {
                 if (data.status !== 'available') continue;
                 const summary = question.summaryStats;
-                assert(summary && Number(summary.displayedVoteCount) + Number(summary.hiddenVoteCount) === Number(summary.totalValidVotes), `Live reconciliation mismatch for campaign ${row.id}`);
+                assert(summary && Number(summary.displayedVoteCount) + Number(summary.hiddenVoteCount) === Number(question.validAnswerCount), `Live reconciliation mismatch for campaign ${row.id}`);
             }
             liveChecks.push({ id: Number(row.id), status: String(data.status), accepted: data.totalAcceptedVotes, questionCount: (data.questions || []).length, reconciliationVerified: data.status === 'available' });
         }
@@ -110,7 +110,7 @@ function prepare(commit, parent) {
     const model = blob(commit, 'public/js/pages/safety-vote-participation-model.mjs').toString('utf8');
     const index = blob(commit, 'index.html').toString('utf8');
     for (const value of ['sv2_attach_catalogue_work_sources', 'WorkSource']) assert(phase2.includes(value), `Missing catalogue API marker ${value}`);
-    for (const value of ['displayedVoteCount', 'hiddenVoteCount', 'totalValidVotes']) assert(liveLib.includes(value) && livePage.includes(value), `Missing live reconciliation marker ${value}`);
+    for (const value of ['displayedVoteCount', 'hiddenVoteCount', 'validAnswerCount']) assert(liveLib.includes(value) && livePage.includes(value), `Missing live reconciliation marker ${value}`);
     for (const value of ['อยู่ระหว่างการตัดสิน', 'เปิดให้ชมผลงาน', 'เปิดรับผลงาน']) assert(page.includes(value), `Missing Jury catalogue label ${value}`);
     assert(model.includes('isViewOnlyJuryCampaign') && model.includes("view === 'read_only'"));
     assert(index.includes(marker));
