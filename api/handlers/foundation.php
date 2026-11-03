@@ -76,6 +76,48 @@ function foundation_notify_registration_admin(array $data): array
     }
 }
 
+function foundation_account_journey_rate_limited(string $employeeId): bool
+{
+    try {
+        $row = db_row(
+            "SELECT COUNT(*) total FROM admin_auditlogs WHERE Action='ACCOUNT_JOURNEY_RESOLVED' AND ActionTime>=DATE_SUB(NOW(),INTERVAL 15 MINUTE) AND (TargetID=? OR IPAddress=?)",
+            [$employeeId,auth_client_ip()]
+        );
+        return (int)($row['total'] ?? 0) >= 20;
+    } catch (Throwable $error) {
+        return false;
+    }
+}
+
+function foundation_account_journey_payload(string $employeeId): array
+{
+    $employee = db_row("SELECT EmployeeID,CASE WHEN Password IS NULL OR Password='' THEN 0 ELSE 1 END HasPassword FROM employees WHERE EmployeeID=? LIMIT 1",[$employeeId]);
+    $registration = $employee ? null : db_row('SELECT Status FROM registration_requests WHERE EmployeeID=? ORDER BY ID DESC LIMIT 1',[$employeeId]);
+    $action='NEW_REGISTRATION';$allowed=['NEW_REGISTRATION','LOGIN'];$requiresReference=false;
+    $message='ไม่พบข้อมูลใน Employee Master สามารถส่งคำขอสมัครบัญชีใหม่ให้ Admin ตรวจสอบได้';
+    if ($employee) {
+        if ((int)$employee['HasPassword']===1) {
+            $action='LOGIN';$allowed=['LOGIN','PASSWORD_RESET'];
+            $message='บัญชีนี้พร้อมใช้งานแล้ว กรุณาเข้าสู่ระบบ หรือใช้เมนูลืมรหัสผ่านหากจำรหัสผ่านไม่ได้';
+        } else {
+            $action='ACTIVATE';$allowed=['ACTIVATE','LEGACY_FIRST_LOGIN'];
+            $message='พบข้อมูลใน Employee Master และยังไม่เคยตั้งรหัสผ่าน สามารถเปิดใช้งานบัญชีเดิมได้ทันที';
+        }
+    } elseif ($registration) {
+        if ((string)$registration['Status']==='Pending') {
+            $action='CHECK_STATUS';$allowed=['CHECK_STATUS','CONTACT_ADMIN'];$requiresReference=true;
+            $message='มีคำขอสมัครบัญชีนี้อยู่ระหว่างการตรวจสอบ ใช้เลขอ้างอิงเพื่อตรวจสอบสถานะ';
+        } elseif ((string)$registration['Status']==='Approved') {
+            $action='CONTACT_ADMIN';$allowed=['CONTACT_ADMIN'];
+            $message='คำขอได้รับการตรวจสอบแล้วแต่บัญชียังไม่พร้อมใช้งาน กรุณาติดต่อ Admin';
+        } else {
+            $action='CHECK_STATUS';$allowed=['CHECK_STATUS','CONTACT_ADMIN'];$requiresReference=true;
+            $message='คำขอนี้ได้รับการตรวจสอบแล้ว ใช้เลขอ้างอิงเพื่อดูสถานะและคำแนะนำล่าสุด';
+        }
+    }
+    return ['contract'=>'2026-11-03-account-journey-router-r1','employeeId'=>$employeeId,'recommendedAction'=>$action,'allowedActions'=>$allowed,'requiresReferenceCode'=>$requiresReference,'message'=>$message,'personalDataIncluded'=>false,'businessMutation'=>false];
+}
+
 function handle_foundation_routes(string $method, string $path): bool
 {
     if ($method === 'GET' && $path === '/onboarding/status') {
@@ -173,6 +215,28 @@ function handle_foundation_routes(string $method, string $path): bool
                 ],
             ],
         ]);
+    }
+
+    if ($method === 'POST' && $path === '/account/journey') {
+        $body=json_body();$employeeId=trim((string)($body['EmployeeID']??''));
+        if ($employeeId===''||mb_strlen($employeeId)>80) {
+            auth_audit_log('ACCOUNT_JOURNEY_FAILED',$employeeId,400,['reason'=>'invalid_employee_id']);
+            json_response(['success'=>false,'code'=>'EMPLOYEE_ID_REQUIRED','message'=>'กรุณากรอกรหัสพนักงานให้ถูกต้อง'],400);
+        }
+        ensure_auth_security_schema();
+        if (foundation_account_journey_rate_limited($employeeId)) {
+            auth_audit_log('ACCOUNT_JOURNEY_RATE_LIMITED',$employeeId,429,['windowMinutes'=>15]);
+            json_response(['success'=>false,'code'=>'ACCOUNT_JOURNEY_RATE_LIMITED','message'=>'ตรวจสอบเส้นทางบัญชีบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่'],429);
+        }
+        try {
+            $data=foundation_account_journey_payload($employeeId);
+            auth_audit_log('ACCOUNT_JOURNEY_RESOLVED',$employeeId,200,['recommendedAction'=>$data['recommendedAction'],'personalDataIncluded'=>false,'businessMutation'=>false]);
+            header('Cache-Control: no-store');
+            json_response(['success'=>true,'data'=>$data]);
+        } catch (Throwable $error) {
+            auth_audit_log('ACCOUNT_JOURNEY_FAILED',$employeeId,500,['reason'=>'resolver_unavailable']);
+            json_response(['success'=>false,'code'=>'ACCOUNT_JOURNEY_UNAVAILABLE','message'=>'ไม่สามารถตรวจสอบเส้นทางบัญชีได้ กรุณาใช้การเข้าสู่ระบบหรือสมัครบัญชีตามปกติ'],500);
+        }
     }
 
     if ($method === 'POST' && $path === '/register') {

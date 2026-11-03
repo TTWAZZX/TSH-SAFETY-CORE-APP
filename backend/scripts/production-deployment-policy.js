@@ -3,6 +3,7 @@
 const path = require('node:path');
 
 const activeProductionDeployScripts = Object.freeze([
+    'account-journey-router-production-deploy.js',
     'bbs-access-discovery-production-deploy.js',
     'patrol-self-checkin-mode-production-deploy.js',
     'patrol-extra-advance-production-deploy.js',

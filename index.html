@@ -506,6 +506,11 @@
                                     <p class="mt-0.5 text-[11px] leading-4 text-slate-500">เคยเปลี่ยนแล้ว: ใช้รหัสผ่านล่าสุด</p>
                                 </div>
                             </div>
+                            <button type="button" id="account-journey-check"
+                                class="w-full min-h-12 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100">
+                                ไม่แน่ใจว่ามีบัญชีหรือยัง? ตรวจสอบเส้นทางบัญชี
+                            </button>
+                            <div id="login-account-journey-result" role="status" aria-live="polite" class="hidden rounded-xl border px-3 py-2.5 text-xs font-semibold leading-relaxed"></div>
                             <div id="login-success-message" role="status" aria-live="polite"
                                 class="hidden rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-semibold leading-relaxed text-emerald-800">
                             </div>
@@ -598,6 +603,11 @@
                                     onfocus="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)';this.style.background='#fff'"
                                     onblur="this.style.borderColor='';this.style.boxShadow='';this.style.background=''">
                             </div>
+                            <button id="registration-account-journey-check" type="button"
+                                class="w-full min-h-12 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100">
+                                ตรวจสอบว่า EmployeeID นี้ควรใช้ขั้นตอนไหน
+                            </button>
+                            <div id="registration-account-journey-result" role="status" aria-live="polite" class="hidden rounded-xl border px-3 py-2.5 text-xs font-semibold leading-relaxed"></div>
                             <div id="registration-new-fields" class="space-y-4 hidden">
                             <!-- Name -->
                             <div>
@@ -997,14 +1007,22 @@
         let _registrationMode = 'activate';
 
         function showRegister() {
+            const loginEmployeeId = document.getElementById('login-employee-id')?.value?.trim()
+                || sessionStorage.getItem('accountJourneyEmployeeID') || '';
             loginView.classList.add('hidden');
             registerView.classList.remove('hidden');
+            const registerEmployeeId = document.getElementById('reg-id');
+            if (registerEmployeeId && loginEmployeeId) registerEmployeeId.value = loginEmployeeId;
             _setRegistrationMode(_registrationMode);
             _loadRegisterOptions();
         }
         function showLogin() {
+            const registerEmployeeId = document.getElementById('reg-id')?.value?.trim()
+                || sessionStorage.getItem('accountJourneyEmployeeID') || '';
             registerView.classList.add('hidden');
             loginView.classList.remove('hidden');
+            const loginEmployeeId = document.getElementById('login-employee-id');
+            if (loginEmployeeId && registerEmployeeId) loginEmployeeId.value = registerEmployeeId;
             document.getElementById('register-error')?.classList.add('hidden');
             document.getElementById('register-success')?.classList.add('hidden');
         }
@@ -1041,6 +1059,98 @@
             if (submit) submit.textContent = isNew ? 'ส่งคำขอสมัครบัญชี' : 'เปิดใช้งานบัญชี';
         }
         window._setRegistrationMode = _setRegistrationMode;
+
+        function _syncAccountEmployeeId(value) {
+            const employeeId = String(value || '').trim();
+            try {
+                if (employeeId) sessionStorage.setItem('accountJourneyEmployeeID', employeeId);
+                else sessionStorage.removeItem('accountJourneyEmployeeID');
+            } catch (_) {}
+            ['login-employee-id','reg-id','registration-status-employee-id'].forEach(id => {
+                const input = document.getElementById(id);
+                if (input && input.value !== employeeId) input.value = employeeId;
+            });
+            return employeeId;
+        }
+
+        function _showAccountJourneyResult(message, tone = 'info') {
+            const styles = tone === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : tone === 'warning'
+                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                    : 'border-sky-200 bg-sky-50 text-sky-800';
+            ['login-account-journey-result','registration-account-journey-result'].forEach(id => {
+                const result = document.getElementById(id);
+                if (!result) return;
+                result.textContent = message;
+                result.className = `rounded-xl border px-3 py-2.5 text-xs font-semibold leading-relaxed ${styles}`;
+            });
+        }
+
+        function _applyAccountJourney(data) {
+            const employeeId = _syncAccountEmployeeId(data.employeeId);
+            const action = String(data.recommendedAction || '');
+            if (action === 'LOGIN') {
+                showLogin();
+                _showAccountJourneyResult(data.message, 'success');
+                document.getElementById('login-password')?.focus();
+                return;
+            }
+            showRegister();
+            if (action === 'ACTIVATE') {
+                _setRegistrationMode('activate');
+                _showAccountJourneyResult(data.message, 'success');
+                document.getElementById('reg-password')?.focus();
+                return;
+            }
+            if (action === 'NEW_REGISTRATION') {
+                _setRegistrationMode('new');
+                _showAccountJourneyResult(data.message, 'info');
+                document.getElementById('reg-name')?.focus();
+                return;
+            }
+            const statusForm = document.getElementById('registration-status-form');
+            statusForm?.classList.remove('hidden');
+            const savedEmployeeId = localStorage.getItem('registrationStatusEmployeeID') || '';
+            const reference = document.getElementById('registration-status-reference');
+            if (reference && savedEmployeeId === employeeId && !reference.value) {
+                reference.value = localStorage.getItem('registrationStatusReference') || '';
+            }
+            _showAccountJourneyResult(data.message, action === 'CONTACT_ADMIN' ? 'warning' : 'info');
+            reference?.focus();
+        }
+
+        async function _resolveAccountJourney(source) {
+            const inputId = source === 'registration' ? 'reg-id' : 'login-employee-id';
+            const employeeId = _syncAccountEmployeeId(document.getElementById(inputId)?.value);
+            if (!employeeId) {
+                _showAccountJourneyResult('กรุณากรอกรหัสพนักงานก่อนตรวจสอบ', 'warning');
+                document.getElementById(inputId)?.focus();
+                return;
+            }
+            const button = document.getElementById(source === 'registration' ? 'registration-account-journey-check' : 'account-journey-check');
+            const original = button?.textContent;
+            if (button) { button.disabled = true; button.textContent = 'กำลังตรวจสอบ...'; }
+            try {
+                const response = await fetch(`${_getApiBase()}/account/journey`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ EmployeeID: employeeId }),
+                });
+                const json = await response.json();
+                if (!json.success) throw new Error(json.message || 'ไม่สามารถตรวจสอบเส้นทางบัญชีได้');
+                _applyAccountJourney(json.data || {});
+            } catch (error) {
+                _showAccountJourneyResult(`${error.message || 'ไม่สามารถตรวจสอบเส้นทางบัญชีได้'} คุณยังสามารถเข้าสู่ระบบหรือสมัครบัญชีด้วยขั้นตอนเดิมได้`, 'warning');
+            } finally {
+                if (button) { button.disabled = false; button.textContent = original; }
+            }
+        }
+
+        document.getElementById('account-journey-check')?.addEventListener('click', () => _resolveAccountJourney('login'));
+        document.getElementById('registration-account-journey-check')?.addEventListener('click', () => _resolveAccountJourney('registration'));
+        document.getElementById('login-employee-id')?.addEventListener('input', event => _syncAccountEmployeeId(event.target.value));
+        document.getElementById('reg-id')?.addEventListener('input', event => _syncAccountEmployeeId(event.target.value));
 
         /* =========================
         3. API base URL helper (ต้องตรงกับ api.js)
@@ -1266,15 +1376,27 @@
                     localStorage.setItem('registrationStatusEmployeeID', id);
                     localStorage.setItem('registrationStatusReference', json.referenceCode);
                 }
+                _syncAccountEmployeeId(id);
                 e.target.reset();
                 // Pending requests stay on this confirmation screen; activated accounts can sign in.
                 if (!json.pending) setTimeout(showLogin, 2000);
             } catch (err) {
+                if (err.nextAction === 'LOGIN_OR_ADMIN_RESET') {
+                    _syncAccountEmployeeId(id);
+                    showLogin();
+                    _showAccountJourneyResult(err.message || 'บัญชีนี้พร้อมใช้งานแล้ว กรุณาเข้าสู่ระบบหรือใช้เมนูลืมรหัสผ่าน', 'warning');
+                    document.getElementById('login-password')?.focus();
+                    return;
+                }
+                if (err.nextAction === 'NEW_REGISTRATION_OR_ADMIN') {
+                    _setRegistrationMode('new');
+                    _showAccountJourneyResult(err.message || 'ไม่พบข้อมูลใน Employee Master กรุณาสมัครบัญชีใหม่หรือติดต่อ Admin', 'warning');
+                }
                 errEl.textContent = err.message || 'เกิดข้อผิดพลาด';
                 errEl.classList.remove('hidden');
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'เปิดใช้งานบัญชี';
+                btn.textContent = _registrationMode === 'new' ? 'ส่งคำขอสมัครบัญชี' : 'เปิดใช้งานบัญชี';
             }
         });
 
@@ -1331,7 +1453,7 @@
     </script>
 
     <!-- main.js โหลดหลังสุด -->
-    <script type="module" src="public/js/main.js?v=20261103-safety-vote-jury-catalogue-state-r1"></script>
+    <script type="module" src="public/js/main.js?v=20261103-account-journey-router-r1"></script>
     <script>
         if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
             window.addEventListener('load', () => {

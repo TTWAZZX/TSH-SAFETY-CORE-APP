@@ -752,6 +752,99 @@ app.get('/api/register/options', async (req, res) => {
     }
 });
 
+const accountJourneyLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { success: false, code: 'ACCOUNT_JOURNEY_RATE_LIMITED', message: 'ตรวจสอบเส้นทางบัญชีบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+app.post('/api/account/journey', accountJourneyLimiter, async (req, res) => {
+    const employeeId = String(req.body?.EmployeeID || '').trim();
+    if (!employeeId || employeeId.length > 80) {
+        await logAuthAudit(req, 'ACCOUNT_JOURNEY_FAILED', employeeId, 400, { reason: 'invalid_employee_id' });
+        return res.status(400).json({ success: false, code: 'EMPLOYEE_ID_REQUIRED', message: 'กรุณากรอกรหัสพนักงานให้ถูกต้อง' });
+    }
+    try {
+        await ensureAuthSecuritySchema();
+        const [[journeyRate]] = await pool.query(
+            "SELECT COUNT(*) total FROM Admin_AuditLogs WHERE Action='ACCOUNT_JOURNEY_RESOLVED' AND ActionTime>=DATE_SUB(NOW(),INTERVAL 15 MINUTE) AND TargetID=?",
+            [employeeId]
+        );
+        if (Number(journeyRate?.total || 0) >= 20) {
+            await logAuthAudit(req, 'ACCOUNT_JOURNEY_RATE_LIMITED', employeeId, 429, { windowMinutes: 15, scope: 'employee' });
+            return res.status(429).json({ success: false, code: 'ACCOUNT_JOURNEY_RATE_LIMITED', message: 'ตรวจสอบเส้นทางบัญชีบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' });
+        }
+        const [[employee]] = await pool.query(
+            'SELECT EmployeeID,CASE WHEN Password IS NULL OR Password=\'\' THEN 0 ELSE 1 END HasPassword FROM Employees WHERE EmployeeID=? LIMIT 1',
+            [employeeId]
+        );
+        let registration = null;
+        if (!employee) {
+            const [registrationRows] = await pool.query(
+                'SELECT Status FROM registration_requests WHERE EmployeeID=? ORDER BY ID DESC LIMIT 1',
+                [employeeId]
+            );
+            registration = registrationRows[0] || null;
+        }
+        let recommendedAction = 'NEW_REGISTRATION';
+        let allowedActions = ['NEW_REGISTRATION', 'LOGIN'];
+        let message = 'ไม่พบข้อมูลใน Employee Master สามารถส่งคำขอสมัครบัญชีใหม่ให้ Admin ตรวจสอบได้';
+        let requiresReferenceCode = false;
+        if (employee) {
+            if (Number(employee.HasPassword) === 1) {
+                recommendedAction = 'LOGIN';
+                allowedActions = ['LOGIN', 'PASSWORD_RESET'];
+                message = 'บัญชีนี้พร้อมใช้งานแล้ว กรุณาเข้าสู่ระบบ หรือใช้เมนูลืมรหัสผ่านหากจำรหัสผ่านไม่ได้';
+            } else {
+                recommendedAction = 'ACTIVATE';
+                allowedActions = ['ACTIVATE', 'LEGACY_FIRST_LOGIN'];
+                message = 'พบข้อมูลใน Employee Master และยังไม่เคยตั้งรหัสผ่าน สามารถเปิดใช้งานบัญชีเดิมได้ทันที';
+            }
+        } else if (registration) {
+            if (String(registration.Status) === 'Pending') {
+                recommendedAction = 'CHECK_STATUS';
+                allowedActions = ['CHECK_STATUS', 'CONTACT_ADMIN'];
+                requiresReferenceCode = true;
+                message = 'มีคำขอสมัครบัญชีนี้อยู่ระหว่างการตรวจสอบ ใช้เลขอ้างอิงเพื่อตรวจสอบสถานะ';
+            } else if (String(registration.Status) === 'Approved') {
+                recommendedAction = 'CONTACT_ADMIN';
+                allowedActions = ['CONTACT_ADMIN'];
+                message = 'คำขอได้รับการตรวจสอบแล้วแต่บัญชียังไม่พร้อมใช้งาน กรุณาติดต่อ Admin';
+            } else {
+                recommendedAction = 'CHECK_STATUS';
+                allowedActions = ['CHECK_STATUS', 'CONTACT_ADMIN'];
+                requiresReferenceCode = true;
+                message = 'คำขอนี้ได้รับการตรวจสอบแล้ว ใช้เลขอ้างอิงเพื่อดูสถานะและคำแนะนำล่าสุด';
+            }
+        }
+        await logAuthAudit(req, 'ACCOUNT_JOURNEY_RESOLVED', employeeId, 200, {
+            recommendedAction,
+            personalDataIncluded: false,
+            businessMutation: false,
+        });
+        res.set('Cache-Control', 'no-store');
+        return res.json({
+            success: true,
+            data: {
+                contract: '2026-11-03-account-journey-router-r1',
+                employeeId,
+                recommendedAction,
+                allowedActions,
+                requiresReferenceCode,
+                message,
+                personalDataIncluded: false,
+                businessMutation: false,
+            },
+        });
+    } catch (error) {
+        console.warn('[auth] account journey failed:', error?.message || error);
+        await logAuthAudit(req, 'ACCOUNT_JOURNEY_FAILED', employeeId, 500, { reason: 'resolver_unavailable' });
+        return res.status(500).json({ success: false, code: 'ACCOUNT_JOURNEY_UNAVAILABLE', message: 'ไม่สามารถตรวจสอบเส้นทางบัญชีได้ กรุณาใช้การเข้าสู่ระบบหรือสมัครบัญชีตามปกติ' });
+    }
+});
+
 const registerLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, max: 5,
     message: { success: false, message: 'ลองใหม่ภายหลัง (เกินขีดจำกัดการสมัคร)' },
