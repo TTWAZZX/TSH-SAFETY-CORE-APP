@@ -28,7 +28,7 @@ const loadAccidentPage = lazyPage('./pages/accident.js?v=20261002-accident-acces
 const loadSafetyCulturePage = lazyPage('./pages/safety-culture.js?v=20261011-design-system-a11y-r1', 'loadSafetyCulturePage');
 const loadBbsSmartCardPage = lazyPage('./pages/bbs-smart-card.js?v=20261019-local-production-css-r1', 'loadBbsSmartCardPage');
 const loadContractorPage = lazyPage('./pages/contractor.js?v=20260715-phase32d-remaining-async-ux', 'loadContractorPage');
-const loadHiyariPage = lazyPage('./pages/hiyari.js?v=20260907-hiyari-pdf-summary-r2', 'loadHiyariPage');
+const loadHiyariPage = lazyPage('./pages/hiyari.js?v=20261109-hiyari-optional-email-r2', 'loadHiyariPage');
 const loadKyPage = lazyPage('./pages/ky.js?v=20261015-ky-video-manager-r4', 'loadKyPage');
 const loadFourmPage = lazyPage('./pages/fourm.js?v=20261011-fourm-chart-containment-r1', 'loadFourmPage');
 const loadJohnnyAiPage = lazyPage('./pages/johnny-ai.js?v=20261011-johnny-admin-workspace-r1', 'loadJohnnyAiPage');

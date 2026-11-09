@@ -831,9 +831,8 @@ router.post('/assignments', isAdmin, async (req, res) => {
         let name = (AssigneeName || '').trim() || null;
         let dept = (Department  || '').trim() || null;
         if (EmployeeID) {
-            const [emp] = await db.query('SELECT EmployeeName, Department, CompanyEmail FROM Employees WHERE EmployeeID = ? LIMIT 1', [EmployeeID]);
+            const [emp] = await db.query('SELECT EmployeeName, Department FROM Employees WHERE EmployeeID = ? LIMIT 1', [EmployeeID]);
             if (!emp.length) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });
-            if (!isValidCompanyEmail(emp[0].CompanyEmail)) return res.status(400).json({ success:false, message:'Employee Master must have a valid CompanyEmail before Hiyari assignment.' });
             name = emp[0].EmployeeName || name;
             dept = emp[0].Department   || dept;
             const [dup] = await db.query('SELECT id FROM Hiyari_Assignments WHERE EmployeeID = ? LIMIT 1', [EmployeeID]);
@@ -863,9 +862,8 @@ router.put('/assignments/:id', isAdmin, async (req, res) => {
         let dept = (Department  || '').trim() || null;
         let empId = EmployeeID || null;
         if (empId) {
-            const [emp] = await db.query('SELECT EmployeeName, Department, CompanyEmail FROM Employees WHERE EmployeeID = ? LIMIT 1', [empId]);
+            const [emp] = await db.query('SELECT EmployeeName, Department FROM Employees WHERE EmployeeID = ? LIMIT 1', [empId]);
             if (!emp.length) return res.status(404).json({ success: false, message: 'ไม่พบพนักงาน' });
-            if (!isValidCompanyEmail(emp[0].CompanyEmail)) return res.status(400).json({ success:false, message:'Employee Master must have a valid CompanyEmail before Hiyari assignment.' });
             name = emp[0].EmployeeName || name;
             dept = emp[0].Department   || dept;
             const [dup] = await db.query('SELECT id FROM Hiyari_Assignments WHERE EmployeeID = ? AND id <> ? LIMIT 1', [empId, id]);
@@ -1215,9 +1213,6 @@ router.post('/', upload.single('attachment'), async (req, res) => {
             isSubmittedOnBehalf = reporterId !== submitterId ? 1 : 0;
         }
         companyEmail = await resolveReporterCompanyEmail(reporterId, CompanyEmail);
-        if (!companyEmail) {
-            return reject(400, `Employee Master has no CompanyEmail for this reporter. Add CompanyEmail or submit a valid ${COMPANY_EMAIL_DOMAIN} email.`);
-        }
         const reportId = randomUUID();
 
         await db.query(
@@ -1273,14 +1268,16 @@ router.post('/', upload.single('attachment'), async (req, res) => {
         const userRecipients = await resolveHiyariUserRecipients({
             ReporterID: reporterId, SubmittedByID: submitterId, CompanyEmail: companyEmail,
         });
-        await queueHiyariEmail({
-            to: userRecipients.recipients,
-            reportId,
-            eventType: 'SubmissionConfirmed',
-            subject: confirmationMail.subject,
-            body: confirmationMail.body,
-            html: confirmationMail.html,
-        });
+        if (userRecipients.recipients) {
+            await queueHiyariEmail({
+                to: userRecipients.recipients,
+                reportId,
+                eventType: 'SubmissionConfirmed',
+                subject: confirmationMail.subject,
+                body: confirmationMail.body,
+                html: confirmationMail.html,
+            });
+        }
         res.status(201).json({ success: true, message: 'ส่งรายงาน Hiyari-Hatto สำเร็จ' });
     } catch (error) {
         if (uploadedUrl) deleteLocalUpload(uploadedUrl);
@@ -1349,9 +1346,6 @@ router.post('/direct-signed', upload.single('attachment'), async (req, res) => {
         const department = assignee?.Department || req.user?.department || req.user?.Department || 'ไม่ระบุ';
         const isSubmittedOnBehalf = reporterId !== submitterId ? 1 : 0;
         companyEmail = await resolveReporterCompanyEmail(reporterId, CompanyEmail);
-        if (!companyEmail) {
-            return reject(400, `Employee Master has no CompanyEmail for this reporter. Add CompanyEmail or submit a valid ${COMPANY_EMAIL_DOMAIN} email.`);
-        }
         const reportId = randomUUID();
 
         await db.query(
@@ -1396,14 +1390,16 @@ router.post('/direct-signed', upload.single('attachment'), async (req, res) => {
         const userRecipients = await resolveHiyariUserRecipients({
             ReporterID: reporterId, SubmittedByID: submitterId, CompanyEmail: companyEmail,
         });
-        await queueHiyariEmail({
-            to: userRecipients.recipients,
-            reportId,
-            eventType: 'DirectSignedConfirmed',
-            subject: confirmationMail.subject,
-            body: confirmationMail.body,
-            html: confirmationMail.html,
-        });
+        if (userRecipients.recipients) {
+            await queueHiyariEmail({
+                to: userRecipients.recipients,
+                reportId,
+                eventType: 'DirectSignedConfirmed',
+                subject: confirmationMail.subject,
+                body: confirmationMail.body,
+                html: confirmationMail.html,
+            });
+        }
         res.status(201).json({ success: true, message: 'ส่ง PDF ที่ลงนามแล้วโดยตรงสำเร็จ', id: reportId, url });
     } catch (error) {
         if (uploadedUrl) deleteLocalUpload(uploadedUrl);

@@ -293,6 +293,7 @@ let _submitInFlight = false;
 let _submitDocumentMode = 'excel';
 let _submitAssignments = [];
 let _submitEmailProfile = undefined;
+let _submitEmailOwnerKey = null;
 let _reviewNoticeTimer = null;
 let _lastPendingReviewCount = null;
 let _hiyariCardSaveMenu = null;
@@ -449,7 +450,7 @@ function _renderSubmitOwnerPreview() {
                 <p class="text-[10px] font-bold uppercase text-emerald-600">Report Owner</p>
                 <p class="mt-1 text-sm font-black text-slate-800">${escHtml(owner.name)}</p>
                 <p class="text-xs text-slate-500">${escHtml([owner.id, owner.department].filter(Boolean).join(' · '))}</p>
-                <p class="mt-1 text-[11px] text-slate-400">${escHtml(owner.email || 'CompanyEmail pending')}</p>
+                <p class="mt-1 text-[11px] text-slate-400">${escHtml(owner.email || 'ไม่มี CompanyEmail (ยังส่งงานได้)')}</p>
                 ${owner.direct ? '<span class="mt-2 inline-flex px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-[10px] font-bold text-sky-700">Direct PDF allowed</span>' : ''}
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-3">
@@ -496,6 +497,9 @@ async function _applyHiyariCompanyEmail({ loadEmployee = false } = {}) {
     if (!input) return;
 
     const selectedId = document.getElementById('hiyari-on-behalf')?.value || '';
+    const ownerKey = selectedId ? `assignment:${selectedId}` : 'self';
+    const ownerChanged = ownerKey !== _submitEmailOwnerKey;
+    _submitEmailOwnerKey = ownerKey;
     const selectedAssignment = selectedId
         ? _submitAssignments.find(a => String(a.EmployeeID || '') === String(selectedId))
         : null;
@@ -521,10 +525,13 @@ async function _applyHiyariCompanyEmail({ loadEmployee = false } = {}) {
         return;
     }
 
+    // Never carry another assignee's email into an owner that has no email.
+    // The Admin may still enter an optional company email after selecting them.
+    if (selectedAssignment && ownerChanged) input.value = '';
     input.readOnly = false;
     input.classList.remove('bg-emerald-50', 'border-emerald-200', 'text-emerald-900');
     input.classList.add('bg-white', 'border-amber-200');
-    if (help) help.textContent = 'Employee Master has no CompanyEmail for this reporter. Enter a company email as fallback.';
+    if (help) help.textContent = 'ไม่มี CompanyEmail ก็ส่งงานได้ หากต้องการรับอีเมลแจ้งเตือนให้กรอกอีเมลบริษัท';
 }
 
 function _validateHiyariFile(file) {
@@ -2836,8 +2843,8 @@ function renderSubmitForm(container) {
                             <p id="hiyari-on-behalf-help" class="text-[11px] text-slate-400 mt-1">Search assignment list by employee name, ID, department, or CompanyEmail.</p>
                         </div>
                         <div>
-                            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Company Email <span class="text-red-500">*</span></label>
-                            <input type="email" name="CompanyEmail" id="hiyari-company-email" required
+                            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Company Email <span class="normal-case font-medium text-slate-400">(ไม่บังคับ)</span></label>
+                            <input type="email" name="CompanyEmail" id="hiyari-company-email"
                                    value="${escHtml(userEmail)}"
                                    placeholder="name@thaisummit-harness.co.th"
                                    pattern="^[^\\s@]+@thaisummit-harness\\.co\\.th$"
@@ -3092,7 +3099,7 @@ function renderSubmitForm(container) {
         const behalfId = document.getElementById('hiyari-on-behalf')?.value.trim() || '';
         if (behalfSearch && !behalfId) { showToast('Please select a matching Hiyari assignment from the dropdown.', 'error'); return; }
         const companyEmail = _ensureSelectedSubmitAssignmentEmail();
-        if (!_isCompanyEmail(companyEmail)) { showToast('CompanyEmail must use @thaisummit-harness.co.th.', 'error'); return; }
+        if (companyEmail && !_isCompanyEmail(companyEmail)) { showToast('CompanyEmail ถ้ากรอกต้องใช้ @thaisummit-harness.co.th', 'error'); return; }
         const stopMeta = STOP_TYPES.find(s => String(s.id) === String(stopVal));
         const rankMeta = RANKS.find(r => r.rank === rankVal);
         const selectedOwner = _getSelectedSubmitAssignment();
@@ -3210,8 +3217,8 @@ function renderSubmitForm(container) {
         if (!stopType || !rank || !desc) {
             showToast('ข้อมูลไม่ครบ — กรุณาย้อนกลับและตรวจสอบ', 'error'); return;
         }
-        if (!_isCompanyEmail(companyEmail)) {
-            showToast('CompanyEmail must use @thaisummit-harness.co.th. If it is missing, update Employee Master or enter a valid company email.', 'error');
+        if (companyEmail && !_isCompanyEmail(companyEmail)) {
+            showToast('CompanyEmail ถ้ากรอกต้องใช้ @thaisummit-harness.co.th', 'error');
             return;
         }
         const behalfSearch = document.getElementById('hiyari-on-behalf-search')?.value.trim() || '';
@@ -4762,12 +4769,22 @@ function openAssignmentModal(assignment = null) {
                     Note:         note,
                     AllowDirectSignedPdf: allowDirectSignedPdf,
                 });
-            } catch { failed.push(escHtml(emp.EmployeeName || emp.EmployeeID)); }
+            } catch (error) {
+                failed.push({
+                    name: emp.EmployeeName || emp.EmployeeID,
+                    reason: error?.message || 'ไม่สามารถเพิ่มรายการได้',
+                });
+            }
         }
 
         const ok = empList.length - failed.length;
         if (ok)           showToast(`เพิ่ม ${ok} คนสำเร็จ`, 'success');
-        if (failed.length) showToast(`ไม่สามารถเพิ่มได้: ${failed.join(', ')}`, 'error');
+        if (failed.length) {
+            const details = failed
+                .map(item => `${escHtml(item.name)}: ${escHtml(item.reason)}`)
+                .join('<br>');
+            showToast(`ไม่สามารถเพิ่มได้<br>${details}`, 'error');
+        }
 
         closeModal();
         await loadAndRenderAssignments();

@@ -6,6 +6,16 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 const nodeRoute = read('backend/routes/hiyari.js');
 const phpRoute = read('api/handlers/workflow_phase6.php');
 const frontend = read('public/js/pages/hiyari.js');
+const main = read('public/js/main.js');
+const index = read('index.html');
+const nodeAssignmentRoutes = nodeRoute.slice(
+    nodeRoute.indexOf("router.post('/assignments'"),
+    nodeRoute.indexOf("router.delete('/assignments/:id'")
+);
+const phpAssignmentRoutes = phpRoute.slice(
+    phpRoute.indexOf("if(($method==='POST'&&$path==='/hiyari/assignments')"),
+    phpRoute.indexOf("$p=route_params($path,'/hiyari/assignments/:id'); if($p!==null&&$method==='DELETE')")
+);
 
 let failures = 0;
 let checks = 0;
@@ -79,6 +89,30 @@ check('Node and PHP resolve owner plus substitute submitter recipients',
 check('Status notifications use deduplicated owner and substitute recipients',
     nodeRoute.includes('to: userRecipients.recipients')
     && phpRoute.includes("'Recipients'=>$recipientInfo['recipients']"));
+check('Assignment creation is independent of CompanyEmail readiness in Node and PHP',
+    nodeAssignmentRoutes.includes('SELECT EmployeeName, Department FROM Employees')
+    && !nodeAssignmentRoutes.includes('isValidCompanyEmail')
+    && phpAssignmentRoutes.includes('SELECT EmployeeName,Department FROM employees')
+    && !phpAssignmentRoutes.includes('wf_hiyari_is_company_email'));
+check('Report submission accepts missing CompanyEmail in Node and PHP',
+    nodeRoute.includes('companyEmail = await resolveReporterCompanyEmail(reporterId, CompanyEmail);')
+    && !nodeRoute.includes('Employee Master has no CompanyEmail for this reporter.')
+    && phpRoute.includes("$companyEmail=wf_hiyari_resolve_company_email($reporter,$b['CompanyEmail']??null);")
+    && !phpRoute.includes('Employee Master has no CompanyEmail for this reporter.'));
+check('Missing user email skips confirmation without blocking report submission',
+    (nodeRoute.match(/if \(userRecipients\.recipients\) \{/g) || []).length >= 2
+    && phpRoute.includes("if($recipientInfo['recipients']!=='')wf_email_outbox('hiyari_emailoutbox',['ReportID'=>$id"));
+check('Frontend treats CompanyEmail as optional but validates a supplied value',
+    frontend.includes('Company Email <span class="normal-case font-medium text-slate-400">(ไม่บังคับ)</span>')
+    && !frontend.includes('id="hiyari-company-email" required')
+    && frontend.includes('if (companyEmail && !_isCompanyEmail(companyEmail))')
+    && frontend.includes("if (selectedAssignment && ownerChanged) input.value = '';"));
+check('Bulk assignment failures surface the API reason per employee',
+    frontend.includes("reason: error?.message ||")
+    && frontend.includes("`${escHtml(item.name)}: ${escHtml(item.reason)}`"));
+check('Hiyari assignment fix has a complete browser cache chain',
+    main.includes("./pages/hiyari.js?v=20261109-hiyari-optional-email-r2")
+    && index.includes('public/js/main.js?v=20261109-hiyari-optional-email-r2'));
 check('Admin can resend the current status email with PHP and Node parity',
     nodeRoute.includes("router.post('/:id/resend-status-email'")
     && phpRoute.includes("route_params($path,'/hiyari/:id/resend-status-email')")
