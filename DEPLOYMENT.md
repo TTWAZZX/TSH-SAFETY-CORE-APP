@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - Deployment
 
+## Hiyari Optional CompanyEmail Production deployment (PASS, 2026-11-09)
+
+Immutable commit `5cd34ed90e790368795ef18842573065db3e258d` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The release uploaded exactly `api/handlers/workflow_phase6.php`, `public/js/pages/hiyari.js`, `public/js/main.js` and `index.html`; Node runtime and test sources remain parity/deployment tooling only.
+
+Remote double-download drift checks matched baseline `777712d5fcacddc98ad6c9623577b1e0222e6d21`. Deployed download-back SHA-256 matched `4/4`, public HTTPS SHA-256 matched `3/3`, and anonymous Hiyari Assignment access remained `401`. Authenticated read-only before/after snapshots retained 64 Assignments and 65 Reports with identical fingerprints.
+
+Evidence is `backups/production/hiyari-optional-email-r1-deploy-20261109084820/`; rollback-manifest SHA-256 is `ff57d7dd674a9c55c018000b1c8b3332559c9a95156109c69181b729c2bf08ed` and result SHA-256 is `39a1e5006c1b7f9dc18c76d787be7238b1471a40afb9dccf4a623a92a7b03eb0`. No schema, Assignment, Report, notification or external-delivery mutation occurred, and rollback was not required. Decision: `PASS_HIYARI_OPTIONAL_EMAIL_R1_PRODUCTION_DEPLOYMENT`.
+
 ## Admin Public File Library Production release (PASS, 2026-10-12)
 
 Immutable commit `1db5848f47cd0adc4612536619b523b5e748ae60` is pushed on `main` and deployed to `https://dev.tshpcl.com/safety/tsh-safety-core`. The additive schema is ready with zero item rows and 14 system categories. Eight allowlisted runtime paths were uploaded and FTPS double-download verified `8/8`; all six public assets matched the candidate byte-for-byte over HTTPS.

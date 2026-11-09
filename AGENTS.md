@@ -1,5 +1,13 @@
 # TSH Safety Core Activity - AGENTS.md
 
+## Hiyari Optional CompanyEmail Production Deployment (PASS, 2026-11-09)
+
+- Immutable commit `5cd34ed90e790368795ef18842573065db3e258d` was deployed to the PHP shared-hosting Production target from runtime baseline `777712d5fcacddc98ad6c9623577b1e0222e6d21` through an exact four-file allowlist: `api/handlers/workflow_phase6.php`, `public/js/pages/hiyari.js`, `public/js/main.js` and `index.html`.
+- Hiyari Assignment creation/edit and both Excel-review and direct signed-PDF submission now accept employees with or without CompanyEmail. A supplied email must still use the company domain; missing user recipients skip only the confirmation email and never block report persistence or the Admin notification path. Switching owners clears a prior assignee's email so it cannot leak into the next report.
+- Local Hiyari email/assignment/history/dashboard parity, JavaScript syntax, PHP lint and PHP 7.4 compatibility across 160 PHP files passed. Remote pre-deploy double-download drift checks passed, deployed download-back SHA-256 matched `4/4`, and public HTTPS SHA-256 matched `3/3` frontend files.
+- Authenticated read-only Production smoke preserved exactly 64 Assignments and 65 Reports with identical before/after fingerprints. No Assignment, Report, schema, notification or external-delivery mutation occurred; rollback was not required.
+- Rollback evidence: `backups/production/hiyari-optional-email-r1-deploy-20261109084820/`; rollback manifest SHA-256 `ff57d7dd674a9c55c018000b1c8b3332559c9a95156109c69181b729c2bf08ed`, result SHA-256 `39a1e5006c1b7f9dc18c76d787be7238b1471a40afb9dccf4a623a92a7b03eb0`. Decision: `PASS_HIYARI_OPTIONAL_EMAIL_R1_PRODUCTION_DEPLOYMENT`.
+
 ## Safety Vote Live Reconciliation & Jury Catalogue Production Deployment (PASS, 2026-11-03)
 
 - Immutable commit `80f40b438cde63f998a7d75c5096c9693eaf8034` was deployed to the PHP shared-hosting Production target from runtime baseline `c21e00dc437fa2da34b9c0ed49fced3acdf82f14` through a guarded ten-file allowlist.

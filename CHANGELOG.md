@@ -1,5 +1,11 @@
 # TSH Safety Core Activity - Changelog And Handoff History
 
+## 2026-11-09 - Hiyari Optional CompanyEmail Production deployment
+
+- Deployed immutable commit `5cd34ed90e790368795ef18842573065db3e258d` with the exact four-file PHP/frontend runtime allowlist after remote drift verification and rollback-package creation.
+- Hiyari Assignment and report submission no longer require CompanyEmail. Valid company email remains optional for user confirmation; missing recipients skip confirmation without blocking Excel or direct signed-PDF submission, while Admin notification behavior remains unchanged.
+- Download-back SHA-256 matched `4/4` files and public HTTPS SHA-256 matched all three frontend files. Authenticated read-only smoke preserved 64 Assignments and 65 Reports with identical fingerprints. No schema, Assignment, Report, notification or external-delivery mutation occurred; rollback was not required. Decision: `PASS_HIYARI_OPTIONAL_EMAIL_R1_PRODUCTION_DEPLOYMENT`.
+
 ## 2026-11-02 - Safety Patrol Extra Advance Production deployment
 
 - Deployed immutable commit `6eaaa0cff031a8e016eb73f31a724ea7c8151bdd` with the exact four-file PHP/frontend runtime allowlist after remote drift verification and rollback-package creation.
