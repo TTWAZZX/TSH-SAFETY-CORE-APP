@@ -763,7 +763,7 @@ function fl_public_base_url(): string
 {
     global $config;
     $config = is_array($config ?? null) ? $config : [];
-    foreach (['PUBLIC_APP_BASE_URL','PUBLIC_APP_URL','APP_BASE_URL'] as $key) {
+    foreach (['PUBLIC_APP_URL','PUBLIC_APP_BASE_URL','APP_BASE_URL'] as $key) {
         $env = rtrim((string)getenv($key), '/');
         if ($env !== '') return $env;
     }

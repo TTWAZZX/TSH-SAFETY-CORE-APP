@@ -643,7 +643,7 @@ async function reminderQueue(query = {}) {
 }
 
 function publicBaseUrl(req) {
-    const configured = String(process.env.PUBLIC_APP_BASE_URL || process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || '').replace(/\/+$/, '');
+    const configured = String(process.env.PUBLIC_APP_URL || process.env.PUBLIC_APP_BASE_URL || process.env.APP_BASE_URL || '').replace(/\/+$/, '');
     if (configured) return configured;
     return `${req.protocol}://${req.get('host')}`;
 }

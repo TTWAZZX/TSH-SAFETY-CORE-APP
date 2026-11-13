@@ -1408,7 +1408,7 @@ router.post('/registration-requests/:id/approve', async (req, res) => {
                     employeeName: request.EmployeeName,
                     employeeId: request.EmployeeID,
                     referenceCode: request.ReferenceCode,
-                    loginUrl: process.env.PUBLIC_UPLOAD_BASE_URL || '',
+                    loginUrl: process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || '',
                 });
                 const mailResult = await sendMail({
                     to: request.CompanyEmail,
@@ -1467,7 +1467,7 @@ router.post('/registration-requests/:id/reject', async (req, res) => {
                     employeeId: registrationRequest.EmployeeID,
                     referenceCode: registrationRequest.ReferenceCode,
                     reason,
-                    loginUrl: process.env.PUBLIC_UPLOAD_BASE_URL || '',
+                    loginUrl: process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || '',
                 });
                 const mailResult = await sendMail({
                     to: registrationRequest.CompanyEmail,

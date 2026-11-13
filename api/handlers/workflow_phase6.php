@@ -956,9 +956,20 @@ function wf_hiyari_admin_email(): string
 
 function wf_app_url(): string
 {
-    $env = getenv('PUBLIC_APP_URL') ?: getenv('APP_BASE_URL');
-    $url = trim((string)($env ?: 'https://dev.tshpcl.com/safety/tsh-safety-core/'));
-    return $url !== '' ? $url : 'https://dev.tshpcl.com/safety/tsh-safety-core/';
+    global $config;
+    $candidates = [
+        is_array($config ?? null) ? ($config['public_app_url'] ?? '') : '',
+        getenv('PUBLIC_APP_URL') ?: '',
+        getenv('APP_BASE_URL') ?: '',
+        'https://uat.tshpcl.com/safety/tsh-safety-core/',
+    ];
+    foreach ($candidates as $candidate) {
+        $url = trim((string)$candidate);
+        if (preg_match('/^https?:\/\//i', $url)) {
+            return rtrim($url, '/') . '/';
+        }
+    }
+    return 'https://uat.tshpcl.com/safety/tsh-safety-core/';
 }
 
 function wf_hiyari_mail_subject(string $action, string $detail = ''): string

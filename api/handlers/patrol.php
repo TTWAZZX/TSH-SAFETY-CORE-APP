@@ -1349,7 +1349,7 @@ function patrol_checkin_mail(array $employee, array $attendance, ?array $session
     }
     $lines = ['Safety Patrol check-in recorded', '', 'Dear ' . ($name ?: 'user'), ''];
     foreach ($details as $d) $lines[] = ($d['label'] ?? '') . ': ' . (($d['value'] ?? '') ?: '-');
-    $url = function_exists('wf_app_url') ? wf_app_url() : 'https://dev.tshpcl.com/safety/tsh-safety-core/';
+    $url = function_exists('wf_app_url') ? wf_app_url() : 'https://uat.tshpcl.com/safety/tsh-safety-core/';
     $lines[] = '';
     $lines[] = 'Open Safety Core: ' . $url;
     $htmlDetails = '';

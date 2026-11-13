@@ -30,7 +30,7 @@ function detailRows(details = []) {
         }));
 }
 
-const DEFAULT_APP_URL = process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://dev.tshpcl.com/safety/tsh-safety-core/';
+const DEFAULT_APP_URL = process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || 'https://uat.tshpcl.com/safety/tsh-safety-core/';
 
 function buildPlainText({ title, greeting, intro, details, actions, note, footerNote, appUrl, moduleLabel }) {
     const loginUrl = String(appUrl || DEFAULT_APP_URL).trim();

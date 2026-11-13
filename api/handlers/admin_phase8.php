@@ -7,22 +7,14 @@ function admin8_registration_login_url(): string
 {
     global $config;
     $candidates = [];
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
-    $host = trim((string)($_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? ''));
-    if ($host !== '') {
-        $script = (string)($_SERVER['SCRIPT_NAME'] ?? '/api/index.php');
-        $apiPos = strpos($script, '/api/');
-        $basePath = $apiPos === false ? '' : substr($script, 0, $apiPos);
-        $candidates[] = ($https ? 'https://' : 'http://') . $host . $basePath;
-    }
     if (is_array($config ?? null)) {
-        foreach (['public_upload_base_url', 'public_app_base_url', 'app_url'] as $key) {
+        foreach (['public_app_url', 'public_app_base_url', 'app_url'] as $key) {
             if (!empty($config[$key])) {
                 $candidates[] = (string)$config[$key];
             }
         }
     }
-    foreach (['PUBLIC_APP_BASE_URL', 'PUBLIC_UPLOAD_BASE_URL', 'APP_URL'] as $key) {
+    foreach (['PUBLIC_APP_URL', 'PUBLIC_APP_BASE_URL', 'APP_BASE_URL', 'APP_URL'] as $key) {
         $value = getenv($key);
         if ($value !== false && trim((string)$value) !== '') {
             $candidates[] = (string)$value;
@@ -35,10 +27,18 @@ function admin8_registration_login_url(): string
                 continue;
             }
             [$key, $value] = explode('=', $line, 2);
-            if (in_array(trim($key), ['PUBLIC_APP_BASE_URL', 'PUBLIC_UPLOAD_BASE_URL', 'APP_URL'], true)) {
+            if (in_array(trim($key), ['PUBLIC_APP_URL', 'PUBLIC_APP_BASE_URL', 'APP_BASE_URL', 'APP_URL'], true)) {
                 $candidates[] = trim($value, " \t\n\r\0\x0B\"'");
             }
         }
+    }
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    $host = trim((string)($_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? ''));
+    if ($host !== '') {
+        $script = (string)($_SERVER['SCRIPT_NAME'] ?? '/api/index.php');
+        $apiPos = strpos($script, '/api/');
+        $basePath = $apiPos === false ? '' : substr($script, 0, $apiPos);
+        $candidates[] = ($https ? 'https://' : 'http://') . $host . $basePath;
     }
     foreach ($candidates as $candidate) {
         $url = rtrim(trim((string)$candidate), '/');
